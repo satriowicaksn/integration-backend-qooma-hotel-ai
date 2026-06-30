@@ -1,0 +1,305 @@
+# PM-STATUS-PARENT — Qooma Backend (cross-dev roll-up)
+
+> **Parent PM tracker.** Read-only buat Executor & PM A/B/C kecuali bagian roll-up yang explicit dipost oleh PM A/B/C. Parent PM authority untuk section §1, §3, §4, §5, §6, §7, §8. PM A/B/C append baris short ke §2 setelah tiap APPROVE (per `PM-AGENT.md §0.8`).
+>
+> Detail per-dev assignment (ASSIGNMENT → PLAN → SUBMIT → VERDICT) tinggal di **`PM-STATUS-A.md`** (Nathan), **`PM-STATUS-B.md`** (Nanak), **`PM-STATUS-C.md`** (Satrio).
+>
+> Komunikasi PO ↔ Parent PM ↔ PM A/B/C ↔ Executor semua via git-synced markdown. Tidak ada DM kecuali eskalasi formal (lihat §9).
+>
+> **Identity check**: setiap session WAJIB sebut role + slot di response pertama (lihat `KICKOFF.md §4`).
+
+---
+
+## 0. Current focus (global)
+
+- **Day**: H12+ (bootstrapped 2026-06-29 from core-backend infra; scope per H12 PO ruling; task tracker activated 2026-06-30)
+- **Phase**: Bootstrap / pre-T01 — authoritative spec live di [`docs/spec/MVP-INTEGRATION-FIRST.md`](./docs/spec/MVP-INTEGRATION-FIRST.md) (Slice 3 of 3 backend MVP slices — ship after Auth + HC)
+- **Active gate**: G1 — Boilerplate + Prisma schema ready (kriteria default `PM-AGENT.md §5`; PO konfirmasi)
+- **Active devs**: A (Nathan) · B (Nanak) · C (Satrio) — T01-T03 + T10 + T17 assigned, sisanya backlog
+- **Progress (global)**: 0 / 25 task approved · 5 assigned · 20 backlog (T01-T09 = slot A · T10-T16 = slot B · T17-T25 = slot C; lihat MVP-INTEGRATION-FIRST §1)
+- **Dependencies**: Auth + Hotel Core MUST be deployed first. Integration RPCs HC for guest upsert + quota two-phase + per-dept dept write-through; webhook routes look up `hotels.code → hotels.id` from Auth.
+- **Reading order untuk fresh dev**: `KICKOFF.md` → `docs/SERVICE-CHARTER.md` → `docs/spec/MVP-INTEGRATION-FIRST.md` → `docs/spec/04-integration-channels.md` (full DDL + RPC catalog + retry strategy) → `docs/spec/data-model.md` → `docs/spec/open-questions.md` → claim task di §1a
+
+> **H12 PO rulings baked in (2026-06-29)**: Integration owns ALL `/api/integrations/*` (config CRUD + actions) + webhook ingress + outbound dispatch. Q-OPS-03 RESOLVED (dispatch owned here). Q-CONTRACT-25 + Q-OPS-06 NEW (per-dept Telegram write-through — shared DB recommended; see `docs/spec/open-questions.md`).
+
+---
+
+## 1. Global task tracker (Parent PM authority)
+
+> Otoritas Parent PM untuk edit row in-place. Status: `backlog` | `assigned` | `wip` | `submit-pending` | `approved` | `rejected` | `escalated`.
+>
+> Setiap task **wajib** punya kolom **Slot** untuk routing ke PM A/B/C. ID `T##` di-issue oleh PO atau Parent PM dari §1a pre-G1 queue.
+
+| T## | Title                                                                            | Slot | Owner   | Status   | Verified by | Notes                                                                       |
+| --- | -------------------------------------------------------------------------------- | ---- | ------- | -------- | ----------- | --------------------------------------------------------------------------- |
+| T01 | `make check` green dari boilerplate (lint + typecheck + format)                  | A    | Nathan  | assigned | —           | Foundation critical path — start here                                       |
+| T02 | Prisma schema initial migration (8 Integration tables + indexes per §4 DDL)      | A    | Nathan  | assigned | —           | ⚠ Blocks B (T10+) and C (T17+) implementation; needs Auth `hotels` deployed |
+| T03 | Encryption-at-rest helper (AES-256-GCM or KMS for token columns)                 | A    | Nathan  | assigned | —           | After T01; consumed by T10 (WA config) + T17 (Telegram config)              |
+| T04 | Webhook signature-verification middleware (Meta `X-Hub-Signature-256` + Telegram)| A    | Nathan  | backlog  | —           | After T01; consumed by T12 + T15 + T19                                      |
+| T05 | Tenant resolution from `:hotel_slug` (LRU cache 5-min, hotels.code lookup)       | A    | Nathan  | backlog  | —           | After T01                                                                   |
+| T06 | BSP adapter interface + `1engage` impl                                           | A    | Nathan  | backlog  | —           | After T01; consumed by T13 (WA dispatch) + T16 (template relay)             |
+| T07 | Queue + scheduler infra (BullMQ-based, retry policy + DLQ)                       | A    | Nathan  | backlog  | —           | After T02; consumed by T14 + T19 + T21 + T24                                |
+| T08 | Common error handlers (Integration-specific codes per spec §9)                   | A    | Nathan  | backlog  | —           | After T01                                                                   |
+| T09 | Internal RPC server (HTTP/mTLS auth scheme; spec §10 catalog)                    | A    | Nathan  | backlog  | —           | After T01 + T05; consumed by HC for outbound dispatch                       |
+| T10 | WA config CRUD (`GET, PUT /api/integrations/whatsapp`)                           | B    | Nanak   | assigned | —           | Spec reading + module skeleton OK; impl blocked on T02 + T03                |
+| T11 | Verify webhook action (`POST /api/integrations/whatsapp/verify-webhook`)         | B    | Nanak   | backlog  | —           | After T10                                                                   |
+| T12 | WA inbound webhook ingest (signature → persist → HC guest upsert → AI RPC)       | B    | Nanak   | backlog  | —           | After T04 + T05 + T10                                                       |
+| T13 | Outbound WA dispatch RPC + DND check + quota two-phase                           | B    | Nanak   | backlog  | —           | After T06 + T09; HC RPC `check_and_reserve_outbound_quota`                  |
+| T14 | Outbound retry queue (3 attempts exponential backoff)                            | B    | Nanak   | backlog  | —           | After T07 + T13                                                             |
+| T15 | Delivery receipts ingest (WA Cloud webhook stream)                               | B    | Nanak   | backlog  | —           | After T04 + T12                                                             |
+| T16 | WA template Meta relay (submit/resubmit/callback to HC)                          | B    | Nanak   | backlog  | —           | After T06; HC internal `updateWaTemplateStatus` callback                    |
+| T17 | Telegram config CRUD (`GET, PUT /api/integrations/telegram`)                     | C    | Satrio  | assigned | —           | Spec reading + module skeleton OK; impl blocked on T02 + T03                |
+| T18 | Per-dept Telegram routing write-through (HC `departments` table)                 | C    | Satrio  | backlog  | —           | After T17; per Q-OPS-06 shared-DB direct write                              |
+| T19 | Telegram inbound webhook + commands (`/take`, `/release`, `/done`, `/help`)      | C    | Satrio  | backlog  | —           | After T04 + T05 + T17                                                       |
+| T20 | Outbound Telegram dispatch RPC                                                   | C    | Satrio  | backlog  | —           | After T06 + T09; per-dept routing per T18                                   |
+| T21 | OTA email IMAP poller + parser pipeline + HC pending-visit RPC                   | C    | Satrio  | backlog  | —           | After T07; HC internal RPC for pending-visit insert                         |
+| T22 | QR generation + download (1024×1024 PNG, object storage)                         | C    | Satrio  | backlog  | —           | After T02 + T10                                                             |
+| T23 | Integration overview endpoint (`GET /api/integrations`)                          | C    | Satrio  | backlog  | —           | After T10 + T17                                                             |
+| T24 | Channel health probes + snapshots + 2-poll debounce                              | C    | Satrio  | backlog  | —           | After T07 + T10 + T17                                                       |
+| T25 | `integration:health_changed` socket emits                                        | C    | Satrio  | backlog  | —           | After T24                                                                   |
+
+### 1a. Pre-G1 bootstrap queue (MIRRORED into §1 on 2026-06-30 — kept as spec-driven reference)
+
+> Roster di bawah ini sudah dimirror ke §1 dengan owner + status. Edit row di §1, JANGAN di sini.
+
+| Suggested T## | Title                                                                            | Slot | Spec ref                                          |
+| ------------- | -------------------------------------------------------------------------------- | ---- | ------------------------------------------------- |
+| T01           | `make check` green dari boilerplate (lint + typecheck + format)                  | A    | F1 prep                                           |
+| T02           | Prisma schema initial migration (8 Integration tables + indexes)                 | A    | F1 — `docs/spec/04-integration-channels.md` §4 DDL|
+| T03           | Encryption-at-rest helper (KMS / libsodium for tokens)                           | A    | F2                                                |
+| T04           | Webhook signature-verification middleware (Meta `X-Hub-Signature-256` + Telegram)| A    | F3                                                |
+| T05           | Tenant resolution from `:hotel_slug` (LRU cache 5-min, hotels.code lookup)       | A    | F4                                                |
+| T06           | BSP adapter interface + `1engage` impl                                           | A    | F5                                                |
+| T07           | Queue + scheduler infra (BullMQ or equivalent)                                   | A    | F6                                                |
+| T08           | Common error handlers (Integration-specific codes per spec §9)                   | A    | F7                                                |
+| T09           | Internal RPC server (HTTP/mTLS auth scheme)                                      | A    | F8                                                |
+| T10           | WA config CRUD (`GET, PUT /api/integrations/whatsapp`)                           | B    | B1                                                |
+| T11           | Verify webhook (`POST /api/integrations/whatsapp/verify-webhook`)                | B    | B2                                                |
+| T12           | WA inbound webhook ingest (signature → persist → HC guest upsert → AI RPC)       | B    | B3                                                |
+| T13           | Outbound WA dispatch RPC + DND check + quota two-phase                           | B    | B4 + B5                                           |
+| T14           | Outbound retry queue (3 attempts exponential backoff)                            | B    | B6                                                |
+| T15           | Delivery receipts ingest (WA Cloud webhook stream)                               | B    | B7                                                |
+| T16           | WA template Meta relay (submit/resubmit/callback to HC)                          | B    | B8                                                |
+| T17           | Telegram config CRUD (`GET, PUT /api/integrations/telegram`)                     | C    | C1                                                |
+| T18           | Per-dept Telegram routing write-through (HC `departments` table)                 | C    | C2                                                |
+| T19           | Telegram inbound webhook + commands (`/take`, `/release`, `/done`, `/help`)      | C    | C3                                                |
+| T20           | Outbound Telegram dispatch RPC                                                   | C    | C4                                                |
+| T21           | OTA email IMAP poller + parser pipeline + HC pending-visit RPC                   | C    | C5                                                |
+| T22           | QR generation + download (1024×1024 PNG, object storage)                         | C    | C6                                                |
+| T23           | Integration overview endpoint (`GET /api/integrations`)                          | C    | C7                                                |
+| T24           | Channel health probes + snapshots + 2-poll debounce                              | C    | C8                                                |
+| T25           | `integration:health_changed` socket emits                                        | C    | C9                                                |
+
+---
+
+## 2. Per-dev short-status roll-up (PM A/B/C append, latest di atas)
+
+> Setiap PM A/B/C post **1-2 baris** summary ke sini setelah tiap VERDICT atau end-of-session. Parent PM scan ini untuk daily report. JANGAN paste full SUBMIT/VERDICT di sini — itu tetap di PM-STATUS-{slot}.md.
+>
+> Format:
+> ```
+> [YYYY-MM-DD H{N}] [PM <SLOT> <NAME>] <T## status — 1 liner>
+> ```
+
+_(kosong — belum ada activity)_
+
+<!-- TEMPLATE:
+[2026-06-25 H3] [PM A Nathan] T01 boilerplate scaffold APPROVED (attempt 2) — make check green, 0 drift hits.
+[2026-06-25 H3] [PM B Nanak]  T02 auth module wip — PLAN ACK'd, executor implementing JWT issuance.
+[2026-06-25 H3] [PM C Satrio] T03 webhook plugin REJECT (attempt 1) — HMAC verify di middle of handler, harus plugin-level.
+-->
+
+---
+
+## 3. Open questions register (consolidated)
+
+> Parent PM consolidate dari PM A/B/C. PM A/B/C juga boleh edit row mereka sendiri (status update). Resolve = PO action.
+
+### 3a. Contract questions (target: resolved sebelum G2; frozen setelah G3)
+
+| ID            | Question | Raised by | Source         | Status | Resolution |
+| ------------- | -------- | --------- | -------------- | ------ | ---------- |
+| —             | —        | —         | —              | —      | —          |
+
+### 3b. Package / tooling questions
+
+| ID            | Question | Raised by | Source         | Status | Resolution |
+| ------------- | -------- | --------- | -------------- | ------ | ---------- |
+| —             | —        | —         | —              | —      | —          |
+
+### 3c. Architecture / planning questions
+
+| ID            | Question | Raised by | Source         | Status | Resolution |
+| ------------- | -------- | --------- | -------------- | ------ | ---------- |
+| —             | —        | —         | —              | —      | —          |
+
+---
+
+## 4. Approved deviations & planning updates (PO-approved)
+
+> Parent PM mencatat tiap perubahan ke planning docs yang dilakukan untuk sync (per `PM-AGENT.md §0.6`), serta deviasi one-off yang di-approve PO. PM A/B/C tidak edit row di sini — propose via §3 atau direct ke Parent PM.
+
+| Tanggal    | Doc / lokasi                                                       | Perubahan singkat                                                                                 | Driver task    | Disetujui oleh |
+| ---------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- | -------------- | -------------- |
+| 2026-06-12 | docker-compose.yml, .env.example, README.md, .claude/settings.json | Shift host port Postgres 5432→5433 & Redis 6379→6380 untuk hindari bentrok dengan service lokal | (pre-T01 fix)  | PO             |
+| —          | —                                                                  | —                                                                                                 | —              | —              |
+
+---
+
+## 5. Gates (Parent PM enforce, PO define)
+
+> Default kriteria di `PM-AGENT.md §5`. PO override di sini bila perlu.
+
+| Gate | Target H | Criteria (recap)                                                                                       | Status      | Notes |
+| ---- | -------- | ------------------------------------------------------------------------------------------------------ | ----------- | ----- |
+| G1   | TBD      | Boilerplate ready: `make check` hijau, `make start` jalan, `_template` jalan, ADR lengkap              | not started | PO konfirmasi timeline |
+| G2   | TBD      | Modul auth + 1 modul business jalan (CRUD lengkap + 1 external integration). Coverage ≥ 80%            | not started | —     |
+| G3   | TBD      | Semua endpoint kontrak terimplementasi. Webhook HMAC tervalidasi. CI hijau                             | not started | —     |
+| G4   | TBD      | Feature freeze — hanya bugfix                                                                          | not started | —     |
+| G5   | TBD      | UAT pass. AC P0 = 100%. Migrasi prod siap. Runbook lengkap di `docs/runbooks/`                          | not started | —     |
+
+---
+
+## 6. Parent standup log (latest di atas)
+
+> Parent PM consolidate dari 3 standup PM A/B/C (yang masing-masing tinggal di PM-STATUS-{slot}.md §6).
+>
+> Format:
+> ```
+> QOOMA BE PARENT — Standup — H{N}/{total}
+>
+> Dev A (Nathan) — <1-2 baris ringkas dari PM A standup>
+> Dev B (Nanak)  — <1-2 baris ringkas dari PM B standup>
+> Dev C (Satrio) — <1-2 baris ringkas dari PM C standup>
+>
+> 📅 Gate status
+> - Next gate: G{N} di H{X} — <on track | at risk | slipping>
+>
+> 🚨 Eskalasi ke PO
+> - <satu baris ask>
+>
+> 🎯 Fokus besok (cross-dev)
+> - <re-balance / dependency unblock / shared-infra ship>
+> ```
+
+### H0 — 2026-06-12 (bootstrap, pre-multi-dev kickoff)
+
+```
+QOOMA BE PARENT — Standup — H0 (bootstrap)
+
+Dev A (Nathan) — belum onboard, awaiting kickoff
+Dev B (Nanak)  — belum onboard, awaiting kickoff
+Dev C (Satrio) — belum onboard, awaiting kickoff
+
+📅 Gate status
+- Next gate: G1 (Boilerplate ready) — kriteria default; PO konfirmasi timeline
+- Open contract questions: 0
+- Open package questions: 0
+
+🚨 Eskalasi ke PO
+- Konfirmasi timeline + gate definition (G1..G5 default vs custom)
+- Konfirmasi roadmap awal (T01–T##) untuk distribute ke 3 dev
+
+🎯 Fokus besok / next session
+- Setelah PO konfirmasi: Parent PM post first ASSIGNMENT batch,
+  PM A/B/C onboard + identitas confirmed, executor session start.
+```
+
+---
+
+## 7. Cross-dev incidents / lessons (Parent PM scope — affects >1 dev)
+
+### 2026-06-12 — Docker port collision (pre-T01)
+
+**What happened**: `make start` gagal — port 5432 host sudah dipakai service Postgres lokal user. Error: `Bind for 0.0.0.0:5432 failed: port is already allocated`.
+
+**Fix**: Shift host port di `docker-compose.yml` — Postgres 5432→5433, Redis 6379→6380. Container internal port tetap default (5432/6379) supaya service di compose network tidak butuh perubahan. Updated: `docker-compose.yml`, `.env.example`, `.env` user, `README.md` quick-start note, `.claude/settings.json` MCP postgres DATABASE_URL.
+
+**Tidak diubah**: `.github/workflows/ci.yml` (CI runner fresh, no collision), `docs/TESTING.md` (testcontainers pakai `getMappedPort()` random ephemeral).
+
+**Lesson for tim**: bila task touch local dev port, cek dulu via `lsof -i :<port>` apakah ada bentrok sebelum tetap pakai default.
+
+---
+
+## 8. Next-up queue (Parent PM authority)
+
+> Parent PM rewrite list ini ketika roadmap berubah. Each task **wajib** kolom Slot (A/B/C) untuk routing. PM A/B/C baca queue ini untuk lihat upcoming work — PM A/B/C tidak edit queue.
+
+_(belum ada — tunggu PO post task / roadmap awal)_
+
+<!-- TEMPLATE — copy untuk task baru di queue:
+
+### T## — <Title>
+
+- **Slot**: A | B | C (Parent PM assign)
+- **Owner**: TBD (PM <SLOT> pick up via PM-STATUS-<SLOT>.md §2 ASSIGNMENT)
+- **Started**: —
+- **Status**: queued
+
+#### Scope (dari roadmap / DEVELOPMENT-PLAN bila ada)
+- ...
+
+#### Files yang harus dibuat
+- ...
+
+#### Files yang akan dimodifikasi
+- ...
+
+#### T## DoD
+- [ ] ...
+- [ ] ...
+
+#### Parent PM notes untuk PM <SLOT>
+- Rasionalisasi slot pick: <kenapa A/B/C>
+- Dependency: T## (slot X, status)
+- Shared-infra risk: <none | flags file/folder shared dengan slot lain>
+- Coordination needed with: <slot> for <reason>
+
+-->
+
+---
+
+## 9. Eskalasi rules (recap)
+
+DM PO langsung HANYA bila:
+
+1. Gate (G1..G5) akan miss dalam 24 jam — Parent PM call
+2. Open contract Q blocking > 48 jam — consolidated
+3. Executor (via PM A/B/C) propose scope/architecture change — Parent PM ratify dulu
+4. Forbidden package / pattern muncul di PR (CLAUDE.md §6 / §11)
+5. Drift sistemik (>5 hits sejenis di banyak file lintas dev)
+6. Security WAJIB (CLAUDE.md §6) tersentuh — Parent PM eskalasi instan
+
+Routine miss / single drift / daily standup → PM-STATUS-{slot} → roll-up
+ke §2 / §6 di sini, **bukan** ke PO langsung.
+
+---
+
+## 10. Cross-dev coordination notes
+
+> Parent PM catat hal yang affect > 1 dev: file collision, shared-infra ship sequence, re-balance proposal, dependency unblocking. PM A/B/C boleh propose via §3c (architecture Q).
+
+| Tanggal | Topic                                         | Affects        | Action / decision                         |
+| ------- | --------------------------------------------- | -------------- | ----------------------------------------- |
+| —       | —                                             | —              | —                                         |
+
+<!-- Contoh:
+2026-06-30 | core/queue/ Bull factory pattern decision | B, C | A ship dulu (T05), B & C unblocked H+1
+2026-07-02 | shared/utils/crypto.ts signature change | A, B          | A coord with B; B re-test webhook (T11)
+-->
+
+---
+
+## 11. Quick reference — file ownership matrix
+
+| File / Folder                                            | Edit authority                                                                                             |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `PM-STATUS-PARENT.md`                                    | Parent PM (full) · PM A/B/C (only append to §2 roll-up & §6 standup; status update for own row in §1)      |
+| `PM-STATUS-A.md`                                         | PM A (Nathan) + Executor A (assignment/PLAN/CHECKPOINT/SUBMIT only — append-only)                          |
+| `PM-STATUS-B.md`                                         | PM B (Nanak) + Executor B (same)                                                                           |
+| `PM-STATUS-C.md`                                         | PM C (Satrio) + Executor C (same)                                                                          |
+| `CLAUDE.md`, `PM-AGENT.md`, `EXECUTOR-PROTOCOL.md`, `KICKOFF.md`, `README.md`, `docs/*`, `docs/decisions/*` | Planning agent (with PO ack) · Parent PM (sync update per `PM-AGENT.md §0.6`)                              |
+| `src/`, `prisma/migrations/`                             | Executor A/B/C (each in own task scope) — never PM/Parent PM                                               |
+| `prisma/schema.prisma`                                   | Executor (in task that touches schema) — never PM (kecuali typo non-semantik)                              |
+| `package.json` deps                                      | PO approval via Parent PM eskalasi — no executor adds deps unilaterally                                    |
+| `docker-compose.yml`, `Makefile`, env templates          | Executor (in task that touches them); Parent PM consolidate via §4 deviation log                           |

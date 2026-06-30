@@ -1,0 +1,74 @@
+# =============================================================================
+# Qooma Backend Service — Local Development Stack
+# =============================================================================
+# Usage:
+#   make start                       # postgres + redis (deps saja)
+#   make start-fresh                 # FRESH: drop volume + migrate + seed
+#   docker compose --profile full up # + api + worker (semua container)
+#
+# Untuk dev sehari-hari, jalankan deps lewat make lalu run service lokal
+# pakai `make dev-api`, `make dev-worker` (hot reload).
+# =============================================================================
+
+name: qooma-backend-service
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: qooma-postgres
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app_dev_pw
+      POSTGRES_DB: app
+    ports:
+      - '5433:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U app -d app']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: qooma-redis
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '6380:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # --- Application services (profile: full) -------------------------------
+  api:
+    profiles: ['full']
+    build:
+      context: .
+      target: api
+    container_name: qooma-api
+    env_file: .env
+    ports:
+      - '3000:3000'
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  worker:
+    profiles: ['full']
+    build:
+      context: .
+      target: worker
+    container_name: qooma-worker
+    env_file: .env
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+volumes:
+  postgres_data:
+  redis_data:

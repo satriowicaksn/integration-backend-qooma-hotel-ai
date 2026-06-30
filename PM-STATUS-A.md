@@ -1,0 +1,251 @@
+# PM-STATUS-A — Qooma Integration · Dev A (Nathan)
+
+> **Per-dev tracker untuk slot A (Nathan).** PM A + Executor A komunikasi **hanya** via file ini. Roll-up short summary ke `PM-STATUS-PARENT.md §2` setelah tiap VERDICT atau end-of-session.
+>
+> **PM B, PM C, Executor B, Executor C — JANGAN edit file ini.** File ini private ke slot A.
+>
+> **Identity check**: di response pertama session WAJIB confirm `Role: PM | Executor`, `Slot: A (Nathan)`. Bila user belum sebut slot — STOP, tanya dulu (lihat `KICKOFF.md §4`).
+>
+> Format block di §2 Active assignments **append-only** (lihat `EXECUTOR-PROTOCOL.md §0.5` & `PM-AGENT.md §0.4`).
+>
+> **Domain slot A (Integration)**: Foundation — Prisma + migrations, encryption-at-rest helper, signature-verify middleware, tenant-slug resolver + LRU, BSP adapter ABI + 1engage impl, BullMQ + scheduler harness, error catalog, internal RPC server. Spec routing: F1–F8 (`docs/spec/MVP-INTEGRATION-FIRST.md §1`).
+
+---
+
+## 0. Current focus (slot A)
+
+- **Day**: H12+ (task tracker activated 2026-06-30)
+- **Active task**: T01 / T02 / T03 (assigned — claim per `EXECUTOR-PROTOCOL §2`)
+- **Branch**: —
+- **Next gate (global)**: G1 — lihat `PM-STATUS-PARENT.md §5`
+- **My queue (preview)**: T01–T09 (foundation) — lihat §8 di bawah (mirror dari PARENT §1 filter Slot=A)
+- **Critical path**: T02 (Prisma migration) blokir implementasi Nanak (T10+) dan Satrio (T17+). Prioritaskan T01 → T02 → T03 sequence.
+
+---
+
+## 1. Task tracker (slot A — PM A authority)
+
+> Mirror dari `PM-STATUS-PARENT.md §1` di mana Slot=A. PM A update status row di sini + push status update ke PARENT §1 setelah verdict.
+
+| T## | Title                                                                            | Status   | Verified by PM | Notes                                                              |
+| --- | -------------------------------------------------------------------------------- | -------- | -------------- | ------------------------------------------------------------------ |
+| T01 | `make check` green dari boilerplate                                              | assigned | —              | Start here                                                         |
+| T02 | Prisma schema initial migration (8 Integration tables + indexes)                 | assigned | —              | ⚠ Blokir slot B + C                                                |
+| T03 | Encryption-at-rest helper (AES-256-GCM / KMS)                                    | assigned | —              | After T01; consumed by T10 + T17                                   |
+| T04 | Webhook signature-verification middleware (Meta `X-Hub-Signature-256` + Telegram)| backlog  | —              | After T01                                                          |
+| T05 | Tenant resolution from `:hotel_slug` (LRU 5-min, hotels.code lookup)             | backlog  | —              | After T01                                                          |
+| T06 | BSP adapter interface + `1engage` impl                                           | backlog  | —              | After T01                                                          |
+| T07 | Queue + scheduler infra (BullMQ + retry + DLQ)                                   | backlog  | —              | After T02                                                          |
+| T08 | Common error handlers (Integration-specific codes per spec §9)                   | backlog  | —              | After T01                                                          |
+| T09 | Internal RPC server (HTTP/mTLS; spec §10 catalog)                                | backlog  | —              | After T01 + T05                                                    |
+
+---
+
+## 2. Active assignments (append-only)
+
+> **Executor A** append `ASSIGNMENT` block saat claim task. **PM A** append `ACK` / `VERDICT` sub-block di bawah block executor — JANGAN edit block lama.
+
+_(kosong — belum ada assignment)_
+
+<!--
+TEMPLATE — copy untuk task baru:
+
+### ASSIGNMENT T## — claimed by exec-A (Nathan) at H{N} HH:MM
+- Branch: feat/<modul>-<short>
+- Routed from: PM-STATUS-PARENT.md §1 T## (Parent PM assigned)
+
+#### PLAN T## — exec-A (Nathan) at H{N} HH:MM
+
+**Scope recap**
+- ...
+
+**Session-start gate** (EXECUTOR-PROTOCOL §2)
+- Identity confirmed: Executor, Slot A (Nathan) ✓
+- CLAUDE.md loaded ✓
+- Task spec read: <doc:section>
+- Parent docs spot-read: <list>
+- Dependencies: T## ✓
+- `make typecheck` clean ✓ ; `make lint` clean ✓
+- Scaffolder risk: none / <tool>
+
+**Files to create**
+```
+src/modules/<name>/...
+```
+
+**Files to modify**
+- src/entrypoints/api.ts — ...
+
+**Approach**
+<1 paragraf>
+
+**GAPs / questions**
+- (none) / GAP T##-#1 — ...
+
+Awaiting PM A ACK.
+
+##### PM A ACK — T## PLAN APPROVED, proceed to coding (H{N})
+- (atau) PM A REJECT-PLAN — fix sebelum mulai: <list>
+
+#### SUBMIT T## — exec-A (Nathan) at H{N} HH:MM (attempt 1)
+
+Task: <title>
+Files changed: <count>
+  - ...
+
+DoD self-check
+- [x] ...
+
+Quality gate
+- `make check`: PASS
+- ...
+
+Drift scans
+- ...
+
+Security check
+- ...
+
+Test evidence
+- Unit: <n>
+- Integration: <n>
+
+Notes
+- ...
+
+Requesting PM A VERDICT.
+
+##### VERDICT T## — APPROVED (H{N}, revisi N) by PM A
+- All DoD verified ✓
+- Drift scans clean ✓
+- `make check` PASS confirmed by PM rerun
+- → §1 task tracker updated; row mirrored to PARENT §1
+- → Short roll-up posted to PARENT §2
+
+(atau)
+
+##### VERDICT T## — REJECT (revisi N) by PM A
+
+⛔ Items to fix:
+
+**Item #1 — <kategori>** `src/.../<file>.ts:<line>`
+- **Violation**: <pelanggaran>
+- **Fix**: <satu kalimat fix-path>
+
+**Item #2 — ...**
+- ...
+
+Re-run `make check` after fix, confirm pass, resubmit (attempt N+1).
+
+(atau)
+
+##### VERDICT T## — ESCALATE by PM A
+- Reason: <gap planning / open Q PO>
+- Escalated to Parent PM at H{N} HH:MM (will reach PO via PARENT §3)
+- Executor A: pick task lain dari §8 sementara
+
+-->
+
+---
+
+## 3. Slot A open questions (mirror to PARENT §3)
+
+> PM A catat di sini ketika executor A raise `GAP` atau `BLOCKED`. Setelah resolve atau eskalasi ke Parent PM, update status. Parent PM consolidate ke `PM-STATUS-PARENT.md §3`.
+
+| ID            | Question | Source         | Status | Resolution |
+| ------------- | -------- | -------------- | ------ | ---------- |
+| —             | —        | —              | —      | —          |
+
+---
+
+## 4. Drift baseline (slot A files only, end of each day)
+
+| Run | Touched files | `any` | console.log | `throw new Error(` | forbidden imports | default export (di luar entry) | `.skip` | hardcoded URL | webhook tanpa HMAC | wrap-Prisma interface |
+| --- | ------------- | ----- | ----------- | ------------------ | ----------------- | ------------------------------ | ------- | ------------- | ------------------ | --------------------- |
+| H12 baseline | (no src/ touched) | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+
+> PM A jalankan drift scan per `PM-AGENT.md §3 Step 2` setiap SUBMIT + end-of-day full scan untuk slot A's touched files.
+
+---
+
+## 5. Standup log slot A (latest di atas)
+
+> PM A post daily standup di sini, lalu post 1-2 baris ringkas ke `PM-STATUS-PARENT.md §6` (yang Parent PM consolidate jadi cross-team report).
+>
+> Format: per `PM-AGENT.md §7`.
+
+### H12 — TBD (Nathan onboard, T01-T03 assigned)
+
+```
+QOOMA INT A (Nathan) — Standup — H{N}/{total}
+
+✅ Approved hari ini
+- (none — belum start)
+
+🔄 In progress
+- (none)
+
+⛔ Rejected
+- (none)
+
+🚨 Eskalasi ke Parent PM
+- (none)
+
+📅 Gate status (global)
+- Next gate: G1 — lihat PARENT §5
+
+📈 Progress slot A
+- 0 / 9 task (T01-T03 assigned · T04-T09 backlog)
+
+🎯 Fokus besok
+- Claim T01 (boilerplate `make check`) → T02 (Prisma migration) → T03 (encryption helper).
+```
+
+---
+
+## 6. Slot A incidents / lessons (own-scope only)
+
+> Hal yang affect cuma slot A. Bila affect > 1 dev, escalate ke `PM-STATUS-PARENT.md §7` lewat Parent PM.
+
+_(kosong)_
+
+---
+
+## 7. PM A operating notes (untuk Executor A)
+
+- PM A baca `PM-AGENT.md` (full) + `PM-STATUS-A.md` + scan `PM-STATUS-PARENT.md` (§1 mine, §3, §5, §8).
+- PM A **TIDAK** edit `src/`, `prisma/schema.prisma` (kecuali typo non-semantik), `package.json` deps — read-only di area itu.
+- PM A **BOLEH** update planning docs untuk sync (per `PM-AGENT.md §0.6`) — TAPI escalation ke Parent PM dulu bila perubahan affect dev lain. Tiap edit planning docs dicatat di `PM-STATUS-PARENT.md §4`.
+- PM A **TIDAK** edit `PM-STATUS-B.md` / `PM-STATUS-C.md` — strict per-slot ownership.
+- PM A **TIDAK** jawab open contract / package question — hanya PO via Parent PM.
+- PM A **TIDAK** negosiasi scope. Descope adalah otoritas PO via Parent PM.
+- On REJECT: fix exactly the listed items (file:line). Re-run `make check` self-validate. Resubmit per `EXECUTOR-PROTOCOL §4.5`, sebut item mana yang sudah di-address.
+- Rebuttal: bila Executor A yakin PM A flag salah, post one-sentence rebuttal + evidence di sub-block `REBUTTAL T## item-#N`. PM A re-check dalam session yang sama.
+- Untuk CLI command apapun yang touch root repo (scaffolder, generator, dll.): tulis exact command di PLAN supaya PM A bisa flag risiko overwrite sebelum executor run.
+- Branch naming: `feat/<modul>-<short>`, `fix/<modul>-<short>`, `chore/<short>`, `docs/<short>` (per `CLAUDE.md §12`).
+- Commit message: conventional commits — `feat(modul): X`, `fix(modul): Y`.
+- Gunakan `make commit MSG="..."` — auto lint + typecheck + format-check sebelum commit.
+
+---
+
+## 8. Slot A queue (filter dari PARENT §1 di mana Slot=A)
+
+> Parent PM authority untuk rewrite — PM A baca only. Executor A self-select dari §1 di atas bila tidak ada explicit ASSIGNMENT.
+
+- **assigned** (claim langsung): T01, T02, T03
+- **backlog** (after deps): T04, T05, T06, T07, T08, T09
+
+<!-- Mirror format dari PM-STATUS-PARENT.md §1 template. -->
+
+---
+
+## 9. Roll-up reminder
+
+Setiap kali PM A:
+
+- **APPROVE** task → post 1 line ke `PM-STATUS-PARENT.md §2` (latest di atas) + update row status di PARENT §1
+- **REJECT** task → tidak perlu PARENT roll-up (internal to slot A)
+- **ESCALATE** task → post status `escalated` ke PARENT §1 + raise di PARENT §3 (Q register)
+- **End-of-day** → post 3-line standup summary ke PARENT §6 di bawah Parent PM's daily roll-up block
+
+Jangan paste full SUBMIT/VERDICT ke PARENT — itu tetap di sini.

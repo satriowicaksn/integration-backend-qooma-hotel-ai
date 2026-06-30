@@ -1,0 +1,170 @@
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../node_modules/.prisma/client"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================================================
+// Integration / Channels — Prisma schema
+// =============================================================================
+//
+// Authoritative spec: docs/spec/04-integration-channels.md §4 (DDL + indexes)
+//                     docs/spec/MVP-INTEGRATION-FIRST.md §3 (migration order)
+//
+// Topology (Q-OPS-06 H12 ratification): Auth + HC + Integration co-locate
+// in one Postgres for MVP. `hotel_id` columns reference Auth's `hotels(id)`
+// via real FK (since shared DB). Cross-DB option uses opaque UUID; flip the
+// `references` clause if you go separate-DB.
+//
+// Conventions:
+// - Tabel: snake_case di DB (@map), camelCase di model Prisma
+// - PK: UUID v4 default (gen_random_uuid()) where applicable
+// - Timestamp: TIMESTAMPTZ UTC
+// - Sensitive tokens encrypted at application layer (KMS / libsodium) before
+//   persist. The TEXT columns below hold ciphertext, NOT plaintext.
+// - Every multi-tenant table has hotelId + @@index([hotelId])
+// =============================================================================
+
+model WaConfig {
+  hotelId              String    @id @map("hotel_id") @db.Uuid
+  bsp                  String    @default("1engage") @db.VarChar(40)
+  phoneNumberId        String    @map("phone_number_id") @db.VarChar(80)
+  phoneNumber          String    @map("phone_number") @db.VarChar(20)
+  accessTokenEnc       String    @map("access_token_enc") @db.Text
+  webhookUrl           String    @map("webhook_url") @db.VarChar(500)
+  webhookVerifyToken   String    @map("webhook_verify_token") @db.VarChar(80)
+  verifiedAt           DateTime? @map("verified_at") @db.Timestamptz
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([hotelId])
+  @@map("wa_configs")
+}
+
+model TelegramConfig {
+  hotelId         String   @id @map("hotel_id") @db.Uuid
+  botTokenEnc     String   @map("bot_token_enc") @db.Text
+  botUsername     String   @map("bot_username") @db.VarChar(40)
+  defaultChatId   String?  @map("default_chat_id") @db.VarChar(64)
+  gmTelegramId    String?  @map("gm_telegram_id") @db.VarChar(64)
+  webhookUrl      String?  @map("webhook_url") @db.VarChar(500)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([hotelId])
+  @@map("telegram_configs")
+}
+
+model QrState {
+  hotelId      String   @id @map("hotel_id") @db.Uuid
+  waLink       String   @map("wa_link") @db.VarChar(500)
+  pngUrl       String   @map("png_url") @db.VarChar(500)
+  generatedAt  DateTime @default(now()) @map("generated_at") @db.Timestamptz
+
+  @@map("qr_state")
+}
+
+model WebhookEvent {
+  id              String    @id @default(uuid()) @db.Uuid
+  hotelId         String    @map("hotel_id") @db.Uuid
+  provider        String    @db.VarChar(20)
+  receivedAt      DateTime  @default(now()) @map("received_at") @db.Timestamptz
+  signatureValid  Boolean   @map("signature_valid")
+  payload         Json
+  processedAt     DateTime? @map("processed_at") @db.Timestamptz
+  processError    Json?     @map("process_error")
+
+  @@index([hotelId, receivedAt(sort: Desc)])
+  @@map("webhook_events")
+}
+
+model OutboundDispatch {
+  id              String    @id @default(uuid()) @db.Uuid
+  hotelId         String    @map("hotel_id") @db.Uuid
+  provider        String    @db.VarChar(20)
+  guestId         String?   @map("guest_id") @db.Uuid
+  templateName    String?   @map("template_name") @db.VarChar(80)
+  body            String?   @db.Text
+  variables       Json?
+  scheduledFor    DateTime  @default(now()) @map("scheduled_for") @db.Timestamptz
+  attempts        Int       @default(0)
+  status          String    @default("pending") @db.VarChar(20)
+  sentAt          DateTime? @map("sent_at") @db.Timestamptz
+  externalId      String?   @map("external_id") @db.VarChar(80)
+  lastError       Json?     @map("last_error")
+
+  receipts DeliveryReceipt[]
+
+  @@index([hotelId, scheduledFor])
+  @@index([externalId])
+  @@map("outbound_dispatch_queue")
+}
+
+model DeliveryReceipt {
+  id           String   @id @default(uuid()) @db.Uuid
+  hotelId      String   @map("hotel_id") @db.Uuid
+  dispatchId   String   @map("dispatch_id") @db.Uuid
+  externalId   String   @map("external_id") @db.VarChar(80)
+  status       String   @db.VarChar(20)
+  receivedAt   DateTime @default(now()) @map("received_at") @db.Timestamptz
+
+  dispatch OutboundDispatch @relation(fields: [dispatchId], references: [id], onDelete: Cascade)
+
+  @@index([hotelId])
+  @@index([dispatchId])
+  @@map("delivery_receipts")
+}
+
+model ChannelHealthSnapshot {
+  id          String   @id @default(uuid()) @db.Uuid
+  hotelId     String   @map("hotel_id") @db.Uuid
+  provider    String   @db.VarChar(20)
+  status      String   @db.VarChar(20)
+  latencyMs   Int?     @map("latency_ms")
+  checkedAt   DateTime @default(now()) @map("checked_at") @db.Timestamptz
+
+  @@index([hotelId, provider, checkedAt(sort: Desc)])
+  @@map("channel_health_snapshots")
+}
+
+model OtaMailboxState {
+  hotelId          String    @id @map("hotel_id") @db.Uuid
+  imapHost         String    @map("imap_host") @db.VarChar(255)
+  imapUsername     String    @map("imap_username") @db.VarChar(255)
+  imapPasswordEnc  String    @map("imap_password_enc") @db.Text
+  lastPollAt       DateTime? @map("last_poll_at") @db.Timestamptz
+  lastUidSeen      Int?      @map("last_uid_seen")
+  pollError        Json?     @map("poll_error")
+  isActive         Boolean   @default(true) @map("is_active")
+
+  @@map("ota_mailbox_state")
+}
+
+// =============================================================================
+// Post-migration SQL — CHECK constraints + partial indexes
+// =============================================================================
+//
+// ALTER TABLE webhook_events ADD CONSTRAINT webhook_events_provider_check
+//   CHECK (provider IN ('whatsapp','telegram'));
+// ALTER TABLE outbound_dispatch_queue ADD CONSTRAINT outbound_status_check
+//   CHECK (status IN ('pending','sent','failed','dead'));
+// ALTER TABLE outbound_dispatch_queue ADD CONSTRAINT outbound_provider_check
+//   CHECK (provider IN ('whatsapp','telegram'));
+// ALTER TABLE delivery_receipts ADD CONSTRAINT delivery_receipts_status_check
+//   CHECK (status IN ('sent','delivered','read','failed'));
+// ALTER TABLE channel_health_snapshots ADD CONSTRAINT channel_health_status_check
+//   CHECK (status IN ('healthy','degraded','down'));
+// ALTER TABLE channel_health_snapshots ADD CONSTRAINT channel_health_provider_check
+//   CHECK (provider IN ('whatsapp','telegram','claude_api'));
+//
+// CREATE INDEX idx_webhook_events_unprocessed ON webhook_events(hotel_id, received_at)
+//   WHERE processed_at IS NULL;
+// CREATE INDEX idx_outbound_pending ON outbound_dispatch_queue(scheduled_for)
+//   WHERE status = 'pending';
+//
+// =============================================================================
