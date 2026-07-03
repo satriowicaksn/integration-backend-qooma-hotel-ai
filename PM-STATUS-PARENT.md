@@ -33,7 +33,7 @@
 | T## | Title                                                                            | Slot | Owner   | Status   | Verified by | Notes                                                                       |
 | --- | -------------------------------------------------------------------------------- | ---- | ------- | -------- | ----------- | --------------------------------------------------------------------------- |
 | T01 | `make check` green dari boilerplate (lint + typecheck + format)                  | A    | Nathan  | merged   | PM A (H12)  | Opsi B jest.config.cjs (zero-dep). Merged to main PR #1 `7b40e11`. Foundation critical path |
-| T02 | Prisma schema initial migration (8 Integration tables + indexes per §4 DDL)      | A    | Nathan  | assigned | —           | ⚠ Blocks B (T10+) and C (T17+) implementation; needs Auth `hotels` deployed |
+| T02 | Prisma schema initial migration (8 Integration tables + indexes per §4 DDL)      | A    | Nathan  | wip      | —           | ⚠ Blocks B (T10+) and C (T17+). PLAN ACK'd; 2 Qs escalated (Q-A-01 topology §3c, Q-A-02 spec-drift §3a) — non-blocking, additively fixable |
 | T03 | Encryption-at-rest helper (AES-256-GCM or KMS for token columns)                 | A    | Nathan  | assigned | —           | After T01; consumed by T10 (WA config) + T17 (Telegram config)              |
 | T04 | Webhook signature-verification middleware (Meta `X-Hub-Signature-256` + Telegram)| A    | Nathan  | backlog  | —           | After T01; consumed by T12 + T15 + T19                                      |
 | T05 | Tenant resolution from `:hotel_slug` (LRU cache 5-min, hotels.code lookup)       | A    | Nathan  | backlog  | —           | After T01                                                                   |
@@ -103,6 +103,7 @@
 
 [2026-07-03 H12] [PM A Nathan] Online. Last approved: none (session start). Active: 1 (T01→approved). Next-up: T02 (Prisma migration, critical path). Open Qs: 0.
 [2026-07-03 H12] [PM A Nathan] T01 `make check` green APPROVED (attempt 1) — Opsi B jest.config.cjs, zero new deps, make check green on PM rerun, 0 new drift. Code on `chore/ci-make-check-green` awaiting PO merge + CI. Next: T02.
+[2026-07-03 H12] [PM A Nathan] T01 MERGED to main (PR #1). T02 PLAN ACK'd (Prisma init migration, isolated-DB/opaque-UUID). **2 open Qs raised for PO** (Q-A-01 DB topology §3c — schema-header claims shared-DB ratification vs ADR-0004 isolated, affects B+C; Q-A-02 schema-vs-spec drift §3a). Both non-blocking + additively fixable — T02 coding proceeds. Parent PM: please route Q-A-01 to PO (topology affects B/C).
 
 <!-- TEMPLATE:
 [2026-06-25 H3] [PM A Nathan] T01 boilerplate scaffold APPROVED (attempt 2) — make check green, 0 drift hits.
@@ -120,7 +121,7 @@
 
 | ID            | Question | Raised by | Source         | Status | Resolution |
 | ------------- | -------- | --------- | -------------- | ------ | ---------- |
-| —             | —        | —         | —              | —      | —          |
+| Q-A-02 | `prisma/schema.prisma` deviates from authoritative spec §4 DDL at 2 non-functional points: (i) `outbound_dispatch_queue.external_id` full index vs spec §4.5 **partial** `WHERE external_id IS NOT NULL`; (ii) client-side `@default(uuid())` vs spec L169 / data-model §5 **DB-side `gen_random_uuid()`**. Schema self-contradictory (comment L26 agrees with spec). **T02 shipped schema-as-is; both additively fixable (no init-migration redo).** PM A recommendation = spec-faithful (partial index + DB-side default, more robust for T09/T13 RPC insert surface). PO: ratify as-is OR direct reconcile. | PM A (Nathan) | schema.prisma:98,104,26 vs spec §4.4-4.8/L169 | open | — |
 
 ### 3b. Package / tooling questions
 
@@ -132,7 +133,7 @@
 
 | ID            | Question | Raised by | Source         | Status | Resolution |
 | ------------- | -------- | --------- | -------------- | ------ | ---------- |
-| —             | —        | —         | —              | —      | —          |
+| Q-A-01 | **DB topology (affects B+C).** `schema.prisma` header L19-22 claims "Q-OPS-06 H12 shared-DB ratification + real `hotel_id→hotels(id)` FK", but ADR-0004 + CLAUDE §1 (1 svc = 1 DB, BUKAN shared) + data-model §1/§2 + spec §4.1 ("FK opaque if separate DB") mandate/permit **isolated DB**. Schema models declare no FK (already isolated). Runtime tension: spec §2.2 L101 "cross-table SELECT to Auth `hotels.dnd`" + T18 per-dept write-through assume shared. **T02 shipped isolated/opaque — forward-compatible (additive FK later if flipped).** PO: confirm isolated authoritative + fix stale header comment, OR ratify shared-DB (then ADR-0004 needs update + B/C impact). | PM A (Nathan) | schema.prisma:19-22 vs ADR-0004/data-model/spec §4.1 | open | — |
 
 ---
 
