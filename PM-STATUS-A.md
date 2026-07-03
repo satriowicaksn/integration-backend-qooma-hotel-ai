@@ -92,6 +92,31 @@ Tidak menulis kode aplikasi. Perbaikan tooling murni: ganti format Jest config a
 
 Awaiting PM A ACK.
 
+##### PM A ACK — T01 PLAN APPROVED, proceed to coding (H12, 2026-07-03)
+
+**GAP T01-#1 — decision: Opsi B (jest.config.ts → jest.config.cjs). APPROVED.**
+
+Root cause diagnosis diverifikasi independen oleh PM A (trust-but-verify, read-only):
+- `node_modules/ts-node` = tidak ada; `ts-node` tidak di `package.json`.
+- `pnpm test:unit` reproduksi error persis: `Jest: 'ts-node' is required for the TypeScript configuration files`.
+Diagnosis executor akurat.
+
+Rasional pilih Opsi B:
+- **Zero package baru** → tidak lintasi gate CLAUDE.md §11 / PM-AGENT §4 (tambah dep = otoritas PO, bukan PM). Opsi A benar kamu identifikasi sebagai PO-gated — kita hindari, tidak perlu eskalasi untuk masalah yang punya fix zero-dep.
+- **Preseden repo**: `.eslintrc.cjs` sudah pakai `.cjs` justru karena `package.json` = `"type": "module"`. `.cjs` = pilihan konsisten (jangan `.js` — akan diperlakukan ESM dan `module.exports` gagal). Kamu sudah pilih `.cjs`, benar.
+- Config-file change = dalam wewenang executor (bukan planning doc, bukan `src/`, bukan deps).
+
+**Binding conditions untuk SUBMIT (verifikasi di VERDICT):**
+1. Semantik config `.cjs` WAJIB identik verbatim dengan `.ts` — semua field (preset ts-jest ESM, moduleNameMapper, transform, coverageThreshold 70/75/80/80, setupFilesAfterEnv, testTimeout) tidak boleh berubah. Ganti `import type { Config }` + `export default` → `/** @type {import('jest').Config} */` + `module.exports`. Hapus `jest.config.ts`.
+2. `make check` WAJIB hijau end-to-end — termasuk `lint` (eslint `.`) + `format:check` (prettier `.`) atas file `.cjs` baru. Kalau lint/prettier trip di `.cjs`, resolve sebelum SUBMIT (jangan tambah override tanpa flag).
+3. Branch `chore/ci-make-check-green` — sesuai konvensi CLAUDE.md §12 (`chore/<short>`). OK.
+
+**Watch-items (BUKAN blocker T01, jangan act di T01):**
+- Glob `test:unit` (`__tests__/.*\.test\.ts`) memang juga match `*.integration.test.ts`. Sekarang aman (integration test `describe.skip` → exit 0). Observasi kamu benar — di luar scope T01, jangan sentuh. Kandidat GAP terpisah bila nanti mengganggu.
+- `.skip` di `src/modules/_template/` = kondisi baseline boilerplate (frozen, `_template/` JANGAN diedit). Ini **bukan** drift yang kamu introduce → PM A **tidak** akan flag `.skip` template sebagai reject item T01. Jangan hapus/ubah.
+
+Proceed to coding. Post SUBMIT (attempt 1) saat `make check` hijau + drift scan bersih.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
