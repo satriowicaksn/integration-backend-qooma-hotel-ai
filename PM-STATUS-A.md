@@ -45,7 +45,52 @@
 
 > **Executor A** append `ASSIGNMENT` block saat claim task. **PM A** append `ACK` / `VERDICT` sub-block di bawah block executor — JANGAN edit block lama.
 
-_(kosong — belum ada assignment)_
+### ASSIGNMENT T01 — claimed by exec-A (Nathan) at H12 (2026-07-03)
+- Branch: chore/ci-make-check-green
+- Routed from: PM-STATUS-A.md §1/§8 T01 (assigned — self-claim per EXECUTOR-PROTOCOL §3B)
+
+#### PLAN T01 — exec-A (Nathan) at H12 (2026-07-03)
+
+**Scope recap**
+- T01 = `make check` hijau dari boilerplate. `make check` = `lint` + `format-check` + `typecheck` + `test-unit`. Prasyarat critical path sebelum T02/T03.
+
+**Session-start gate** (EXECUTOR-PROTOCOL §2)
+- Identity confirmed: Executor, Slot A (Nathan) ✓
+- CLAUDE.md loaded ✓
+- Task spec read: Makefile (target `check`, `test-unit`), package.json (scripts), jest.config.ts, docs/TESTING.md (pola test)
+- Parent docs spot-read: EXECUTOR-PROTOCOL.md (full), KICKOFF.md, PM-STATUS-A.md §1/§2/§8
+- Dependencies: none (T01 adalah root task)
+- `make typecheck` clean ✓ ; `make lint` clean ✓ ; `make format-check` clean ✓
+- Scaffolder risk: none
+
+**Diagnosis (sudah dijalankan — read-only)**
+- `lint` PASS, `format-check` PASS, `typecheck` PASS.
+- `test-unit` FAIL, root cause tunggal: Jest gagal parse `jest.config.ts` — `ts-node` diperlukan untuk config TypeScript, TAPI `ts-node` **tidak** ada di `package.json` (hanya muncul sebagai optional-peer yang di-*exclude* di `pnpm-lock.yaml`, tidak ter-install). Ini gap boilerplate: ship config `.ts` tanpa tool untuk membacanya.
+- Semua test template pakai `.skip`/`describe.skip` (di `src/modules/_template/` — frozen, TIDAK saya sentuh). Setelah config bisa di-load, hasil = 2 suites skipped, 0 fail, exit 0.
+
+**GAP / decision — butuh ACK PM A sebelum coding**
+- **GAP T01-#1** — cara memperbaiki parsing `jest.config.ts`. Dua opsi mutually-exclusive:
+  - **Opsi A** — `pnpm add -D ts-node`. Pertahankan `jest.config.ts` apa adanya (typed). **Konsekuensi**: tambah package baru + ubah `pnpm-lock.yaml` → butuh approval PO (EXECUTOR-PROTOCOL §10, CLAUDE.md §11).
+  - **Opsi B (default saya)** — konversi `jest.config.ts` → `jest.config.cjs` (opsi verbatim, tambah JSDoc `/** @type {import('jest').Config} */` untuk type-hint editor). **Zero package baru**, dalam wewenang executor (config file, bukan planning doc). Sudah saya **validasi** via probe `.cjs` sementara (langsung dihapus, working tree bersih): `jest --testPathPattern='__tests__/.*\.test\.ts'` → `Test Suites: 2 skipped`, exit 0, TANPA `NODE_OPTIONS`/dep baru.
+  - **My intent**: Opsi B — memenuhi "green from boilerplate" tanpa lintasi gate package-baru dan tanpa nunggu PO. Bila PM/PO prefer pertahankan config TS, saya switch ke Opsi A (route ke PO).
+- **Observasi (bukan bagian T01, tidak saya ubah)**: glob `test:unit` (`__tests__/.*\.test\.ts`) juga match file `*.integration.test.ts`. Sekarang aman karena integration test `describe.skip`. Kandidat GAP terpisah bila nanti mengganggu — flag saja, tidak act di T01.
+
+**Files to modify (bila Opsi B di-ACK)**
+- `jest.config.ts` → hapus, ganti `jest.config.cjs` (isi opsi identik, `module.exports`).
+- (tidak ada perubahan `package.json`/scripts/lockfile di Opsi B.)
+
+**Files to create**
+```
+jest.config.cjs   (pengganti jest.config.ts — Opsi B)
+```
+
+**Approach**
+Tidak menulis kode aplikasi. Perbaikan tooling murni: ganti format Jest config agar Node bisa load tanpa `ts-node`, lalu buktikan `make check` hijau end-to-end (lint+format+typecheck+test-unit) + jalankan drift scans EXECUTOR-PROTOCOL §4.4. Tidak sentuh `src/`, `prisma/`, `_template/`.
+
+**GAPs / questions**
+- GAP T01-#1 di atas — tunggu ACK PM A untuk pilih Opsi A vs B.
+
+Awaiting PM A ACK.
 
 <!--
 TEMPLATE — copy untuk task baru:
