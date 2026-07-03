@@ -15,8 +15,8 @@
 ## 0. Current focus (slot A)
 
 - **Day**: H12+ (task tracker activated 2026-06-30)
-- **Active task**: T01 ✅ APPROVED (attempt 1, awaiting PO merge) → next: T02 / T03 (assigned)
-- **Branch**: `chore/ci-make-check-green` (T01, awaiting PO merge + CI)
+- **Active task**: T01 ✅ MERGED to main (PR #1, `7b40e11`) → **T02 next: planning open** (Prisma migration, critical path)
+- **Branch**: — (T01 merged; T02 branch TBD at PLAN, `feat/<wa-module>-schema` or similar)
 - **Next gate (global)**: G1 — lihat `PM-STATUS-PARENT.md §5`
 - **My queue (preview)**: T01–T09 (foundation) — lihat §8 di bawah (mirror dari PARENT §1 filter Slot=A)
 - **Critical path**: T02 (Prisma migration) blokir implementasi Nanak (T10+) dan Satrio (T17+). Prioritaskan T01 → T02 → T03 sequence.
@@ -29,7 +29,7 @@
 
 | T## | Title                                                                            | Status   | Verified by PM | Notes                                                              |
 | --- | -------------------------------------------------------------------------------- | -------- | -------------- | ------------------------------------------------------------------ |
-| T01 | `make check` green dari boilerplate                                              | approved | PM A (H12) ✓   | Opsi B (jest.config.cjs, zero-dep). Awaiting PO merge + CI. attempt 1 |
+| T01 | `make check` green dari boilerplate                                              | merged   | PM A (H12) ✓   | Opsi B (jest.config.cjs, zero-dep). Merged to main PR #1 `7b40e11`. attempt 1 |
 | T02 | Prisma schema initial migration (8 Integration tables + indexes)                 | assigned | —              | ⚠ Blokir slot B + C                                                |
 | T03 | Encryption-at-rest helper (AES-256-GCM / KMS)                                    | assigned | —              | After T01; consumed by T10 + T17                                   |
 | T04 | Webhook signature-verification middleware (Meta `X-Hub-Signature-256` + Telegram)| backlog  | —              | After T01                                                          |
