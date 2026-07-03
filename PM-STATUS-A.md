@@ -15,8 +15,8 @@
 ## 0. Current focus (slot A)
 
 - **Day**: H12+ (task tracker activated 2026-06-30)
-- **Active task**: T01 ✅ MERGED (PR #1) · T02 ✅ **APPROVED** (awaiting PO merge) → **B+C schema-unblocked**. Next: T03 (encryption helper). 2 open Qs for PO (Q-A-01 topology, Q-A-02 spec-drift) — non-blocking.
-- **Branch**: `feat/prisma-init-migration` (T02, awaiting PO merge + CI)
+- **Active task**: T01 ✅ MERGED (PR #1) · T02 ✅ **MERGED** (PR #2, `53a4925`) → **B+C schema-unblocked**. Next: T03 (encryption helper) — planning open. 2 open Qs for PO (Q-A-01 topology, Q-A-02 spec-drift) — non-blocking.
+- **Branch**: — (T02 merged; T03 branch TBD at PLAN)
 - **Next gate (global)**: G1 — lihat `PM-STATUS-PARENT.md §5`
 - **My queue (preview)**: T01–T09 (foundation) — lihat §8 di bawah (mirror dari PARENT §1 filter Slot=A)
 - **Critical path**: T02 (Prisma migration) blokir implementasi Nanak (T10+) dan Satrio (T17+). Prioritaskan T01 → T02 → T03 sequence.
@@ -30,7 +30,7 @@
 | T## | Title                                                                            | Status   | Verified by PM | Notes                                                              |
 | --- | -------------------------------------------------------------------------------- | -------- | -------------- | ------------------------------------------------------------------ |
 | T01 | `make check` green dari boilerplate                                              | merged   | PM A (H12) ✓   | Opsi B (jest.config.cjs, zero-dep). Merged to main PR #1 `7b40e11`. attempt 1 |
-| T02 | Prisma schema initial migration (8 Integration tables + indexes)                 | approved | PM A (H12) ✓   | Clean-DB validated by PM (8 tbl, 6 chk, 2 partial idx, 0 auth). Opsi A. Awaiting PO merge. Unblocks B+C. |
+| T02 | Prisma schema initial migration (8 Integration tables + indexes)                 | merged   | PM A (H12) ✓   | Clean-DB validated by PM (8 tbl, 6 chk, 2 partial idx, 0 auth). Opsi A. Merged PR #2 `53a4925`. Unblocks B+C. |
 | T03 | Encryption-at-rest helper (AES-256-GCM / KMS)                                    | assigned | —              | After T01; consumed by T10 + T17                                   |
 | T04 | Webhook signature-verification middleware (Meta `X-Hub-Signature-256` + Telegram)| backlog  | —              | After T01                                                          |
 | T05 | Tenant resolution from `:hotel_slug` (LRU 5-min, hotels.code lookup)             | backlog  | —              | After T01                                                          |
