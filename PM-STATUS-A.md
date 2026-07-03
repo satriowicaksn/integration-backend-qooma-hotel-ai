@@ -15,8 +15,8 @@
 ## 0. Current focus (slot A)
 
 - **Day**: H12+ (task tracker activated 2026-06-30)
-- **Active task**: T01·T02·T03 MERGED · **T04 ✅ APPROVED** (HMAC plugin, 100% line cov, awaiting PO merge). Next: T05 (tenant resolver). Open Qs: Q-A-01/02/04 (PO/PM B), Q-A-03/05 (shared-infra/config → Parent PM).
-- **Branch**: `feat/hmac-webhook-verify` (T04, awaiting PO merge + CI)
+- **Active task**: T01·T02·T03·T04 ✅ **MERGED** (PR #1-4). Next: T05 (tenant resolver) — planning open. Open Qs: Q-A-01/02/04 (PO/PM B), Q-A-03/05 (shared-infra/config → Parent PM).
+- **Branch**: — (T04 merged; T05 branch TBD at PLAN)
 - **Next gate (global)**: G1 — lihat `PM-STATUS-PARENT.md §5`
 - **My queue (preview)**: T01–T09 (foundation) — lihat §8 di bawah (mirror dari PARENT §1 filter Slot=A)
 - **Critical path**: T02 (Prisma migration) blokir implementasi Nanak (T10+) dan Satrio (T17+). Prioritaskan T01 → T02 → T03 sequence.
@@ -32,7 +32,7 @@
 | T01 | `make check` green dari boilerplate                                              | merged   | PM A (H12) ✓   | Opsi B (jest.config.cjs, zero-dep). Merged to main PR #1 `7b40e11`. attempt 1 |
 | T02 | Prisma schema initial migration (8 Integration tables + indexes)                 | merged   | PM A (H12) ✓   | Clean-DB validated by PM (8 tbl, 6 chk, 2 partial idx, 0 auth). Opsi A. Merged PR #2 `53a4925`. Unblocks B+C. |
 | T03 | Encryption-at-rest helper (AES-256-GCM / KMS)                                    | merged   | PM A (H12) ✓   | Opsi A current-version. 100% cov, tamper+fail-fast verified. Merged PR #3 `ca9685b`. Consumed by T10+T17. |
-| T04 | Webhook signature-verification middleware (Meta `X-Hub-Signature-256` + Telegram)| approved | PM A (H12) ✓   | plugin-level preHandler, timingSafeEqual, raw-byte HMAC, AuthError→401 native, no-insert invariant proven. 100% line cov. Awaiting PO merge. |
+| T04 | Webhook signature-verification middleware (Meta `X-Hub-Signature-256` + Telegram)| merged   | PM A (H12) ✓   | plugin-level preHandler, timingSafeEqual, raw-byte HMAC, 401 native, no-insert invariant proven. 100% line cov. Merged PR #4 `ad46125`. |
 | T05 | Tenant resolution from `:hotel_slug` (LRU 5-min, hotels.code lookup)             | backlog  | —              | After T01                                                          |
 | T06 | BSP adapter interface + `1engage` impl                                           | backlog  | —              | After T01                                                          |
 | T07 | Queue + scheduler infra (BullMQ + retry + DLQ)                                   | backlog  | —              | After T02                                                          |
