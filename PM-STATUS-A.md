@@ -15,8 +15,8 @@
 ## 0. Current focus (slot A)
 
 - **Day**: H12+ (task tracker activated 2026-06-30)
-- **Active task**: T01·T02·T03 ✅ **MERGED** (PR #1/#2/#3). **Foundation critical path T01→T02→T03 done.** Next: T04 (HMAC plugin) — planning open. Open Qs: Q-A-01/Q-A-02 (PO), Q-A-03 (shared-infra test env).
-- **Branch**: — (T03 merged; T04 branch TBD at PLAN)
+- **Active task**: T01·T02·T03 MERGED · **T04 PLAN ACK'd, coding** (HMAC verify plugin, Opsi A ×3: zero-dep raw-body, injected secret-resolver, throw AuthError). Open Qs: Q-A-01/Q-A-02/Q-A-04 (PO/PM B), Q-A-03 (shared-infra).
+- **Branch**: `feat/hmac-webhook-verify` (T04, in progress)
 - **Next gate (global)**: G1 — lihat `PM-STATUS-PARENT.md §5`
 - **My queue (preview)**: T01–T09 (foundation) — lihat §8 di bawah (mirror dari PARENT §1 filter Slot=A)
 - **Critical path**: T02 (Prisma migration) blokir implementasi Nanak (T10+) dan Satrio (T17+). Prioritaskan T01 → T02 → T03 sequence.
@@ -32,7 +32,7 @@
 | T01 | `make check` green dari boilerplate                                              | merged   | PM A (H12) ✓   | Opsi B (jest.config.cjs, zero-dep). Merged to main PR #1 `7b40e11`. attempt 1 |
 | T02 | Prisma schema initial migration (8 Integration tables + indexes)                 | merged   | PM A (H12) ✓   | Clean-DB validated by PM (8 tbl, 6 chk, 2 partial idx, 0 auth). Opsi A. Merged PR #2 `53a4925`. Unblocks B+C. |
 | T03 | Encryption-at-rest helper (AES-256-GCM / KMS)                                    | merged   | PM A (H12) ✓   | Opsi A current-version. 100% cov, tamper+fail-fast verified. Merged PR #3 `ca9685b`. Consumed by T10+T17. |
-| T04 | Webhook signature-verification middleware (Meta `X-Hub-Signature-256` + Telegram)| backlog  | —              | After T01                                                          |
+| T04 | Webhook signature-verification middleware (Meta `X-Hub-Signature-256` + Telegram)| wip      | —              | PLAN ACK'd (Opsi A×3). plugin-level, timingSafeEqual, throw AuthError→401 native. Q-A-04 raised (WA secret, affects B). |
 | T05 | Tenant resolution from `:hotel_slug` (LRU 5-min, hotels.code lookup)             | backlog  | —              | After T01                                                          |
 | T06 | BSP adapter interface + `1engage` impl                                           | backlog  | —              | After T01                                                          |
 | T07 | Queue + scheduler infra (BullMQ + retry + DLQ)                                   | backlog  | —              | After T02                                                          |
@@ -533,6 +533,30 @@ src/plugins/__tests__/hmac-validator.plugin.test.ts
 
 Awaiting PM A ACK (GAP #1/#2/#3).
 
+##### PM A ACK — T04 PLAN APPROVED, proceed to coding (H12, 2026-07-03)
+
+Verified by PM A: `AuthError` has `readonly statusCode = 401` (app-errors.ts:33); SECURITY §4 canonical example = `createHmac('sha256')` + `timingSafeEqual` + `throw AuthError` (exactly your approach); `fastify-plugin`/`fastify-raw-body` NOT in package.json; `api.ts` fully stubbed. All three intents sound.
+
+**GAP T04-#1 (raw-body) → Opsi A (custom `addContentTypeParser` parseAs buffer, zero-dep). APPROVED.** HMAC MUST be over raw bytes (re-serialized JSON breaks the signature); `fastify-raw-body` = PO-gated new dep. Encapsulated per-scope parser (no `fp`) is the correct Fastify pattern — won't pollute the global JSON parser.
+
+**GAP T04-#2 (secret decoupling) → Opsi A (injected `resolveSecret` hook factory). APPROVED.** Textbook hexagonal-disiplin (ADR-0001): T04 is a primitive; injecting the secret resolver keeps it unit-testable with a stub and unblocks T04 from T05. Do NOT hard-couple to DB/T05.
+
+**GAP T04-#3 (401 vs invariant) → Opsi A (throw `AuthError`). APPROVED — with a clarification.** Throw-in-preHandler guarantees the handler never runs → **no `webhook_events` insert** (the binding invariant), independent of T08. **AND I verified the literal 401 is produced natively**: Fastify's default error handler reads `error.statusCode`, and `AuthError.statusCode = 401` → `fastify.inject` on an invalid sig returns **401 pre-T08, no custom handler required**. So your test should assert the **native 401** via `inject` (that's the real runtime behavior B/C get today) — the "mini local error-handler" is unnecessary; drop it or keep only as a T08-preview, but the native-401 assertion is the one that must pass. Opsi B (`reply.code(401)` directly) rejected — deviates from SECURITY §4 / CLAUDE §5.4 convention.
+
+**Nota (WA secret semantics) → escalated as Q-A-04 (affects slot B, not a T04 blocker).** Your catch is correct and important: Meta signs `X-Hub-Signature-256` with the **App Secret**, while `webhook_verify_token` is for the GET verify-challenge (`hub.verify_token`) — spec §4.2 conflates them, and `wa_configs` has no `app_secret` column. T04 is agnostic (injected secret) so unaffected, but **B (T12 webhook ingest) will verify against the wrong secret** unless resolved, and it may need a schema follow-up (add `app_secret_enc`). Raised to Parent PM → PO / PM B (§3 Q-A-04 + PARENT §3a). You: flag only, do NOT act in T04 — correct.
+
+**Binding conditions — verify at SUBMIT (security floor):**
+1. **`timingSafeEqual`** (never `===`); length-guard BEFORE it (it throws on unequal length) → length-mismatch returns `false`, not throw. Tested.
+2. **HMAC over raw bytes** — `req.rawBody` (Buffer) from the content-type parser; computed on raw buffer, not re-serialized JSON. Prove it: sign a body with non-canonical whitespace/key-order, send exact bytes → 200; a re-serialized digest would fail.
+3. **plugin-level BEFORE handler** — verification in a `preHandler` hook; invalid → `throw AuthError` → **handler never runs**. Test asserts handler-ran = `false` on invalid (proxy for no-insert invariant). This is the core WAJIB.
+4. **401 native** — `inject` returns 401 on invalid/missing/malformed WA `X-Hub-Signature-256` + Telegram `X-Telegram-Bot-Api-Secret-Token`, via `AuthError.statusCode` (no T08 dependency).
+5. **`AuthError` thrown** (not raw `Error`, not direct `reply`). Message generic (`'Invalid webhook signature'`) — no secret/body leak.
+6. **Zero new deps** — package.json + lockfile unchanged.
+7. **Files** — `src/plugins/hmac-validator.plugin.ts` + its test only; `api.ts`/`env.ts` untouched; 0 `any`; explicit return types on exported fns; coverage ≥ 80%. `declare module 'fastify'` augmentation for `rawBody` is fine.
+8. **Telegram** — constant-time secret-echo compare (Telegram doesn't HMAC-sign) ✓.
+
+Branch `feat/hmac-webhook-verify` OK. Note: if the `NODE_ENV=test` gap (Q-A-03) bites this test's `loadConfig()` path, apply the same localized in-test workaround as T03 — don't fix it globally here (still Parent-PM-routed shared-infra). Proceed to coding.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
@@ -643,6 +667,7 @@ Re-run `make check` after fix, confirm pass, resubmit (attempt N+1).
 | Q-A-01 (arch) | Topology: schema-header L19-22 claims "Q-OPS-06 H12 shared-DB ratification + real `hotel_id→hotels(id)` FK", but ADR-0004 + CLAUDE §1 + data-model §1/§2 + spec §4.1 ("opaque if separate DB") mandate/permit **isolated DB**. Which is authoritative? Also runtime: spec §2.2 L101 "cross-table SELECT to Auth `hotels.dnd`" + T18 per-dept write-through assume shared. **T02 shipped isolated/opaque (forward-compatible; additive FK later).** PO confirm + fix stale header. | schema.prisma:19-22 vs ADR-0004/data-model/spec §4.1; T02 PLAN GAP-#1 | escalated → PARENT §3c | — |
 | Q-A-02 (contract) | schema.prisma deviates from authoritative spec §4 at 2 non-functional points: (i) `external_id` full `@@index` vs spec §4.5 partial `WHERE external_id IS NOT NULL`; (ii) client-side `@default(uuid())` vs spec L169 / data-model §5 DB-side `gen_random_uuid()`. Schema self-contradictory (comment L26 says gen_random_uuid). **T02 shipped schema-as-is (Opsi A); both additively fixable.** PM recommendation = spec-faithful. PO ratify as-is OR direct reconcile. | schema.prisma:98,104,26 vs spec §4.4-4.8,L169; T02 PLAN GAP-#2 | escalated → PARENT §3c | — |
 | Q-A-03 (infra) | `NODE_ENV=test` (Jest default) not in `env.ts` enum (`development\|staging\|production`) → any test calling `loadConfig()` throws. **Shared-infra: affects T04/T05… + slots B/C.** T03 used a localized `NODE_ENV:'development'` in-test workaround (no env.ts edit). Global fix = baseline env in `src/shared/utils/test-setup.ts` (recommended) OR add `'test'` to enum. Raised to Parent PM (affects >1 dev). | env.ts:16, Jest default; T03 SUBMIT Notes #2 | raised → PARENT (shared-infra) | — |
+| Q-A-04 (contract) | **WA signature secret (affects slot B, T12).** Meta signs `X-Hub-Signature-256` with the **App Secret**; `webhook_verify_token` is only for the GET verify-challenge (`hub.verify_token`). Spec §4.2 conflates them, and `wa_configs` has no `app_secret` column. T04 is secret-agnostic (injected resolver) → not blocked; but B's webhook ingest will verify against the wrong secret unless resolved, likely needing a schema follow-up (`app_secret_enc` column). PO/PM B to rule. | spec §4.2 vs Meta WA Cloud API; schema `wa_configs`; T04 PLAN nota | escalated → PARENT §3a | — |
 
 ---
 
