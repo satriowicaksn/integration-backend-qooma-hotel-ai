@@ -4,6 +4,6 @@
     "rootDir": ".",
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "scripts/**/*.ts", "prisma/seeds/**/*.ts", "jest.config.ts"],
+  "include": ["src/**/*.ts", "scripts/**/*.ts", "prisma/seeds/**/*.ts", "jest.config.cjs"],
   "exclude": ["node_modules", "dist", "coverage"]
 }
