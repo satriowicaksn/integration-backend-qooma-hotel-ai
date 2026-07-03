@@ -9,10 +9,10 @@ const config = {
   moduleFileExtensions: ['ts', 'js', 'json'],
   extensionsToTreatAsEsm: ['.ts'],
   moduleNameMapper: {
-    '^@core/(.*)$': '<rootDir>/src/core/$1',
-    '^@modules/(.*)$': '<rootDir>/src/modules/$1',
-    '^@plugins/(.*)$': '<rootDir>/src/plugins/$1',
-    '^@shared/(.*)$': '<rootDir>/src/shared/$1',
+    '^@core/(.*?)(?:\\.js)?$': '<rootDir>/src/core/$1',
+    '^@modules/(.*?)(?:\\.js)?$': '<rootDir>/src/modules/$1',
+    '^@plugins/(.*?)(?:\\.js)?$': '<rootDir>/src/plugins/$1',
+    '^@shared/(.*?)(?:\\.js)?$': '<rootDir>/src/shared/$1',
     '^(\\.{1,2}/.*)\\.js$': '$1',
   },
   transform: {
