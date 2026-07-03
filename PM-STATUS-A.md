@@ -197,6 +197,67 @@ Requesting PM A VERDICT.
 
 **Executor A: proceed to claim T02** (Prisma migration, 8 tables) — critical path, blocks slot B+C. Post PLAN; note the mandatory forward-only migration order + `hotels` FK dependency on Auth in your session-start gate.
 
+### ASSIGNMENT T02 — claimed by exec-A (Nathan) at H12 (2026-07-03)
+- Branch: `feat/prisma-init-migration` (proposal — foundation prisma; `feat/<short>` per CLAUDE.md §12. Koreksi bila PM mau nama lain)
+- Routed from: PM-STATUS-A.md §1 T02 + VERDICT T01 hand-off (PM A). Spec: `docs/spec/04-integration-channels.md §4` (DDL) + `MVP-INTEGRATION-FIRST.md §3` (migration order) + `data-model.md §1/§2` (DB split + ownership).
+
+#### PLAN T02 — exec-A (Nathan) at H12 (2026-07-03)
+
+**Scope recap**
+- T02 = initial Prisma migration untuk 8 tabel Integration + indexes, forward-only order. Blokir slot B (T10+) & C (T17+). `prisma/schema.prisma` **sudah ada** (F1 artifact, ratified) dengan 8 model + comment-block post-migration SQL. Deliverable = generate migration pertama dari schema itu, lengkapi fitur non-PSL (CHECK + partial index) via raw SQL di file migration yang sama, apply + verify.
+
+**Session-start gate** (EXECUTOR-PROTOCOL §2)
+- Identity confirmed: Executor, Slot A (Nathan) ✓
+- CLAUDE.md loaded ✓
+- Task spec read: `04-integration-channels.md §4` (DDL 8 tabel + index + CHECK), `MVP-INTEGRATION-FIRST.md §3` (urutan forward-only) + §4.1 (encryption-at-rest note), `data-model.md §1/§2` (Integration = own DB, `hotels` owned by Auth), `prisma/schema.prisma` (full).
+- Parent docs spot-read: docker-compose.yml (postgres @ `localhost:5433`, user `app` superuser), `.env.example` (DATABASE_URL), Makefile (`db-migrate`/`prisma:*`).
+- Dependencies: T01 ✓ merged (`make check` green baseline).
+- `hotels` FK dependency (per VERDICT T01 note): **RESOLVED** → lihat GAP T02-#1. Auth's `hotels` table **tidak** ada di schema repo ini (Integration = own DB, `data-model.md §1/§2`), jadi FK lintas-service tidak bisa & tidak boleh di-generate Prisma. `hotel_id` = opaque UUID NOT NULL (sesuai spec §3). Schema saat ini memang **tidak** deklarasi relasi ke `hotels` → migrate = kolom UUID polos. Konsisten.
+- Forward-only order: relasi intra-schema satu-satunya = `delivery_receipts.dispatch_id → outbound_dispatch_queue.id`. Prisma auto-order `CREATE TABLE outbound_dispatch_queue` sebelum `delivery_receipts`. 6 tabel lain independen. Aman.
+- `make typecheck`/`make lint`/`make format-check` clean ✓ (T01 baseline, belum sentuh apa pun).
+- Scaffolder risk: **YES — perlu PM flag**. Perintah CLI yang akan dijalankan (di bawah).
+
+**CLI commands (guardrail — mohon PM flag risiko overwrite sebelum saya run)**
+```
+cp .env.example .env                 # LOKAL saja, gitignored — hanya untuk DATABASE_URL saat generate. TIDAK di-commit.
+docker compose up -d postgres        # HANYA postgres (BUKAN `make start` — hindari auto db-migrate prompt)
+pnpm prisma migrate dev --name init_integration_channels --create-only   # generate migration.sql TANPA apply
+#   → lalu saya APPEND raw SQL (5 CHECK + 2 partial index) ke migration.sql (manual edit)
+pnpm prisma migrate dev              # apply + validate (shadow DB) migration yang sudah dilengkapi
+pnpm prisma generate                 # regen client, pastikan types OK
+```
+- Risiko yang saya sadari: (a) `.env` — gitignored, tidak akan ke-push (EXECUTOR-PROTOCOL §0.7). (b) `prisma migrate dev` butuh shadow DB — user `app` = superuser (image default) → auto-create shadow DB OK. (c) Tidak ada migrasi existing → ini genuinely "init", tidak overwrite.
+
+**Files to create**
+```
+prisma/migrations/<timestamp>_init_integration_channels/migration.sql
+prisma/migrations/migration_lock.toml        (provider = postgresql)
+```
+
+**Files to modify**
+- `prisma/schema.prisma` — **HANYA bila PM pilih Opsi B di GAP T02-#2** (reconcile ke spec). Default Opsi A = schema TIDAK disentuh.
+
+**Approach**
+Generate migration dari `schema.prisma` yang sudah ratified (`--create-only`), lalu append raw SQL untuk fitur yang PSL tidak bisa ekspresikan — persis seperti yang di-list schema di comment-block §148-169: 5 CHECK constraint (webhook provider, outbound status+provider, delivery status, health status+provider) + 2 partial index (`idx_webhook_events_unprocessed`, `idx_outbound_pending`). Apply ke DB lokal untuk validasi shadow-DB + `prisma generate` untuk pastikan client OK. Tidak menulis kode aplikasi/service. Tidak sentuh `src/`.
+
+**GAPs / questions — butuh ACK PM A sebelum coding**
+
+- **GAP T02-#1 — `hotel_id` topology / FK (per VERDICT T01 note).**
+  - **Gap**: schema.prisma header (baris 19-22) sebut "Q-OPS-06 H12 ratification: shared Postgres, `hotel_id` → `hotels(id)` real FK". TAPI `data-model.md §1/§2` + spec §3 = Integration **own DB**, `hotel_id` **opaque, no FK**. Model Prisma juga tidak deklarasi relasi `hotels`.
+  - **Doc reference**: `04-integration-channels.md §3`, `data-model.md §1/§2`, `schema.prisma:19-22`.
+  - **Options**: A) opaque UUID, no cross-service FK (migrate schema apa adanya). B) tambah raw-SQL FK `hotel_id → hotels(id)` (butuh `hotels` ada di DB → shadow-DB migrate GAGAL, langgar CLAUDE.md §1 "1 service=1 DB=1 schema").
+  - **My intent**: **A** — opaque UUID, no FK. Satu-satunya opsi yang feasible untuk single-schema migration + selaras spec §3/data-model. Header comment shared-DB = topologi alternatif, tak dapat diekspresikan di schema isolated ini. (Ini konfirmasi, bukan blocker.)
+
+- **GAP T02-#2 — `schema.prisma` (F1 ratified) menyimpang dari spec §4 DDL di 2 titik non-fungsional.**
+  - **Gap**: (i) `outbound_dispatch_queue.external_id` — schema = **full** `@@index([externalId])`; spec §4.5 = **partial** `WHERE external_id IS NOT NULL`. (ii) PK id auto — schema = client-side `@default(uuid())`; spec §4.4-4.8 = DB-side `DEFAULT gen_random_uuid()`. Comment-block schema TIDAK meng-list `idx_outbound_external` partial (konsisten dgn pilihan full-index si author).
+  - **Doc reference**: `schema.prisma:98,104` + comment-block:148-169 vs `04-integration-channels.md §4.4-4.8`.
+  - **Options**:
+    - **A (default saya)** — hormati `schema.prisma` sebagai source-of-truth (artifact F1 sudah ter-review). Migrate as-is + append **hanya** SQL yang di-list comment-block schema (5 CHECK + 2 partial index). Deviasi (i)/(ii) dibiarkan; keduanya non-fungsional (full-index tetap melayani lookup `external_id=?`; `uuid()` di-supply Prisma Client). Schema TIDAK disentuh. **Zero dampak ke types B/C** (index & DB-default tidak muncul di Prisma Client types).
+    - **B** — reconcile penuh ke spec §4: edit schema (`external_id` → hapus `@@index`, tambah raw partial; `@default(uuid())` → `@default(dbgenerated("gen_random_uuid()"))`). Lebih spec-faithful tapi meng-edit foundation schema.
+  - **My intent**: **A**. Sebagai executor saya tidak sepatutnya override foundation schema yang sudah ratified berdasarkan bacaan spec saya sendiri — saya flag saja. Bila PM/PO mau spec-exact (B), saya kerjakan. Deviasi 0 dampak ke slot B/C.
+
+Awaiting PM A ACK (khususnya keputusan GAP T02-#2 A vs B).
+
 <!--
 TEMPLATE — copy untuk task baru:
 
