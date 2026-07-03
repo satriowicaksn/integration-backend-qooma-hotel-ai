@@ -15,8 +15,8 @@
 ## 0. Current focus (slot A)
 
 - **Day**: H12+ (task tracker activated 2026-06-30)
-- **Active task**: T01 ✅ MERGED (PR #1) · T02 ✅ **MERGED** (PR #2, `53a4925`) → **B+C schema-unblocked**. Next: T03 (encryption helper) — planning open. 2 open Qs for PO (Q-A-01 topology, Q-A-02 spec-drift) — non-blocking.
-- **Branch**: — (T02 merged; T03 branch TBD at PLAN)
+- **Active task**: T01 ✅ MERGED (PR #1) · T02 ✅ MERGED (PR #2) → B+C unblocked. **T03 PLAN ACK'd, coding** (crypto AES-256-GCM, Opsi A current-version). 2 open Qs for PO (Q-A-01, Q-A-02) — non-blocking.
+- **Branch**: `feat/crypto-at-rest` (T03, in progress)
 - **Next gate (global)**: G1 — lihat `PM-STATUS-PARENT.md §5`
 - **My queue (preview)**: T01–T09 (foundation) — lihat §8 di bawah (mirror dari PARENT §1 filter Slot=A)
 - **Critical path**: T02 (Prisma migration) blokir implementasi Nanak (T10+) dan Satrio (T17+). Prioritaskan T01 → T02 → T03 sequence.
@@ -31,7 +31,7 @@
 | --- | -------------------------------------------------------------------------------- | -------- | -------------- | ------------------------------------------------------------------ |
 | T01 | `make check` green dari boilerplate                                              | merged   | PM A (H12) ✓   | Opsi B (jest.config.cjs, zero-dep). Merged to main PR #1 `7b40e11`. attempt 1 |
 | T02 | Prisma schema initial migration (8 Integration tables + indexes)                 | merged   | PM A (H12) ✓   | Clean-DB validated by PM (8 tbl, 6 chk, 2 partial idx, 0 auth). Opsi A. Merged PR #2 `53a4925`. Unblocks B+C. |
-| T03 | Encryption-at-rest helper (AES-256-GCM / KMS)                                    | assigned | —              | After T01; consumed by T10 + T17                                   |
+| T03 | Encryption-at-rest helper (AES-256-GCM / KMS)                                    | wip      | —              | PLAN ACK'd (GAP#1→A current-version, versioned envelope). crypto.ts + test. Consumed by T10+T17. |
 | T04 | Webhook signature-verification middleware (Meta `X-Hub-Signature-256` + Telegram)| backlog  | —              | After T01                                                          |
 | T05 | Tenant resolution from `:hotel_slug` (LRU 5-min, hotels.code lookup)             | backlog  | —              | After T01                                                          |
 | T06 | BSP adapter interface + `1engage` impl                                           | backlog  | —              | After T01                                                          |
@@ -402,6 +402,26 @@ src/shared/utils/__tests__/crypto.test.ts   (unit test — roundtrip, tamper-det
   - **My intent**: **A**. Envelope versioned sejak awal → forward-compatible; rotation machinery ditambah saat benar-benar dibutuhkan (ops rotation, pasca-MVP) tanpa re-encrypt data lama. Bila PM/PO mau rotation penuh di MVP, saya kerjakan B (dan route env-schema question ke PO).
 
 Awaiting PM A ACK (khususnya GAP T03-#1 A vs B).
+
+##### PM A ACK — T03 PLAN APPROVED, proceed to coding (H12, 2026-07-03)
+
+All PLAN claims **verified** by PM A: `crypto.ts` stub + envelope doc ✓; `env.ts` `ENCRYPTION_KEY .length(64)` + `ENCRYPTION_KEY_VERSION` default `v1` + `loadConfig()` fail-fast + `resetConfigCache()` ✓ (no `ENCRYPTION_KEY_RETIRED_*` field — confirms the gap); SECURITY §3 rotation = ops *strategy* not MVP AC; `maskTokenForLog` exists in `masking.ts` ✓.
+
+**GAP T03-#1 (key rotation scope) → DECISION: Opsi A (current-version only, versioned envelope, extensible). APPROVED.**
+- Rationale: MVP §4.1 mandates only encrypt/decrypt + fail-fast; SECURITY §3 multi-version decrypt is step 3 of a *rotation procedure* (with background re-encrypt job) = post-MVP ops, not an MVP §5 AC. Opsi A keeps the envelope versioned from day 1 → **forward-compatible** (old ciphertext still decrypts once retired-key resolution is added later, ~3 lines + env field). Opsi B would either read `process.env` directly (violates CLAUDE.md §4 "config lewat @core/config") or add an `env.ts` field for a feature not needed now (larger core/config surface). Opsi A is YAGNI-correct + most-restrictive (throws on unknown version rather than reaching into env). Zero `env.ts` change.
+
+**Binding conditions — verify at SUBMIT (security floor, CLAUDE.md §6 + my scope constraints):**
+1. **Algo/envelope**: AES-256-GCM, **12-byte random IV per call**, envelope exactly `v<version>:<iv_hex>:<ct_hex>:<tag_hex>` per SECURITY §3. IV randomness proven by test (2× encrypt of same plaintext → different ciphertext).
+2. **Fail-fast**: missing/invalid `ENCRYPTION_KEY` → throw (via `loadConfig()`), plus explicit 32-byte key-length assertion. Test must prove fail-fast on missing/short key (using `resetConfigCache()`).
+3. **Tamper detection**: decrypt verifies GCM auth-tag → mutated ciphertext AND mutated tag each throw. Both cases tested. Malformed envelope (≠4 parts) + unknown version → throw.
+4. **No secret leakage**: `CryptoError` messages must NOT contain key material or plaintext. Confirm message strings.
+5. **Named error, no raw `throw new Error(`**: replace ALL stub `throw new Error(...)` in crypto.ts with `CryptoError`. `CryptoError extends Error` accepted for now (crypto util is context-agnostic — HTTP + worker/CLI — so coupling to AppError's `statusCode` is wrong; error-handler plugin's non-AppError fallback → 500, no leak). When T08 error catalog lands we may reconcile — note only, not a blocker.
+6. **Scope/no `any`**: files = modify `src/shared/utils/crypto.ts` + create `src/shared/utils/__tests__/crypto.test.ts` only. **No `env.ts` / core/config change** (Opsi A). Strictly typed, 0 `any`. Coverage ≥ 80% for crypto.ts.
+7. **`make check` green** — this is the **first real executing unit test** (T01/T02 were skipped), so it also validates the harness end-to-end. If `test:unit` needs no `--experimental-vm-modules` (your probe says so), the script stays unchanged — confirm at SUBMIT.
+
+**Out of T03 scope (noted so it isn't dropped later):** token **masking-on-GET** is enforced at the B/C config-CRUD response layer (T10/T17) via `maskTokenForLog` — I'll gate it there, not here. Correct to exclude from T03.
+
+Branch `feat/crypto-at-rest` OK (CLAUDE.md §12). Proceed to coding.
 
 <!--
 TEMPLATE — copy untuk task baru:
