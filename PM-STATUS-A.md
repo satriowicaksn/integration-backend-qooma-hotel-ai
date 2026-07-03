@@ -117,6 +117,60 @@ Rasional pilih Opsi B:
 
 Proceed to coding. Post SUBMIT (attempt 1) saat `make check` hijau + drift scan bersih.
 
+#### SUBMIT T01 — exec-A (Nathan) at H12 (2026-07-03) (attempt 1)
+
+Task: `make check` green dari boilerplate (Opsi B — jest.config.ts → jest.config.cjs)
+Branch: `chore/ci-make-check-green` (pushed, commit `8277b7a`)
+Files changed: 3
+  - `jest.config.ts` → `jest.config.cjs` (rename, opsi verbatim; `import type {Config}`+`export default` → `/** @type {import('jest').Config} */`+`module.exports`; git detect 91% rename)
+  - `tsconfig.eslint.json` (modified — include `"jest.config.ts"` → `"jest.config.cjs"`)
+  - (`jest.config.cjs` juga berisi 1 baris `/* eslint-env node */` — lihat Notes #2)
+
+DoD self-check
+- [x] `make check` hijau end-to-end — lint + format:check + typecheck + test-unit semua PASS, exit 0.
+- [x] `test-unit` sekarang jalan tanpa `ts-node` → `Test Suites: 2 skipped, 0 fail`, exit 0.
+- [x] Zero package baru (no `package.json` / `pnpm-lock.yaml` change).
+
+Binding conditions (dari ACK)
+- **#1 semantik verbatim** ✓ — semua field identik: preset `ts-jest/presets/default-esm`, testEnvironment, rootDir, roots, testMatch, moduleFileExtensions, extensionsToTreatAsEsm, moduleNameMapper (5 entri), transform (useESM + tsconfig), collectCoverageFrom, coverageDirectory, coverageReporters, **coverageThreshold 70/75/80/80**, clearMocks, restoreMocks, setupFilesAfterEnv, testTimeout=10000. `jest.config.ts` dihapus.
+- **#2 make check hijau incl. lint+format:check atas `.cjs`** ✓ — lihat Notes #1/#2 untuk 2 langkah minimal yang diperlukan agar `.cjs` lolos typed-lint (aku flag, tidak silent).
+- **#3 branch `chore/ci-make-check-green`** ✓ — sesuai CLAUDE.md §12.
+
+Quality gate
+- `make lint` (eslint . --max-warnings 0): PASS (0 error, 0 warning)
+- `make format-check` (prettier --check .): PASS
+- `make typecheck` (tsc --noEmit): PASS
+- `make test-unit`: PASS (2 suites skipped, 0 fail)
+
+Drift scans (§4.4 — semua hit di bawah = **baseline boilerplate**, di file yang TIDAK aku sentuh; diff-ku 0 file `src/`)
+- `any`: 2 hits — `_template/_template.repository.ts:12`, `_template/adapters/example-vendor.adapter.ts:9` (stub `_db: any`/`_httpClient: any`, frozen `_template/`).
+- console.log: 0 hits.
+- `throw new Error(`: 4 hits — `_template/_template.repository.ts:23`, `core/config/env.ts:75`, `core/http/http-client.ts:19,27` (stub/bootstrap boilerplate; bukan file-ku).
+- forbidden imports (express/typeorm/sequelize/moment/node-fetch): 0 hits.
+- default export di luar entry/config: 0 hits.
+- `.skip`: 2 hits — `_template/__tests__/*` (baseline per ACK watch-item #2; frozen).
+- **Confirmed**: `git diff --name-only` = `jest.config.ts`, `jest.config.cjs`, `tsconfig.eslint.json` only. **0 file `src/` berubah** → tidak ada drift baru yang aku introduce.
+
+Security check
+- N/A (task tooling murni; tidak sentuh auth/webhook/crypto/secret).
+
+Test evidence
+- Unit: 0 aktif (2 skipped di `_template/`, baseline). `test-unit` command exit 0.
+- Integration: N/A (T01 tidak sentuh DB/queue/IO).
+- Bukti runtime `make test-unit`:
+  ```
+  > jest --testPathPattern=__tests__/.*\.test\.ts
+  Test Suites: 2 skipped, 0 of 2 total
+  Tests:       2 skipped, 2 total
+  ```
+
+Notes / questions (transparansi 2 langkah di luar rename murni — mohon verifikasi PM A)
+- **#1 — `tsconfig.eslint.json` include rename**: ESLint typed-lint (`parserOptions.project`) mewajibkan file yang di-lint ada di include. Boilerplate sudah include `jest.config.ts`; aku hanya rename referensinya ke `jest.config.cjs`. Konsekuensi mekanis langsung dari rename yang di-ACK, bukan keputusan baru. **Tidak** menambah/menghapus rule eslint.
+- **#2 — `/* eslint-env node */` di baris atas `jest.config.cjs`**: file `.cjs` di-lint sebagai CommonJS (bukan TS), jadi `no-undef` protes `module`/`module.exports`. Aku pilih directive file-local (blast radius = 1 file) **alih-alih** menambah override di `.eslintrc.cjs` — sesuai kondisi ACK #2 "jangan tambah override tanpa flag". Ini aku flag eksplisit; tidak silent. `.eslintrc.cjs` **tidak diubah**.
+- Watch-item glob `test:unit` match `*.integration.test.ts`: tidak aku act (di luar scope T01), sesuai arahan ACK.
+
+Requesting PM A VERDICT.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
