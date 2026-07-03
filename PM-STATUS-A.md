@@ -15,8 +15,8 @@
 ## 0. Current focus (slot A)
 
 - **Day**: H12+ (task tracker activated 2026-06-30)
-- **Active task**: T01 ✅ MERGED (PR #1) · T02 ✅ MERGED (PR #2) → B+C unblocked. **T03 PLAN ACK'd, coding** (crypto AES-256-GCM, Opsi A current-version). 2 open Qs for PO (Q-A-01, Q-A-02) — non-blocking.
-- **Branch**: `feat/crypto-at-rest` (T03, in progress)
+- **Active task**: T01·T02 MERGED · T03 ✅ **APPROVED** (crypto AES-256-GCM, 100% cov, awaiting PO merge). **Foundation critical path T01→T02→T03 done.** Next: T04 (HMAC plugin). Open Qs: Q-A-01/Q-A-02 (PO), Q-A-03 (shared-infra test env).
+- **Branch**: `feat/crypto-at-rest` (T03, awaiting PO merge + CI)
 - **Next gate (global)**: G1 — lihat `PM-STATUS-PARENT.md §5`
 - **My queue (preview)**: T01–T09 (foundation) — lihat §8 di bawah (mirror dari PARENT §1 filter Slot=A)
 - **Critical path**: T02 (Prisma migration) blokir implementasi Nanak (T10+) dan Satrio (T17+). Prioritaskan T01 → T02 → T03 sequence.
@@ -31,7 +31,7 @@
 | --- | -------------------------------------------------------------------------------- | -------- | -------------- | ------------------------------------------------------------------ |
 | T01 | `make check` green dari boilerplate                                              | merged   | PM A (H12) ✓   | Opsi B (jest.config.cjs, zero-dep). Merged to main PR #1 `7b40e11`. attempt 1 |
 | T02 | Prisma schema initial migration (8 Integration tables + indexes)                 | merged   | PM A (H12) ✓   | Clean-DB validated by PM (8 tbl, 6 chk, 2 partial idx, 0 auth). Opsi A. Merged PR #2 `53a4925`. Unblocks B+C. |
-| T03 | Encryption-at-rest helper (AES-256-GCM / KMS)                                    | wip      | —              | PLAN ACK'd (GAP#1→A current-version, versioned envelope). crypto.ts + test. Consumed by T10+T17. |
+| T03 | Encryption-at-rest helper (AES-256-GCM / KMS)                                    | approved | PM A (H12) ✓   | Opsi A current-version. 100% cov, tamper+fail-fast verified by PM. Awaiting PO merge. Consumed by T10+T17. |
 | T04 | Webhook signature-verification middleware (Meta `X-Hub-Signature-256` + Telegram)| backlog  | —              | After T01                                                          |
 | T05 | Tenant resolution from `:hotel_slug` (LRU 5-min, hotels.code lookup)             | backlog  | —              | After T01                                                          |
 | T06 | BSP adapter interface + `1engage` impl                                           | backlog  | —              | After T01                                                          |
@@ -469,6 +469,29 @@ Notes / questions (untuk PM A)
 
 Requesting PM A VERDICT.
 
+##### VERDICT T03 — APPROVED (H12, attempt 1) by PM A
+
+✅ **APPROVE.** All 7 binding conditions verified independently; crypto reviewed line-by-line as a security-floor deliverable.
+
+**Independent verification (PM reran on `feat/crypto-at-rest` `f2b9fcf`):**
+- **#1 algo/envelope** — `aes-256-gcm`, `randomBytes(12)` IV per call, envelope `v1:<iv>:<ct>:<tag>`; IV-randomness test (2× encrypt → different ct) ✓.
+- **#2 fail-fast** — `loadConfig()` throws on missing/short key + `decodeKey` regex-guards 64-hex/32-byte; both tested (missing-key + 64-non-hex) ✓.
+- **#3 tamper detection** — GCM `final()` wrapped in `CryptoError`; mutated-ct, mutated-tag, malformed (≠4 parts), wrong-iv-length, unknown-version all throw; 5 tests ✓. Tag length pinned to 16 bytes (blocks truncated-tag) — good defensive touch.
+- **#4 no leakage** — `CryptoError` messages static; only the **public** envelope version string appears (`"v1"`), never key/plaintext ✓.
+- **#5 named error** — 0 raw `throw new Error(` in crypto.ts; all `CryptoError` ✓.
+- **#6 scope/no-any/coverage** — `env.ts`/core-config UNTOUCHED (Opsi A held); **0 `any`** in crypto.ts + test (`as string`, not `as any`); **crypto.ts coverage = 100/100/100/100** (PM reran `jest --coverage`), well above the 80% floor ✓.
+- **#7 make check green** — PM rerun exit 0; 13 crypto tests pass; `test:unit` runs without `--experimental-vm-modules` → `package.json` unchanged, resolving the T01 ESM watch-item ✓.
+
+**On the 2 flagged side-effects — both accepted:**
+- **jest.config.cjs moduleNameMapper** (`^@core/(.*)$` → `^@core/(.*?)(?:\.js)?$`, +modules/plugins/shared) — legitimate, general, correct: this is the first test importing a `@core/*` alias with a `.js` suffix (required by NodeNext), exposing a latent boilerplate gap; the optional `(?:\.js)?` mirrors the existing relative-import stripper and is backward-compatible. Verified only the 4 mapper lines changed — coverageThreshold/preset/setup/timeout intact. Does **not** touch the surface condition #6 protected (env.ts/core-config). Analogous to T01's tsconfig side-effect. Transparent, not silent.
+- **`NODE_ENV` localized in test BASE_ENV** — Jest sets `NODE_ENV=test` but `env.ts` enum lacks `test`, so `loadConfig()` would throw. Localizing `NODE_ENV:'development'` to the test file (no env.ts edit) is the correct minimal fix for T03. Accepted.
+
+**One tracked follow-up (does NOT hold T03):** the `NODE_ENV=test` gap is **shared-infra** — every future test calling `loadConfig()` (T04/T05… and slots B/C) will hit it. A global fix belongs in `src/shared/utils/test-setup.ts` (baseline env) or adding `'test'` to the enum — that touches shared infra affecting >1 dev, so I'm raising it to Parent PM rather than patching unilaterally (§3 Q-A-03 + PARENT roll-up). Recommendation: small chore setting a baseline test env in `test-setup.ts`.
+
+→ §1 tracker: T03 `approved`, Verified by PM A. → Code on `feat/crypto-at-rest` awaiting **PO merge + CI** (PM does not merge).
+
+**Executor A: T03 done — T10 (WA config) + T17 (Telegram config) now have their encryption primitive.** Foundation critical path (T01→T02→T03) complete. Next in queue: **T04** (webhook signature-verify plugin — `src/plugins/hmac-validator.plugin.ts`, **plugin-level before handler**, WA `X-Hub-Signature-256` → 401 with no `webhook_events` insert, Telegram own scheme). Post PLAN when ready.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
@@ -578,6 +601,7 @@ Re-run `make check` after fix, confirm pass, resubmit (attempt N+1).
 | ------------- | -------- | -------------- | ------ | ---------- |
 | Q-A-01 (arch) | Topology: schema-header L19-22 claims "Q-OPS-06 H12 shared-DB ratification + real `hotel_id→hotels(id)` FK", but ADR-0004 + CLAUDE §1 + data-model §1/§2 + spec §4.1 ("opaque if separate DB") mandate/permit **isolated DB**. Which is authoritative? Also runtime: spec §2.2 L101 "cross-table SELECT to Auth `hotels.dnd`" + T18 per-dept write-through assume shared. **T02 shipped isolated/opaque (forward-compatible; additive FK later).** PO confirm + fix stale header. | schema.prisma:19-22 vs ADR-0004/data-model/spec §4.1; T02 PLAN GAP-#1 | escalated → PARENT §3c | — |
 | Q-A-02 (contract) | schema.prisma deviates from authoritative spec §4 at 2 non-functional points: (i) `external_id` full `@@index` vs spec §4.5 partial `WHERE external_id IS NOT NULL`; (ii) client-side `@default(uuid())` vs spec L169 / data-model §5 DB-side `gen_random_uuid()`. Schema self-contradictory (comment L26 says gen_random_uuid). **T02 shipped schema-as-is (Opsi A); both additively fixable.** PM recommendation = spec-faithful. PO ratify as-is OR direct reconcile. | schema.prisma:98,104,26 vs spec §4.4-4.8,L169; T02 PLAN GAP-#2 | escalated → PARENT §3c | — |
+| Q-A-03 (infra) | `NODE_ENV=test` (Jest default) not in `env.ts` enum (`development\|staging\|production`) → any test calling `loadConfig()` throws. **Shared-infra: affects T04/T05… + slots B/C.** T03 used a localized `NODE_ENV:'development'` in-test workaround (no env.ts edit). Global fix = baseline env in `src/shared/utils/test-setup.ts` (recommended) OR add `'test'` to enum. Raised to Parent PM (affects >1 dev). | env.ts:16, Jest default; T03 SUBMIT Notes #2 | raised → PARENT (shared-infra) | — |
 
 ---
 
