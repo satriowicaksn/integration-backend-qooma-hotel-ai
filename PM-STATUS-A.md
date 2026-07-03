@@ -15,8 +15,8 @@
 ## 0. Current focus (slot A)
 
 - **Day**: H12+ (task tracker activated 2026-06-30)
-- **Active task**: T01 / T02 / T03 (assigned — claim per `EXECUTOR-PROTOCOL §2`)
-- **Branch**: —
+- **Active task**: T01 ✅ APPROVED (attempt 1, awaiting PO merge) → next: T02 / T03 (assigned)
+- **Branch**: `chore/ci-make-check-green` (T01, awaiting PO merge + CI)
 - **Next gate (global)**: G1 — lihat `PM-STATUS-PARENT.md §5`
 - **My queue (preview)**: T01–T09 (foundation) — lihat §8 di bawah (mirror dari PARENT §1 filter Slot=A)
 - **Critical path**: T02 (Prisma migration) blokir implementasi Nanak (T10+) dan Satrio (T17+). Prioritaskan T01 → T02 → T03 sequence.
@@ -29,7 +29,7 @@
 
 | T## | Title                                                                            | Status   | Verified by PM | Notes                                                              |
 | --- | -------------------------------------------------------------------------------- | -------- | -------------- | ------------------------------------------------------------------ |
-| T01 | `make check` green dari boilerplate                                              | assigned | —              | Start here                                                         |
+| T01 | `make check` green dari boilerplate                                              | approved | PM A (H12) ✓   | Opsi B (jest.config.cjs, zero-dep). Awaiting PO merge + CI. attempt 1 |
 | T02 | Prisma schema initial migration (8 Integration tables + indexes)                 | assigned | —              | ⚠ Blokir slot B + C                                                |
 | T03 | Encryption-at-rest helper (AES-256-GCM / KMS)                                    | assigned | —              | After T01; consumed by T10 + T17                                   |
 | T04 | Webhook signature-verification middleware (Meta `X-Hub-Signature-256` + Telegram)| backlog  | —              | After T01                                                          |
@@ -170,6 +170,32 @@ Notes / questions (transparansi 2 langkah di luar rename murni — mohon verifik
 - Watch-item glob `test:unit` match `*.integration.test.ts`: tidak aku act (di luar scope T01), sesuai arahan ACK.
 
 Requesting PM A VERDICT.
+
+##### VERDICT T01 — APPROVED (H12, attempt 1) by PM A
+
+✅ **APPROVE.** All 8 PM-AGENT §3 steps pass. Verified independently on `chore/ci-make-check-green` (commit `8277b7a`), not trust-only.
+
+**Step-by-step verification (PM rerun):**
+1. **DoD match** — T01 = `make check` green from boilerplate. Met.
+2. **Drift scan** — clean. All `any`/`throw new Error`/`.skip` hits are pre-existing boilerplate in files with **0 diff** (`_template/` frozen, `core/config`, `core/http`). `git diff --name-only dae46f1..HEAD` (code) = `jest.config.cjs` + `tsconfig.eslint.json` only → **no new drift introduced**. Confirmed by PM, not just self-report.
+3. **File inventory** — matches PLAN + 2 flagged side-effects. No unexpected/silent files.
+4. **Quality gate** — `make check` **green on PM rerun**: lint (0 warn) + format:check + typecheck + test-unit (2 skipped, exit 0). Reproduced before-state fail (ts-node missing) → after-state pass.
+5. **Semantics verbatim** (ACK cond #1) — `.cjs` field-by-field identical to `.ts` incl. coverageThreshold 70/75/80/80, ts-jest ESM preset, moduleNameMapper, setupFilesAfterEnv, testTimeout. Old `.ts` deleted. Only wrapper (`import type`+`export default` → JSDoc+`module.exports`) changed.
+6. **Security floor** — N/A (pure tooling; no auth/webhook/crypto/token touched). Correct.
+7. **Test coverage** — N/A; T01 adds no business logic (tooling fix). No new tests required — correct call.
+8. **Zero new deps** (ACK cond) — `package.json` + `pnpm-lock.yaml` unchanged; no npm/yarn lockfile. Confirmed.
+
+**On the 2 flagged side-effects — both accepted:**
+- **#1 `tsconfig.eslint.json` include rename** — mechanically required (typed-lint `parserOptions.project` needs the linted file in `include`); boilerplate already listed `jest.config.ts`, only the reference was retargeted. No eslint rule added/removed. In-scope consequence of the ACK'd rename.
+- **#2 `/* eslint-env node */` file-local in `.cjs`** — honors ACK cond #2 ("no override without flag"): blast radius = 1 file, `.eslintrc.cjs` untouched. Correct least-privilege choice over a global override. Explicitly flagged, not silent.
+
+**Notes:** Executor discipline exemplary — root-cause isolated, options presented with the PO-gate correctly identified, side-effects surfaced rather than hidden. Model behavior for the foundation sequence.
+
+→ §1 task tracker: T01 `approved`, Verified by PM A.
+→ Code stays on `chore/ci-make-check-green` awaiting **PO merge to main + CI green** (per service workflow rule #2 — PM does not merge).
+→ Roll-up posted to PARENT §1 (status) + §2 (short line).
+
+**Executor A: proceed to claim T02** (Prisma migration, 8 tables) — critical path, blocks slot B+C. Post PLAN; note the mandatory forward-only migration order + `hotels` FK dependency on Auth in your session-start gate.
 
 <!--
 TEMPLATE — copy untuk task baru:
