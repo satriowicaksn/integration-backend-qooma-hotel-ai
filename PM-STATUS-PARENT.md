@@ -33,7 +33,7 @@
 | T## | Title                                                                            | Slot | Owner   | Status   | Verified by | Notes                                                                       |
 | --- | -------------------------------------------------------------------------------- | ---- | ------- | -------- | ----------- | --------------------------------------------------------------------------- |
 | T01 | `make check` green dari boilerplate (lint + typecheck + format)                  | A    | Nathan  | merged   | PM A (H12)  | Opsi B jest.config.cjs (zero-dep). Merged to main PR #1 `7b40e11`. Foundation critical path |
-| T02 | Prisma schema initial migration (8 Integration tables + indexes per §4 DDL)      | A    | Nathan  | wip      | —           | ⚠ Blocks B (T10+) and C (T17+). PLAN ACK'd; 2 Qs escalated (Q-A-01 topology §3c, Q-A-02 spec-drift §3a) — non-blocking, additively fixable |
+| T02 | Prisma schema initial migration (8 Integration tables + indexes per §4 DDL)      | A    | Nathan  | approved | PM A (H12)  | ✅ **B (T10+) + C (T17+) now schema-unblocked.** Clean-DB validated by PM. Opsi A (isolated/opaque). Awaiting PO merge + CI. Q-A-01/Q-A-02 open, non-blocking |
 | T03 | Encryption-at-rest helper (AES-256-GCM or KMS for token columns)                 | A    | Nathan  | assigned | —           | After T01; consumed by T10 (WA config) + T17 (Telegram config)              |
 | T04 | Webhook signature-verification middleware (Meta `X-Hub-Signature-256` + Telegram)| A    | Nathan  | backlog  | —           | After T01; consumed by T12 + T15 + T19                                      |
 | T05 | Tenant resolution from `:hotel_slug` (LRU cache 5-min, hotels.code lookup)       | A    | Nathan  | backlog  | —           | After T01                                                                   |
@@ -104,6 +104,7 @@
 [2026-07-03 H12] [PM A Nathan] Online. Last approved: none (session start). Active: 1 (T01→approved). Next-up: T02 (Prisma migration, critical path). Open Qs: 0.
 [2026-07-03 H12] [PM A Nathan] T01 `make check` green APPROVED (attempt 1) — Opsi B jest.config.cjs, zero new deps, make check green on PM rerun, 0 new drift. Code on `chore/ci-make-check-green` awaiting PO merge + CI. Next: T02.
 [2026-07-03 H12] [PM A Nathan] T01 MERGED to main (PR #1). T02 PLAN ACK'd (Prisma init migration, isolated-DB/opaque-UUID). **2 open Qs raised for PO** (Q-A-01 DB topology §3c — schema-header claims shared-DB ratification vs ADR-0004 isolated, affects B+C; Q-A-02 schema-vs-spec drift §3a). Both non-blocking + additively fixable — T02 coding proceeds. Parent PM: please route Q-A-01 to PO (topology affects B/C).
+[2026-07-03 H12] [PM A Nathan] **T02 APPROVED (attempt 1)** — Prisma init migration, 8 tables. PM independently applied to a clean throwaway DB: 8 Integration tables, 0 auth, 6 CHECK, 2 partial idx, 1 intra-schema FK, mandated forward-only order; make check green. **→ Slot B (T10+) and C (T17+) are now schema-unblocked** — Parent PM can green-light their impl. Code awaiting PO merge. ⚠ Cross-dev note: shared local `postgres_data` volume has stale Auth tables — B/C should `make start-fresh` for a clean Integration DB.
 
 <!-- TEMPLATE:
 [2026-06-25 H3] [PM A Nathan] T01 boilerplate scaffold APPROVED (attempt 2) — make check green, 0 drift hits.
