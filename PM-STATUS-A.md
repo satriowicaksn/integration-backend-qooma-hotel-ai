@@ -15,8 +15,8 @@
 ## 0. Current focus (slot A)
 
 - **Day**: H12+ (task tracker activated 2026-06-30)
-- **Active task**: T01 ✅ MERGED to main (PR #1, `7b40e11`) → **T02 next: planning open** (Prisma migration, critical path)
-- **Branch**: — (T01 merged; T02 branch TBD at PLAN, `feat/<wa-module>-schema` or similar)
+- **Active task**: T01 ✅ MERGED (PR #1) → **T02 PLAN ACK'd, coding** (Prisma migration, critical path). 2 open Qs escalated to PO (Q-A-01 topology, Q-A-02 spec-drift) — non-blocking.
+- **Branch**: `feat/prisma-init-migration` (T02, in progress)
 - **Next gate (global)**: G1 — lihat `PM-STATUS-PARENT.md §5`
 - **My queue (preview)**: T01–T09 (foundation) — lihat §8 di bawah (mirror dari PARENT §1 filter Slot=A)
 - **Critical path**: T02 (Prisma migration) blokir implementasi Nanak (T10+) dan Satrio (T17+). Prioritaskan T01 → T02 → T03 sequence.
@@ -30,7 +30,7 @@
 | T## | Title                                                                            | Status   | Verified by PM | Notes                                                              |
 | --- | -------------------------------------------------------------------------------- | -------- | -------------- | ------------------------------------------------------------------ |
 | T01 | `make check` green dari boilerplate                                              | merged   | PM A (H12) ✓   | Opsi B (jest.config.cjs, zero-dep). Merged to main PR #1 `7b40e11`. attempt 1 |
-| T02 | Prisma schema initial migration (8 Integration tables + indexes)                 | assigned | —              | ⚠ Blokir slot B + C                                                |
+| T02 | Prisma schema initial migration (8 Integration tables + indexes)                 | wip      | —              | ⚠ Blokir slot B + C. PLAN ACK'd (GAP#1→A opaque, GAP#2→A as-is). 2 Qs escalated. |
 | T03 | Encryption-at-rest helper (AES-256-GCM / KMS)                                    | assigned | —              | After T01; consumed by T10 + T17                                   |
 | T04 | Webhook signature-verification middleware (Meta `X-Hub-Signature-256` + Telegram)| backlog  | —              | After T01                                                          |
 | T05 | Tenant resolution from `:hotel_slug` (LRU 5-min, hotels.code lookup)             | backlog  | —              | After T01                                                          |
@@ -258,6 +258,31 @@ Generate migration dari `schema.prisma` yang sudah ratified (`--create-only`), l
 
 Awaiting PM A ACK (khususnya keputusan GAP T02-#2 A vs B).
 
+##### PM A ACK — T02 PLAN APPROVED, proceed to coding (H12, 2026-07-03)
+
+Both GAP claims **verified independently** by PM A against `prisma/schema.prisma` (full read) + spec §4 (`04-integration-channels.md`). Confirmed: schema models have **no `@relation` to hotels** (already isolated-shaped); spec §4.1 L177 = "FK opaque if separate DB"; spec L169 = `gen_random_uuid()`; schema is **internally self-contradictory** (header L19-22 shared-FK vs models no-FK; comment L26 `gen_random_uuid` vs model `@default(uuid())`).
+
+**GAP T02-#1 (hotel_id topology) → DECISION: Opsi A (opaque UUID, no FK). APPROVED.**
+- Rationale: ADR-0004 + CLAUDE.md §1 (1 svc = 1 DB, **BUKAN shared DB**) + data-model §1/§2 + spec §4.1 ("opaque if separate DB") all mandate/permit isolated. These **outrank** the schema-header comment. Models already declare no FK → migrate as-written = opaque UUID column. Only feasible single-schema migration; forward-compatible (additive FK later if topology ever flips). This is the most-restrictive default per CLAUDE.md §14 — not me deciding architecture, but enforcing higher-authority planning.
+- **BUT** the header's "Q-OPS-06 H12 shared-DB ratification" claim is escalated (see §3 Q-A-01) — PO must confirm isolated is authoritative + fix the stale header comment. Non-blocking; migration proceeds on A.
+
+**GAP T02-#2 (schema vs spec §4 drift, 2 non-functional points) → DECISION: Opsi A (migrate schema as-written). APPROVED, with escalation.**
+- I am **not** directing you to edit the ratified F1 schema on my spec-reading — your humility instinct is correct. Migrate schema as-is: full `@@index([externalId])`, client-side `@default(uuid())`.
+- Both deviations (full-vs-partial index; client-vs-DB-side uuid) are **non-functional, zero-impact on B/C generated types, and additively fixable** (a follow-up migration can swap index / `ALTER COLUMN SET DEFAULT` with no data loss and no redo of this init migration). So Opsi A now costs ~0 even if PO later rules spec-exact.
+- Escalated to PO for ratification (see §3 Q-A-02) with my recommendation = spec-faithful (partial index for the high-volume dispatch table; DB-side `gen_random_uuid()` is more robust for the RPC/multi-path insert surface of T09/T13). Non-blocking.
+
+**Binding conditions — verify at SUBMIT:**
+1. **CREATE TABLE order** in `migration.sql` must follow the mandated forward-only sequence: `wa_configs → telegram_configs → qr_state → webhook_events → outbound_dispatch_queue → delivery_receipts → channel_health_snapshots → ota_mailbox_state`. Minimum hard requirement: `outbound_dispatch_queue` before `delivery_receipts` (FK validity). If Prisma auto-order differs, reorder statements in the single init file.
+2. **6 CHECK constraints — NOT 5.** Your PLAN says "5 CHECK" but enumerates 6 (webhook provider · outbound status · outbound provider · delivery status · health status · health provider incl. `claude_api`). All **6** from the comment-block L152-163 must land. Recount before SUBMIT.
+3. **2 partial indexes** from comment-block: `idx_webhook_events_unprocessed`, `idx_outbound_pending`. Both present.
+4. `prisma migrate dev` shadow-DB validation green + `prisma generate` types OK + `make check` green.
+5. `.env` must NOT be committed (gitignored — confirm working tree clean of it at SUBMIT).
+6. `migration_lock.toml` provider = `postgresql`; migration name `init_integration_channels` (descriptive ✓). No `src/` touched; `schema.prisma` untouched (Opsi A).
+
+**CLI / scaffolder risk — approved.** Commands target LOCAL dockerized PG only (`localhost:5433`), fresh DB = genuine init (no overwrite), `--create-only` first is the right cautious flow. `.env` copy stays uncommitted. Branch `feat/prisma-init-migration` OK (CLAUDE.md §12 `feat/<short>`).
+
+Proceed to coding. Post SUBMIT when the 6 conditions are green.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
@@ -365,7 +390,8 @@ Re-run `make check` after fix, confirm pass, resubmit (attempt N+1).
 
 | ID            | Question | Source         | Status | Resolution |
 | ------------- | -------- | -------------- | ------ | ---------- |
-| —             | —        | —              | —      | —          |
+| Q-A-01 (arch) | Topology: schema-header L19-22 claims "Q-OPS-06 H12 shared-DB ratification + real `hotel_id→hotels(id)` FK", but ADR-0004 + CLAUDE §1 + data-model §1/§2 + spec §4.1 ("opaque if separate DB") mandate/permit **isolated DB**. Which is authoritative? Also runtime: spec §2.2 L101 "cross-table SELECT to Auth `hotels.dnd`" + T18 per-dept write-through assume shared. **T02 shipped isolated/opaque (forward-compatible; additive FK later).** PO confirm + fix stale header. | schema.prisma:19-22 vs ADR-0004/data-model/spec §4.1; T02 PLAN GAP-#1 | escalated → PARENT §3c | — |
+| Q-A-02 (contract) | schema.prisma deviates from authoritative spec §4 at 2 non-functional points: (i) `external_id` full `@@index` vs spec §4.5 partial `WHERE external_id IS NOT NULL`; (ii) client-side `@default(uuid())` vs spec L169 / data-model §5 DB-side `gen_random_uuid()`. Schema self-contradictory (comment L26 says gen_random_uuid). **T02 shipped schema-as-is (Opsi A); both additively fixable.** PM recommendation = spec-faithful. PO ratify as-is OR direct reconcile. | schema.prisma:98,104,26 vs spec §4.4-4.8,L169; T02 PLAN GAP-#2 | escalated → PARENT §3c | — |
 
 ---
 
