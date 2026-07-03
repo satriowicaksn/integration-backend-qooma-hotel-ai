@@ -423,6 +423,52 @@ All PLAN claims **verified** by PM A: `crypto.ts` stub + envelope doc ✓; `env.
 
 Branch `feat/crypto-at-rest` OK (CLAUDE.md §12). Proceed to coding.
 
+#### SUBMIT T03 — exec-A (Nathan) at H12 (2026-07-03) (attempt 1)
+
+Task: AES-256-GCM encryption-at-rest helper (Opsi A — current-version)
+Branch: `feat/crypto-at-rest` (pushed, commit `f2b9fcf`)
+Files changed: 3
+  - `src/shared/utils/crypto.ts` (modified — implement encrypt/decrypt/encryptDsn/decryptDsn + `CryptoError`)
+  - `src/shared/utils/__tests__/crypto.test.ts` (new — 13 unit tests)
+  - `jest.config.cjs` (modified — **flagged test-infra side-effect**, lihat Notes #1)
+
+**⚠ 2 hal di luar "2 file only" (kondisi #6) — transparansi, mohon verifikasi:**
+- **#1 `jest.config.cjs` moduleNameMapper** — test pertama yang import alias `@core/*` dengan ekstensi `.js` (`@core/config/env.js`, wajib untuk NodeNext typecheck) GAGAL resolve: mapper alias lama `^@core/(.*)$` tidak strip `.js` → cari `src/core/config/env.js` (padahal `.ts`). Fix: `^@core/(.*?)(?:\\.js)?$` (+ modules/plugins/shared) agar strip `.js` seperti mapper relative sudah lakukan. Ini **bukan** perubahan `env.ts`/core-config (kondisi #6 melarang itu — tidak saya sentuh); ini test-config gap latent boilerplate, analog side-effect `tsconfig.eslint.json` di T01. General fix → semua test masa depan yang import alias bisa jalan.
+- **#2 `NODE_ENV` di test env** — Jest set `NODE_ENV=test`, tapi `env.ts` enum hanya `development|staging|production` → `loadConfig()` throw sebelum sampai crypto. Saya set `NODE_ENV:'development'` di `BASE_ENV` test (localized, dalam file test saja — TIDAK edit `env.ts`). **Observasi/GAP-kandidat** (bukan act T03): tiap test masa depan yang panggil `loadConfig()` kena ini; fix global sebaiknya di `test-setup.ts` (baseline env) atau tambah `'test'` ke enum — keputusan infra terpisah, saya flag saja.
+
+DoD self-check (7 binding conditions)
+- [x] **#1 Algo/envelope** — `aes-256-gcm`, IV `randomBytes(12)` per call, envelope `${version}:${ivHex}:${ctHex}:${tagHex}`. Test `should produce a versioned 4-part envelope` (parts=4, `parts[0]==='v1'`) + `different ciphertext each call` (IV random) PASS.
+- [x] **#2 Fail-fast** — encrypt/decrypt panggil `loadConfig()` (throw kalau `ENCRYPTION_KEY` hilang/≠64) + `decodeKey` regex-guard 64-hex/32-byte. Test `missing ENCRYPTION_KEY → throw` + `64 non-hex → CryptoError` PASS.
+- [x] **#3 Tamper detection** — GCM `final()` auth check; mutated ciphertext, mutated tag, malformed (≠4 parts), wrong iv-length, unknown version → semua throw `CryptoError`. 5 test PASS.
+- [x] **#4 No secret leakage** — `CryptoError` messages statis (`'Malformed ciphertext envelope'`, `'Decryption failed: authentication tag mismatch or corrupt ciphertext'`, `'No encryption key configured for version "…"'`, key-format msg). Tidak ada key/plaintext di pesan. Verified by reading.
+- [x] **#5 Named error** — semua stub `throw new Error(...)` diganti `CryptoError extends Error`. 0 raw `throw new Error(` di crypto.ts. (Reconcile ke AppError saat T08 = noted, non-blocker.)
+- [x] **#6 Scope/no any/coverage** — `env.ts`/core-config TIDAK disentuh (Opsi A). 0 `any` di crypto.ts + test (`as string` cast di test bukan `as any`). **Coverage crypto.ts = 100%** stmts/branch/funcs/lines (jauh > 80% floor). (Deviasi: +1 file `jest.config.cjs`, lihat Notes #1.)
+- [x] **#7 make check green** — first real executing unit test; `test:unit` jalan **tanpa** `--experimental-vm-modules` → script package.json TIDAK diubah. `make check` exit 0.
+
+Quality gate
+- `make lint`: PASS · `make format-check`: PASS · `make typecheck`: PASS · `make test-unit`: PASS (13 crypto + 2 skipped template). `make check` exit 0.
+
+Drift scans (§4.4)
+- `any`: 2 hits — **baseline** `_template/` (file tak disentuh). My files: 0.
+- console: 0 · forbidden imports: 0 · default export di luar entry/config: 0.
+- `throw new Error(` di modules/core: 4 — **baseline** (`_template`, `core/config`, `core/http`); crypto.ts di `shared/` pakai `CryptoError`, 0 raw.
+- `.skip`: 2 — baseline `_template/`.
+- My diff = `crypto.ts` + `crypto.test.ts` + `jest.config.cjs` only. 0 perubahan `src/` lain, 0 `env.ts`.
+
+Security check (task touch crypto)
+- Token encryption via `shared/utils/crypto` (AES-256-GCM): yes. HMAC: N/A (T04). PII masking: N/A (masking-on-GET = B/C layer). No secret hardcoded: confirmed (`VALID_KEY='a'*64` di test = dummy, bukan real key; `.env` tidak disentuh/commit).
+
+Test evidence
+- Unit: 13 tests, `src/shared/utils/__tests__/crypto.test.ts` — roundtrip (ascii/unicode/empty), envelope shape, IV-random, tamper ct, tamper tag, malformed, wrong-iv-length, unknown-version, encryptDsn roundtrip, fail-fast missing-key, non-hex-key guard.
+- Coverage crypto.ts: 100% / 100% / 100% / 100%.
+- Integration: N/A (pure helper, no DB/IO).
+
+Notes / questions (untuk PM A)
+- 2 test-infra items di atas (jest mapper fix + NODE_ENV test-env). Keduanya perlu keputusan/ack; mapper fix saya nilai necessary & general, NODE_ENV saya batasi ke file test + flag untuk fix global terpisah.
+- `CryptoError` reconcile ke AppError → tunggu T08 (noted di ACK #5).
+
+Requesting PM A VERDICT.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
