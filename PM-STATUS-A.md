@@ -15,8 +15,8 @@
 ## 0. Current focus (slot A)
 
 - **Day**: H12+ (task tracker activated 2026-06-30)
-- **Active task**: T01 ✅ MERGED (PR #1) → **T02 PLAN ACK'd, coding** (Prisma migration, critical path). 2 open Qs escalated to PO (Q-A-01 topology, Q-A-02 spec-drift) — non-blocking.
-- **Branch**: `feat/prisma-init-migration` (T02, in progress)
+- **Active task**: T01 ✅ MERGED (PR #1) · T02 ✅ **APPROVED** (awaiting PO merge) → **B+C schema-unblocked**. Next: T03 (encryption helper). 2 open Qs for PO (Q-A-01 topology, Q-A-02 spec-drift) — non-blocking.
+- **Branch**: `feat/prisma-init-migration` (T02, awaiting PO merge + CI)
 - **Next gate (global)**: G1 — lihat `PM-STATUS-PARENT.md §5`
 - **My queue (preview)**: T01–T09 (foundation) — lihat §8 di bawah (mirror dari PARENT §1 filter Slot=A)
 - **Critical path**: T02 (Prisma migration) blokir implementasi Nanak (T10+) dan Satrio (T17+). Prioritaskan T01 → T02 → T03 sequence.
@@ -30,7 +30,7 @@
 | T## | Title                                                                            | Status   | Verified by PM | Notes                                                              |
 | --- | -------------------------------------------------------------------------------- | -------- | -------------- | ------------------------------------------------------------------ |
 | T01 | `make check` green dari boilerplate                                              | merged   | PM A (H12) ✓   | Opsi B (jest.config.cjs, zero-dep). Merged to main PR #1 `7b40e11`. attempt 1 |
-| T02 | Prisma schema initial migration (8 Integration tables + indexes)                 | wip      | —              | ⚠ Blokir slot B + C. PLAN ACK'd (GAP#1→A opaque, GAP#2→A as-is). 2 Qs escalated. |
+| T02 | Prisma schema initial migration (8 Integration tables + indexes)                 | approved | PM A (H12) ✓   | Clean-DB validated by PM (8 tbl, 6 chk, 2 partial idx, 0 auth). Opsi A. Awaiting PO merge. Unblocks B+C. |
 | T03 | Encryption-at-rest helper (AES-256-GCM / KMS)                                    | assigned | —              | After T01; consumed by T10 + T17                                   |
 | T04 | Webhook signature-verification middleware (Meta `X-Hub-Signature-256` + Telegram)| backlog  | —              | After T01                                                          |
 | T05 | Tenant resolution from `:hotel_slug` (LRU 5-min, hotels.code lookup)             | backlog  | —              | After T01                                                          |
@@ -332,6 +332,29 @@ Notes / questions (untuk PM A)
 - Opsi A dijalankan penuh: `schema.prisma` tidak diedit; deviasi non-fungsional (external_id full-index, client-side uuid) dibiarkan apa adanya, additively fixable bila Q-A-02 diputus spec-exact — tanpa redo init migration.
 
 Requesting PM A VERDICT.
+
+##### VERDICT T02 — APPROVED (H12, attempt 1) by PM A
+
+✅ **APPROVE.** All 6 binding conditions verified — including an **independent clean-DB apply** by PM A (not trust-only), because T02 blocks slot B+C.
+
+**Independent verification (PM reran on `feat/prisma-init-migration` `23a7e0f`):**
+- **#1 CREATE TABLE order** — dumped from migration.sql: `wa_configs → telegram_configs → qr_state → webhook_events → outbound_dispatch_queue → delivery_receipts → channel_health_snapshots → ota_mailbox_state`. Exact mandated forward-only sequence ✓. FK added via trailing `ALTER TABLE` after all tables → order-safe ✓.
+- **#2 CHECK ×6** — applied migration to a **fresh throwaway DB** (`pm_migval`, created empty, dropped after): all 6 user checks present (webhook provider · outbound status · outbound provider · delivery status · health status · health provider incl. `claude_api`) ✓. Executor corrected the "5→6" miscount.
+- **#3 partial ×2** — `idx_webhook_events_unprocessed` + `idx_outbound_pending` present with WHERE clauses ✓.
+- **#4 clean-DB validation** — my apply = exit 0; result = **8 Integration tables, ZERO auth tables**, 1 FK (`delivery_receipts→outbound_dispatch_queue`, no hotels FK), 6 checks, 2 partial idx. `make check` **green on PM rerun** (exit 0, 2 skipped). Migration self-contained + isolated-DB-clean ✓.
+- **#5 `.env`** — `git ls-files .env` empty (untracked/gitignored) ✓.
+- **#6 lock + name + schema** — `migration_lock.toml` provider=postgresql; name `init_integration_channels` descriptive; `schema.prisma` UNTOUCHED (Opsi A); diff = 2 files in `prisma/migrations/` only, **0 `src/`** ✓.
+- **Opsi A integrity** — no `gen_random_uuid` / no hotels FK / full `external_id` index, exactly as decided. Deviations remain additively fixable pending Q-A-02.
+
+**On the flagged CLI deviation (accepted):** `prisma migrate dev --create-only` refuses non-interactive envs — executor substituted `migrate diff --from-empty` + manual raw-SQL append + `migrate deploy`, then validated via clean-DB + `migrate diff ... --exit-code` = "No difference detected". My own independent clean-DB apply confirms the SQL is correct **regardless of generation path** — substitution is sound. Good transparency, not silent.
+
+**Env-contamination heads-up (noted, not a T02 defect):** shared local `postgres_data` volume already holds Auth tables (`hotels`, `users`, …) from a prior run, outside `_prisma_migrations`. T02 migration is self-contained and validated clean, so no correctness impact. It **reinforces Q-A-01** (someone co-located Auth here) and is an operational note for B/C: start from a fresh volume (`make start-fresh`). Rolling to Parent PM §2 for cross-dev coordination.
+
+→ §1 tracker: T02 `approved`, Verified by PM A.
+→ Code on `feat/prisma-init-migration` awaiting **PO merge + CI** (PM does not merge).
+→ Q-A-01 / Q-A-02 remain open for PO — neither blocks; both additively fixable.
+
+**Executor A: T02 done — slot B (T10+) & C (T17+) are now schema-unblocked.** Next in your queue: **T03** (AES-256-GCM encryption helper — extend existing `src/shared/utils/crypto.ts`, fail-fast on missing key env, token masking on GET). Post PLAN when ready.
 
 <!--
 TEMPLATE — copy untuk task baru:
