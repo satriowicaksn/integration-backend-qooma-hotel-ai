@@ -32,7 +32,7 @@
 
 | T## | Title                                                                            | Slot | Owner   | Status   | Verified by | Notes                                                                       |
 | --- | -------------------------------------------------------------------------------- | ---- | ------- | -------- | ----------- | --------------------------------------------------------------------------- |
-| T01 | `make check` green dari boilerplate (lint + typecheck + format)                  | A    | Nathan  | assigned | —           | Foundation critical path — start here                                       |
+| T01 | `make check` green dari boilerplate (lint + typecheck + format)                  | A    | Nathan  | approved | PM A (H12)  | Opsi B jest.config.cjs (zero-dep). Awaiting PO merge + CI. Foundation critical path |
 | T02 | Prisma schema initial migration (8 Integration tables + indexes per §4 DDL)      | A    | Nathan  | assigned | —           | ⚠ Blocks B (T10+) and C (T17+) implementation; needs Auth `hotels` deployed |
 | T03 | Encryption-at-rest helper (AES-256-GCM or KMS for token columns)                 | A    | Nathan  | assigned | —           | After T01; consumed by T10 (WA config) + T17 (Telegram config)              |
 | T04 | Webhook signature-verification middleware (Meta `X-Hub-Signature-256` + Telegram)| A    | Nathan  | backlog  | —           | After T01; consumed by T12 + T15 + T19                                      |
@@ -101,7 +101,8 @@
 > [YYYY-MM-DD H{N}] [PM <SLOT> <NAME>] <T## status — 1 liner>
 > ```
 
-_(kosong — belum ada activity)_
+[2026-07-03 H12] [PM A Nathan] Online. Last approved: none (session start). Active: 1 (T01→approved). Next-up: T02 (Prisma migration, critical path). Open Qs: 0.
+[2026-07-03 H12] [PM A Nathan] T01 `make check` green APPROVED (attempt 1) — Opsi B jest.config.cjs, zero new deps, make check green on PM rerun, 0 new drift. Code on `chore/ci-make-check-green` awaiting PO merge + CI. Next: T02.
 
 <!-- TEMPLATE:
 [2026-06-25 H3] [PM A Nathan] T01 boilerplate scaffold APPROVED (attempt 2) — make check green, 0 drift hits.
