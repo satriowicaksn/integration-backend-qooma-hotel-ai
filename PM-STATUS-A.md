@@ -356,6 +356,53 @@ Requesting PM A VERDICT.
 
 **Executor A: T02 done — slot B (T10+) & C (T17+) are now schema-unblocked.** Next in your queue: **T03** (AES-256-GCM encryption helper — extend existing `src/shared/utils/crypto.ts`, fail-fast on missing key env, token masking on GET). Post PLAN when ready.
 
+### ASSIGNMENT T03 — claimed by exec-A (Nathan) at H12 (2026-07-03)
+- Branch: `feat/crypto-at-rest` (proposal — `feat/<short>` per CLAUDE.md §12)
+- Routed from: PM-STATUS-A.md §1 T03 + VERDICT T02 hand-off. Spec: `MVP-INTEGRATION-FIRST.md §4.1` (fail-fast), `docs/SECURITY.md §3` (algo + envelope + rotation), guardrail (crypto → `src/shared/utils/crypto.ts`, JANGAN `src/common/`).
+
+#### PLAN T03 — exec-A (Nathan) at H12 (2026-07-03)
+
+**Scope recap**
+- T03 = implement encryption-at-rest helper AES-256-GCM di `src/shared/utils/crypto.ts` (SUDAH ADA, isinya stub `throw new Error('...not implemented')`). Dikonsumsi T10 (`wa_configs.access_token_enc`) + T17 (`telegram_configs.bot_token_enc`, `ota_mailbox_state.imap_password_enc`). Envelope `v<version>:<iv_hex>:<ct_hex>:<tag_hex>` per SECURITY §3.
+
+**Session-start gate** (EXECUTOR-PROTOCOL §2)
+- Identity confirmed: Executor, Slot A (Nathan) ✓
+- CLAUDE.md loaded ✓
+- Task spec read: `SECURITY.md §3` (AES-256-GCM, envelope, rotation strategy), `MVP-INTEGRATION-FIRST.md §4.1` (encrypt-before-persist, fail-fast on missing key), `docs/TESTING.md` (unit pattern).
+- Parent docs spot-read: `crypto.ts` (stub + documented envelope), `masking.ts` (`maskTokenForLog` sudah ada), `core/config/env.ts` (`ENCRYPTION_KEY` = `.length(64)` hex = 32 bytes; `ENCRYPTION_KEY_VERSION` default `v1`; lazy `loadConfig()`), `core/errors/app-errors.ts` (AppError hierarchy — tidak ada kelas 500 generic selain TenantError).
+- Dependencies: T01 ✓ (make check baseline), T02 ✓ (schema — kolom `*_enc` TEXT sudah ada). Config `ENCRYPTION_KEY` sudah divalidasi env loader (fail-fast di boot).
+- **Probe (throwaway, sudah dihapus, working tree bersih)**: T03 = unit test **eksekusi nyata** pertama (T01/T02 test semua skipped). Saya probe `make test:unit` dengan test riil (import `node:crypto` + ESM local import) → **PASS tanpa** `--experimental-vm-modules`. → **`test:unit` script TIDAK perlu diubah**. (Jawab kekhawatiran ESM yang saya flag di T01.)
+- `make check` clean baseline ✓ (belum sentuh apa pun). Scaffolder risk: none.
+
+**Files to modify**
+- `src/shared/utils/crypto.ts` — implement `encrypt`/`decrypt`/`encryptDsn`/`decryptDsn` (signature EXISTING, tidak diubah). Tambah `CryptoError` (kelas lokal `extends Error`) + `resolveKeyForVersion` internal.
+
+**Files to create**
+```
+src/shared/utils/__tests__/crypto.test.ts   (unit test — roundtrip, tamper-detection, malformed, fail-fast)
+```
+
+**Approach**
+- `encrypt(plaintext)`: `key = Buffer.from(config.ENCRYPTION_KEY,'hex')` (assert 32 byte, else `CryptoError`), `iv = randomBytes(12)`, `aes-256-gcm`, envelope `${config.ENCRYPTION_KEY_VERSION}:${ivHex}:${ctHex}:${tagHex}`. Random IV per-call → ciphertext non-deterministik.
+- `decrypt(envelope)`: split ':' → wajib 4 part (`CryptoError` bila tidak), `resolveKeyForVersion(version)`, `setAuthTag(tag)`, `final()` auto-verify GCM (tamper → throw, saya bungkus jadi `CryptoError` pesan aman tanpa leak key/plaintext).
+- `resolveKeyForVersion`: version === `config.ENCRYPTION_KEY_VERSION` → current key; selain itu → `CryptoError('no key configured for version …')` (lihat GAP T03-#1 soal rotation).
+- `encryptDsn`/`decryptDsn`: tetap delegasi ke `encrypt`/`decrypt` (per SECURITY §3 tabel).
+- **Fail-fast**: `loadConfig()` sudah throw kalau `ENCRYPTION_KEY` hilang/≠64 char (env `.length(64)`). encrypt/decrypt panggil `loadConfig()` (cached) → otomatis fail-fast. Plus guard 32-byte decode.
+- **Error class**: `CryptoError extends Error` (BUKAN AppError) — crypto util context-agnostic (dipakai worker/CLI juga, bukan cuma HTTP), jadi tak coupling ke `statusCode`. `throw new Error` drift-scan hanya target `modules/`+`core/`, `shared/` aman — tapi saya tetap pakai kelas bernama, bukan raw Error.
+- **Masking di GET**: sudah tercakup `masking.ts` (`maskTokenForLog`) — dipakai B/C di layer CRUD response. T03 tidak perlu tambah masking. (Konfirmasi, bukan kerjaan baru.)
+- Test: roundtrip (ascii/unicode/empty), IV-random (2× encrypt beda ct), tamper ct/tag → throw, malformed envelope → throw, unknown version → throw, encryptDsn roundtrip, invalid key (set `ENCRYPTION_KEY` pendek + `resetConfigCache()`) → throw. Set `process.env.ENCRYPTION_KEY` valid di test + `resetConfigCache()`.
+
+**GAPs / questions — butuh ACK PM A**
+- **GAP T03-#1 — cakupan key rotation (multi-version decrypt).**
+  - **Gap**: SECURITY §3 "Key rotation strategy" + doc-comment `crypto.ts` mendeskripsikan decrypt multi-version (retired key di `ENCRYPTION_KEY_RETIRED_<Vn>`). TAPI `env.ts` tidak model retired-key, dan MVP §4.1 hanya wajib encrypt/decrypt + fail-fast (rotation = prosedur ops, bukan AC MVP §5).
+  - **Doc reference**: `SECURITY.md §3`, `crypto.ts:5-8`, `env.ts:40-41`, `MVP-INTEGRATION-FIRST.md §4.1/§5`.
+  - **Options**:
+    - **A (default saya)** — implement **current-version saja**, envelope tetap versioned, `resolveKeyForVersion` throw `CryptoError` untuk versi non-current. Struktur siap-extend (nambah retired-key nanti = ~3 baris). Zero perubahan `env.ts`, zero baca `process.env` langsung. YAGNI-correct untuk MVP.
+    - **B** — full multi-version decrypt sekarang: `resolveKeyForVersion` baca `ENCRYPTION_KEY_RETIRED_<VERSION>` (dari `process.env` langsung atau tambah field `env.ts`). Honor SECURITY §3 penuh, tapi nambah surface untethered + (bila via process.env) menyimpang prinsip "config lewat @core/config".
+  - **My intent**: **A**. Envelope versioned sejak awal → forward-compatible; rotation machinery ditambah saat benar-benar dibutuhkan (ops rotation, pasca-MVP) tanpa re-encrypt data lama. Bila PM/PO mau rotation penuh di MVP, saya kerjakan B (dan route env-schema question ke PO).
+
+Awaiting PM A ACK (khususnya GAP T03-#1 A vs B).
+
 <!--
 TEMPLATE — copy untuk task baru:
 
