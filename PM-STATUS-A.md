@@ -492,6 +492,47 @@ Requesting PM A VERDICT.
 
 **Executor A: T03 done — T10 (WA config) + T17 (Telegram config) now have their encryption primitive.** Foundation critical path (T01→T02→T03) complete. Next in queue: **T04** (webhook signature-verify plugin — `src/plugins/hmac-validator.plugin.ts`, **plugin-level before handler**, WA `X-Hub-Signature-256` → 401 with no `webhook_events` insert, Telegram own scheme). Post PLAN when ready.
 
+### ASSIGNMENT T04 — claimed by exec-A (Nathan) at H12 (2026-07-03)
+- Branch: `feat/hmac-webhook-verify` (proposal, `feat/<short>` per CLAUDE.md §12)
+- Routed from: PM-STATUS-A.md §1 T04 + VERDICT T03 hand-off. Spec: `SECURITY.md §4` (HMAC + timingSafeEqual), `04-integration-channels.md §2.3/§8` (webhook ingress, no session), `MVP-INTEGRATION-FIRST.md §4.2` (verify → 401, no exceptions), guardrail (`src/plugins/hmac-validator.plugin.ts`; plugins/ kosong).
+
+#### PLAN T04 — exec-A (Nathan) at H12 (2026-07-03)
+
+**Scope recap**
+- T04 = plugin verifikasi signature webhook, jalan **plugin-level SEBELUM handler**, sehingga invalid → 401 dan handler tak pernah jalan (→ **no `webhook_events` insert**). WA: `X-Hub-Signature-256` (`sha256=<hmac-sha256(rawBody, secret)>`). Telegram: header `X-Telegram-Bot-Api-Secret-Token` (secret echo, Telegram tidak HMAC-sign). `timingSafeEqual` wajib. Foundation primitive — dikonsumsi B (webhook WA ingest) & C (Telegram webhook).
+
+**Session-start gate** (EXECUTOR-PROTOCOL §2)
+- Identity confirmed: Executor, Slot A (Nathan) ✓ · CLAUDE.md loaded ✓
+- Task spec read: `SECURITY.md §4` (contoh `createHmac('sha256')` + `timingSafeEqual`, WAJIB bukan `===`), `04-integration-channels.md §2.3` (`POST /webhook/whatsapp|telegram/:hotel_slug`, `X-Hub-Signature-256`) + §8 (webhook no Auth session, secured via signature) + §9 (no dedicated sig-fail code → 401/`AuthError`), `MVP §4.2` (401, no exceptions).
+- Parent docs spot-read: `api.ts` (Fastify **stub** — belum wired; T04 = primitive, live-wiring nanti oleh B/C), `app-errors.ts` (`AuthError` 401 sudah ada), `crypto.ts`/`env.ts` (pola).
+- Dependencies: T01 ✓. **Catatan dep**: secret per-hotel dari `wa_configs.webhook_verify_token`/`telegram_configs` (domain B/C) + resolusi `:hotel_slug`→`hotel_id` (T05, belum ada). → T04 pakai **injected secret-resolver** (GAP #2), tidak hard-couple ke DB/T05.
+- **Dep availability check**: `fastify-plugin` & `fastify-raw-body` **TIDAK** di `package.json` (fastify-plugin cuma transitive → pnpm strict = tak importable tanpa declare = PO-gated). → **Zero new dep**: desain tanpa `fp`, raw-body via custom content-type parser.
+- `make check` clean baseline ✓. Scaffolder risk: none.
+
+**Files to create**
+```
+src/plugins/hmac-validator.plugin.ts
+src/plugins/__tests__/hmac-validator.plugin.test.ts
+```
+
+**Files to modify**
+- (none) — `api.ts` masih stub; T04 tidak wire ke server hidup (deferred ke assembly). Tidak sentuh `env.ts`/`src` lain.
+
+**Approach (arsitektur)** — export dari `hmac-validator.plugin.ts`:
+1. **Pure core** (unit-test tanpa Fastify): `verifyMetaSignature(rawBody: Buffer, header: string|undefined, secret: string): boolean` (parse `sha256=`, `createHmac('sha256',secret).update(rawBody).digest`, guard equal-length lalu `timingSafeEqual`); `verifyTelegramToken(header: string|undefined, secret: string): boolean` (constant-time equal). Length-mismatch → `false` (hindari throw `timingSafeEqual`).
+2. **Raw-body parser**: `registerWebhookRawBody(app)` — `addContentTypeParser('application/json',{parseAs:'buffer'}, …)` simpan `req.rawBody: Buffer` lalu `JSON.parse`. (HMAC wajib atas byte mentah, bukan re-serialize.) + module augmentation `FastifyRequest.rawBody`.
+3. **Hook factory**: `verifyWebhookSignature(opts:{ provider:'whatsapp'|'telegram'; resolveSecret:(req)=>string|Promise<string> }): preHandlerHookHandler` — ambil `req.rawBody` + header provider, resolve secret (injected), verify; gagal → `throw new AuthError('Invalid webhook signature')`. preHandler throw sebelum handler → handler tak jalan → **no webhook_events insert** (invariant terjaga tanpa tergantung error-handler).
+- **Consumption (B/C nanti)**: `registerWebhookRawBody(scope)` + route `preHandler: verifyWebhookSignature({...})`. Tanpa `fp` (parser + route se-scope).
+- **Test** (`fastify.inject`, in-proc, no DB/Redis): valid WA sig → 200 + handler-ran flag true; invalid/missing/`sha256=`-malformed → 401 + handler-ran **false** (bukti no-handler-exec = proxy no-insert); Telegram valid/invalid; pure-fn unit (timing-safe, length-mismatch). Daftar error-handler mini `AppError→statusCode` (GAP #3).
+
+**GAPs / questions — butuh ACK PM A**
+- **GAP T04-#1 — raw-body capture.** A (default): custom `addContentTypeParser` parseAs buffer + `JSON.parse`, simpan `req.rawBody`. Zero dep. B: `fastify-raw-body` (new dep → PO). **Intent: A.**
+- **GAP T04-#2 — secret source decoupling.** Secret per-hotel di config B/C + butuh T05. A (default): T04 expose hook factory dgn **`resolveSecret` injected** (port-style); B/C wire resolver DB nanti; test pakai stub. B: tunggu T05 (blokir T04). **Intent: A.**
+- **GAP T04-#3 — 401 translation vs invariant.** `AuthError` throw sebelum handler menjamin **no insert** apa pun. Kode **401** butuh global error-handler (T08, belum ada). A (default): plugin **throw `AuthError`** (konvensi SECURITY §4); 401 diproduksi error-handler saat T08; test daftar mini error-handler lokal utk assert 401. B: `reply.code(401).send()` langsung (self-contained tapi menyimpang konvensi). **Intent: A.**
+- **Nota (bukan blocker) — WA secret semantics:** spec §4.2 verify `X-Hub-Signature-256` thd `webhook_verify_token`; Meta-native X-Hub ditandatangani **App Secret** (verify_token utk GET-challenge). T04 agnostik (secret via resolver) → nuansa ini urusan wiring B; saya flag, tidak act.
+
+Awaiting PM A ACK (GAP #1/#2/#3).
+
 <!--
 TEMPLATE — copy untuk task baru:
 
