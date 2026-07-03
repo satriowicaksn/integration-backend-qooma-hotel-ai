@@ -1,6 +1,6 @@
-import type { Config } from 'jest';
-
-const config: Config = {
+/* eslint-env node */
+/** @type {import('jest').Config} */
+const config = {
   preset: 'ts-jest/presets/default-esm',
   testEnvironment: 'node',
   rootDir: '.',
@@ -41,4 +41,4 @@ const config: Config = {
   testTimeout: 10000,
 };
 
-export default config;
+module.exports = config;
