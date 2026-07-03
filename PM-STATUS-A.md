@@ -557,6 +557,46 @@ Verified by PM A: `AuthError` has `readonly statusCode = 401` (app-errors.ts:33)
 
 Branch `feat/hmac-webhook-verify` OK. Note: if the `NODE_ENV=test` gap (Q-A-03) bites this test's `loadConfig()` path, apply the same localized in-test workaround as T03 — don't fix it globally here (still Parent-PM-routed shared-infra). Proceed to coding.
 
+#### SUBMIT T04 — exec-A (Nathan) at H12 (2026-07-03) (attempt 1)
+
+Task: Webhook signature-verification plugin (WA `X-Hub-Signature-256` + Telegram secret-echo)
+Branch: `feat/hmac-webhook-verify` (pushed, commit `e101e6a`)
+Files changed: 2 (both new)
+  - `src/plugins/hmac-validator.plugin.ts` (new)
+  - `src/plugins/__tests__/hmac-validator.plugin.test.ts` (new, 15 tests)
+
+DoD self-check (8 binding conditions)
+- [x] **#1 `timingSafeEqual` + length-guard** — `constantTimeEqual` cek `bufA.length !== bufB.length` → `false` SEBELUM `timingSafeEqual` (yang throw kalau beda length). Test `provided hex length differs` + `telegram token differs in length` → `false`, no throw.
+- [x] **#2 HMAC over raw bytes** — `req.rawBody` (Buffer) dari content-type parser; HMAC atas buffer mentah. **Dibuktikan**: test `verify HMAC over raw bytes` kirim body non-canonical `{"b":2,   "a":1}` (whitespace + key unsorted), sign byte persis → **200**. Digest atas `JSON.stringify(parsed)` akan beda → gagal. Lulus.
+- [x] **#3 plugin-level SEBELUM handler** — verifikasi di `preHandler` hook; invalid → `throw AuthError` → handler tak jalan. Test assert `didHandlerRun()===false` di semua kasus invalid (WA wrong/missing, Telegram wrong). **Invariant no-`webhook_events`-insert** terjaga.
+- [x] **#4 401 native** — `fastify.inject` → **401** untuk WA sig salah, header hilang, `sha256=`-malformed, + Telegram token salah. Via `AuthError.statusCode=401` (default Fastify error handler), **tanpa** T08/custom handler. Lulus.
+- [x] **#5 `AuthError` thrown, generic msg** — `throw new AuthError('Invalid webhook signature')` (bukan raw Error/reply langsung). Pesan statis, tak ada secret/body.
+- [x] **#6 zero new deps** — `package.json` + `pnpm-lock.yaml` UNCHANGED (`git diff` bersih). Tanpa `fp`/`fastify-raw-body`.
+- [x] **#7 files/no-any/return-types/coverage** — hanya `hmac-validator.plugin.ts` + testnya; `api.ts`/`env.ts` UNTOUCHED; **0 `any`**; return type eksplisit di semua exported fn; `declare module 'fastify'` augment `rawBody`. **Coverage plugin = 100% line / 100% func / 80% branch** (jauh > 80% line floor; 3 branch tak-tercover = defensive fallback: header-array, non-buffer body, `rawBody ?? alloc(0)`).
+- [x] **#8 Telegram** — `verifyTelegramToken` constant-time secret-echo compare (Telegram tak HMAC-sign). Test valid/invalid/missing.
+
+Quality gate
+- `make lint`: PASS · `make format-check`: PASS · `make typecheck`: PASS · `make test-unit`: PASS (28: 13 crypto + 15 hmac; 2 skipped template). `make check` exit 0.
+
+Drift scans (§4.4)
+- My files: `any` 0 · console 0 · `throw new Error(` 0 (pakai `AuthError`/`ValidationError`) · forbidden imports 0 · default export 0 · `.skip` 0.
+- Baseline lain (di `_template/`/core, tak disentuh) tidak berubah. Diff = 2 file `src/plugins/` saja.
+
+Security check (task = webhook/HMAC)
+- HMAC verified before business logic (preHandler before handler): **yes**. `timingSafeEqual` (bukan `===`): yes. AuthError before handler → no insert on spoof: yes. No secret hardcoded (test pakai dummy `'test-webhook-secret'`): confirmed. Secret injected (resolver), plugin tak simpan/log secret.
+
+Test evidence
+- Unit: 15 tests. 7 pure (`verifyMetaSignature`/`verifyTelegramToken`: match, no-prefix, undefined, length-mismatch, telegram match/mismatch/undefined) + 6 inject (WA valid, WA raw-byte-proof, WA wrong→401, WA missing→401, TG valid, TG wrong→401) + 2 parser (empty-body→200/undefined, malformed-json→400).
+- Coverage: 100/80/100/100.
+- Integration: N/A murni (in-proc `fastify.inject`, no DB/Redis).
+
+Notes / questions (untuk PM A)
+- **Item butuh keputusan — eslint `no-misused-promises` vs Fastify async hooks.** Async hook di **property** route-option (`preHandler`) memicu `checksVoidReturn.properties` (typecheck LULUS — ini strictness lint, bukan bug; runtime benar). Saya pakai **1 baris `eslint-disable-next-line` lokal + komentar** di test (blast radius 1 baris), TIDAK edit `.eslintrc.cjs` (shared-infra). **Tapi ini akan kena B/C** tiap mereka pasang async `preHandler`/hook di route. **Rekomendasi**: ratifikasi project-level `'@typescript-eslint/no-misused-promises': ['error', { checksVoidReturn: { properties: false } }]` (targeted; `no-floating-promises` tetap aktif) supaya B/C tak perlu suppress per-baris. Ini shared-config affecting >1 dev → saya flag untuk route ke Parent PM (mirip Q-A-03), tidak act unilateral. Kalau PM prefer, saya bisa ganti disable lokal → bridge callback, tapi itu memindah keruwetan ke B/C.
+- **`ValidationError` (400) untuk malformed JSON** di raw-body parser — tanpa itu Fastify balikin **500** untuk input klien rusak (salah kelas). Kecil, in-scope (parser bagian T04), pakai `@core/errors` existing.
+- **Nota WA-secret (Q-A-04)** — plugin agnostik (secret via resolver); nuansa App-Secret vs verify_token = urusan wiring B, sudah di-escalate PM. Tidak act.
+
+Requesting PM A VERDICT.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
