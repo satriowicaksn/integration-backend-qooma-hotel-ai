@@ -15,8 +15,8 @@
 ## 0. Current focus (slot A)
 
 - **Day**: H12+ (task tracker activated 2026-06-30)
-- **Active task**: T01·T02·T03 MERGED · **T04 PLAN ACK'd, coding** (HMAC verify plugin, Opsi A ×3: zero-dep raw-body, injected secret-resolver, throw AuthError). Open Qs: Q-A-01/Q-A-02/Q-A-04 (PO/PM B), Q-A-03 (shared-infra).
-- **Branch**: `feat/hmac-webhook-verify` (T04, in progress)
+- **Active task**: T01·T02·T03 MERGED · **T04 ✅ APPROVED** (HMAC plugin, 100% line cov, awaiting PO merge). Next: T05 (tenant resolver). Open Qs: Q-A-01/02/04 (PO/PM B), Q-A-03/05 (shared-infra/config → Parent PM).
+- **Branch**: `feat/hmac-webhook-verify` (T04, awaiting PO merge + CI)
 - **Next gate (global)**: G1 — lihat `PM-STATUS-PARENT.md §5`
 - **My queue (preview)**: T01–T09 (foundation) — lihat §8 di bawah (mirror dari PARENT §1 filter Slot=A)
 - **Critical path**: T02 (Prisma migration) blokir implementasi Nanak (T10+) dan Satrio (T17+). Prioritaskan T01 → T02 → T03 sequence.
@@ -32,7 +32,7 @@
 | T01 | `make check` green dari boilerplate                                              | merged   | PM A (H12) ✓   | Opsi B (jest.config.cjs, zero-dep). Merged to main PR #1 `7b40e11`. attempt 1 |
 | T02 | Prisma schema initial migration (8 Integration tables + indexes)                 | merged   | PM A (H12) ✓   | Clean-DB validated by PM (8 tbl, 6 chk, 2 partial idx, 0 auth). Opsi A. Merged PR #2 `53a4925`. Unblocks B+C. |
 | T03 | Encryption-at-rest helper (AES-256-GCM / KMS)                                    | merged   | PM A (H12) ✓   | Opsi A current-version. 100% cov, tamper+fail-fast verified. Merged PR #3 `ca9685b`. Consumed by T10+T17. |
-| T04 | Webhook signature-verification middleware (Meta `X-Hub-Signature-256` + Telegram)| wip      | —              | PLAN ACK'd (Opsi A×3). plugin-level, timingSafeEqual, throw AuthError→401 native. Q-A-04 raised (WA secret, affects B). |
+| T04 | Webhook signature-verification middleware (Meta `X-Hub-Signature-256` + Telegram)| approved | PM A (H12) ✓   | plugin-level preHandler, timingSafeEqual, raw-byte HMAC, AuthError→401 native, no-insert invariant proven. 100% line cov. Awaiting PO merge. |
 | T05 | Tenant resolution from `:hotel_slug` (LRU 5-min, hotels.code lookup)             | backlog  | —              | After T01                                                          |
 | T06 | BSP adapter interface + `1engage` impl                                           | backlog  | —              | After T01                                                          |
 | T07 | Queue + scheduler infra (BullMQ + retry + DLQ)                                   | backlog  | —              | After T02                                                          |
@@ -597,6 +597,30 @@ Notes / questions (untuk PM A)
 
 Requesting PM A VERDICT.
 
+##### VERDICT T04 — APPROVED (H12, attempt 1) by PM A
+
+✅ **APPROVE.** All 8 binding conditions verified independently; plugin reviewed line-by-line as a security-floor deliverable.
+
+**Independent verification (PM reran on `feat/hmac-webhook-verify` `e101e6a`):**
+- **#1 timingSafeEqual + length-guard** — `constantTimeEqual` guards `bufA.length !== bufB.length → false` before `timingSafeEqual`; never `===`. ✓
+- **#2 HMAC over raw bytes** — HMAC computed on `req.rawBody` Buffer from the content-type parser. Proof test sends non-canonical `{"b":2,   "a":1}`, signs exact bytes → **200 + handler ran**; a re-serialized digest would fail. ✓
+- **#3 plugin-level BEFORE handler** — verification in a `preHandler` hook; invalid → `throw AuthError` → tests assert `didHandlerRun() === false` on every invalid case. **No-`webhook_events`-insert invariant proven.** ✓
+- **#4 401 native** — `inject` returns **401** for WA wrong/missing/`sha256=`-malformed + Telegram wrong, via `AuthError.statusCode=401` (Fastify default handler) with **no T08 dependency**. ✓
+- **#5 AuthError, generic msg** — `throw new AuthError('Invalid webhook signature')`, static, no secret/body leak. ✓
+- **#6 zero new deps** — package.json + lockfile UNCHANGED (PM confirmed); no `fp`/`fastify-raw-body`. ✓
+- **#7 files/no-any/coverage** — 2 files in `src/plugins/` only; `api.ts`/`env.ts` untouched; **0 `any`**; explicit return types; `declare module 'fastify'` augment. PM rerun coverage = **100 line / 100 func / 80 branch** (3 uncovered = defensive fallbacks: array-header, non-buffer body, `?? alloc(0)`). `make check` green on PM rerun. ✓
+- **#8 Telegram** — constant-time secret-echo compare, tested valid/invalid/missing. ✓
+
+**Design quality:** clean hexagonal split (pure `verifyMetaSignature`/`verifyTelegramToken` + injected `resolveSecret` + scoped raw-body parser), fail-closed `rawBody ?? alloc(0)`, encapsulated parser (no global pollution). Matches SECURITY §4 exactly.
+
+**On the 2 SUBMIT notes:**
+- **`ValidationError` (400) for malformed JSON** — ACCEPTED. In-scope (the parser is a T04 deliverable), correct status (bad client JSON = 400, not Fastify's default 500), reuses existing `@core/errors`. Good touch.
+- **eslint `no-misused-promises` on async `preHandler`** — the local single-line `eslint-disable-next-line` (in the **test** only, well-commented; plugin itself clean) is ACCEPTED as the minimal mitigation, and you correctly did NOT edit shared `.eslintrc.cjs`. Your project-level recommendation (`checksVoidReturn: { properties: false }`, keeping `no-floating-promises` active) is sound and **will hit B/C on every async route hook** → raised as **Q-A-05** (tooling, shared-config) to Parent PM, same handling as Q-A-03. Until ratified, B/C use the same local disable.
+
+→ §1 tracker: T04 `approved`, Verified by PM A. → Code on `feat/hmac-webhook-verify` awaiting **PO merge + CI** (PM does not merge).
+
+**Executor A: T04 done — webhook signature primitive ready for B (WA ingest T12) & C (Telegram T19).** Next in queue: **T05** (tenant resolution from `:hotel_slug`, LRU 5-min, `hotels.code` lookup). Note T05 will need the `hotels`-lookup source — expect a topology dependency on Q-A-01; call it out in your PLAN's session-start gate. Post PLAN when ready.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
@@ -708,6 +732,7 @@ Re-run `make check` after fix, confirm pass, resubmit (attempt N+1).
 | Q-A-02 (contract) | schema.prisma deviates from authoritative spec §4 at 2 non-functional points: (i) `external_id` full `@@index` vs spec §4.5 partial `WHERE external_id IS NOT NULL`; (ii) client-side `@default(uuid())` vs spec L169 / data-model §5 DB-side `gen_random_uuid()`. Schema self-contradictory (comment L26 says gen_random_uuid). **T02 shipped schema-as-is (Opsi A); both additively fixable.** PM recommendation = spec-faithful. PO ratify as-is OR direct reconcile. | schema.prisma:98,104,26 vs spec §4.4-4.8,L169; T02 PLAN GAP-#2 | escalated → PARENT §3c | — |
 | Q-A-03 (infra) | `NODE_ENV=test` (Jest default) not in `env.ts` enum (`development\|staging\|production`) → any test calling `loadConfig()` throws. **Shared-infra: affects T04/T05… + slots B/C.** T03 used a localized `NODE_ENV:'development'` in-test workaround (no env.ts edit). Global fix = baseline env in `src/shared/utils/test-setup.ts` (recommended) OR add `'test'` to enum. Raised to Parent PM (affects >1 dev). | env.ts:16, Jest default; T03 SUBMIT Notes #2 | raised → PARENT (shared-infra) | — |
 | Q-A-04 (contract) | **WA signature secret (affects slot B, T12).** Meta signs `X-Hub-Signature-256` with the **App Secret**; `webhook_verify_token` is only for the GET verify-challenge (`hub.verify_token`). Spec §4.2 conflates them, and `wa_configs` has no `app_secret` column. T04 is secret-agnostic (injected resolver) → not blocked; but B's webhook ingest will verify against the wrong secret unless resolved, likely needing a schema follow-up (`app_secret_enc` column). PO/PM B to rule. | spec §4.2 vs Meta WA Cloud API; schema `wa_configs`; T04 PLAN nota | escalated → PARENT §3a | — |
+| Q-A-05 (tooling) | `@typescript-eslint/no-misused-promises` flags async Fastify hooks passed to route-option **properties** (`checksVoidReturn.properties`) — false-positive (Fastify awaits async hooks; typecheck passes). **Affects B/C** on every async `preHandler`/hook. T04 used a local 1-line `eslint-disable` (test only; `.eslintrc.cjs` untouched). Recommended project-level fix: `['error', { checksVoidReturn: { properties: false } }]` (keeps `no-floating-promises`). Shared-config → Parent PM. | T04 SUBMIT Notes; `.eslintrc.cjs` | raised → PARENT §3b (shared-config) | — |
 
 ---
 
