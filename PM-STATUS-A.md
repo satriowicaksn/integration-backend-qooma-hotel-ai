@@ -15,8 +15,8 @@
 ## 0. Current focus (slot A)
 
 - **Day**: H12+ (task tracker activated 2026-06-30)
-- **Active task**: T01·T02 MERGED · T03 ✅ **APPROVED** (crypto AES-256-GCM, 100% cov, awaiting PO merge). **Foundation critical path T01→T02→T03 done.** Next: T04 (HMAC plugin). Open Qs: Q-A-01/Q-A-02 (PO), Q-A-03 (shared-infra test env).
-- **Branch**: `feat/crypto-at-rest` (T03, awaiting PO merge + CI)
+- **Active task**: T01·T02·T03 ✅ **MERGED** (PR #1/#2/#3). **Foundation critical path T01→T02→T03 done.** Next: T04 (HMAC plugin) — planning open. Open Qs: Q-A-01/Q-A-02 (PO), Q-A-03 (shared-infra test env).
+- **Branch**: — (T03 merged; T04 branch TBD at PLAN)
 - **Next gate (global)**: G1 — lihat `PM-STATUS-PARENT.md §5`
 - **My queue (preview)**: T01–T09 (foundation) — lihat §8 di bawah (mirror dari PARENT §1 filter Slot=A)
 - **Critical path**: T02 (Prisma migration) blokir implementasi Nanak (T10+) dan Satrio (T17+). Prioritaskan T01 → T02 → T03 sequence.
@@ -31,7 +31,7 @@
 | --- | -------------------------------------------------------------------------------- | -------- | -------------- | ------------------------------------------------------------------ |
 | T01 | `make check` green dari boilerplate                                              | merged   | PM A (H12) ✓   | Opsi B (jest.config.cjs, zero-dep). Merged to main PR #1 `7b40e11`. attempt 1 |
 | T02 | Prisma schema initial migration (8 Integration tables + indexes)                 | merged   | PM A (H12) ✓   | Clean-DB validated by PM (8 tbl, 6 chk, 2 partial idx, 0 auth). Opsi A. Merged PR #2 `53a4925`. Unblocks B+C. |
-| T03 | Encryption-at-rest helper (AES-256-GCM / KMS)                                    | approved | PM A (H12) ✓   | Opsi A current-version. 100% cov, tamper+fail-fast verified by PM. Awaiting PO merge. Consumed by T10+T17. |
+| T03 | Encryption-at-rest helper (AES-256-GCM / KMS)                                    | merged   | PM A (H12) ✓   | Opsi A current-version. 100% cov, tamper+fail-fast verified. Merged PR #3 `ca9685b`. Consumed by T10+T17. |
 | T04 | Webhook signature-verification middleware (Meta `X-Hub-Signature-256` + Telegram)| backlog  | —              | After T01                                                          |
 | T05 | Tenant resolution from `:hotel_slug` (LRU 5-min, hotels.code lookup)             | backlog  | —              | After T01                                                          |
 | T06 | BSP adapter interface + `1engage` impl                                           | backlog  | —              | After T01                                                          |
