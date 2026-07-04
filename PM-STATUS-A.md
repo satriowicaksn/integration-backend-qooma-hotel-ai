@@ -823,6 +823,48 @@ Verified by PM A: merged schema provider enum = `('whatsapp','telegram')`; spec 
 
 Minor: `1engage.adapter.ts` filename (leading digit) is acceptable — matches the vendor brand and the factory identifier `create1engageAdapter` is letter-first so imports are fine; adjust only if a lint/tooling rule objects. Branch `feat/wa-bsp-adapter` OK. Proceed to coding.
 
+#### SUBMIT T06 — exec-A (Nathan) at H12 (2026-07-03) (attempt 1)
+
+Task: BSP port (ABI) + `1engage` adapter — outbound WA messaging (module `whatsapp`)
+Branch: `feat/wa-bsp-adapter` (pushed, tip `1a05af1`)
+Files changed: 4 (all new)
+  - `src/modules/whatsapp/ports/whatsapp-bsp.port.ts` (new — port + domain types)
+  - `src/modules/whatsapp/adapters/1engage.adapter.ts` (new — `create1engageAdapter` factory)
+  - `src/modules/whatsapp/index.ts` (new — barrel: port + types only)
+  - `src/modules/whatsapp/__tests__/1engage.adapter.test.ts` (new, 7 tests)
+
+DoD self-check (9 binding conditions)
+- [x] **#1 hexagonal (ADR-0001)** — `WhatsappBspPort` = `interface`, vendor-agnostic (types = `BspCredentials`/`SendTextInput`/`SendTemplateInput`/`BspSendResult`; NO axios/Cloud-API/1engage leak). Adapter = factory via injected `HttpPoster`.
+- [x] **#2 barrel discipline** — `index.ts` `export type` **port + domain types ONLY, NOT adapter**. Adapter di-import cuma oleh test (no-restricted-imports OFF di test).
+- [x] **#3 module-scoped path** — `src/modules/whatsapp/{ports,adapters,__tests__}` — BUKAN top-level `src/adapters/` (guardrail).
+- [x] **#4 error mapping** — non-2xx / missing `messageId` / http-throw → `ExternalServiceError('1engage', msg, {status?, body})` (502). Non-2xx + http-throw + non-Error-throw + missing-id semua tested. Bukan raw `Error`.
+- [x] **#5 injected `HttpPoster`** — narrow structural type, mock di test, **no real network**. Adapter terima access token **plaintext** (B decrypt via T03) — adapter tak decrypt.
+- [x] **#6 no hardcoded vendor URL** — `baseUrl`/`apiVersion` dari injected `config` (`grep graph.facebook` di adapter = 0).
+- [x] **#7 factory/no-any/return-types/coverage** — factory function (0 `class`); **0 `any`** (mock via `as unknown as HttpPoster`, bukan `as any`); explicit return types di semua exported/fungsi non-test. Coverage `1engage.adapter.ts` **100 stmt / 92.3 br / 100 fn / 100 line** (>80 floor; 1 br = defensive `?? []` unreachable).
+- [x] **#8 Cloud-API payload** — text `{messaging_product:'whatsapp',recipient_type:'individual',to,type:'text',text:{body}}`; template `type:'template',template:{name,language:{code},components:[{type:'body',parameters:[{type:'text',text}...]}]}`; template-tanpa-variables → components di-omit. Semua tested via `toHaveBeenCalledWith`.
+- [x] **#9 make check green; 4 files; `_template`/`api.ts`/`env.ts` untouched** — confirmed.
+
+Quality gate
+- `make lint`: PASS · `make format-check`: PASS · `make typecheck`: PASS · `make test-unit`: PASS (50: +7 T06; 2 skipped template). `make check` exit 0.
+
+Drift scans (§4.4)
+- My module files: `any` 0 · `class` 0 · console 0 · `throw new Error(` 0 (pakai `ExternalServiceError`) · forbidden imports (express/axios/moment) 0 · hardcoded URL 0 · default export 0 · `.skip` 0. Barrel tak export adapter (boundary OK).
+- Diff = 4 file baru di `src/modules/whatsapp/` saja.
+
+Security check (external IO)
+- External HTTP via port+adapter (ADR-0001): yes. Access token plaintext in-memory only (from B's decrypt), tidak di-log, tidak di-hardcode. `ExternalServiceError.upstream` bawa status+body untuk Sentry (bukan token). No secret hardcoded (test pakai `plain-token` dummy).
+
+Test evidence
+- Unit: 7 — sendText (success+assert URL/Bearer/payload, non-2xx→ExternalServiceError, missing-id→ExternalServiceError, http-reject→ExternalServiceError, non-Error-reject→ExternalServiceError) · sendTemplate (with-vars mapping, without-vars omit-components).
+- Coverage: adapter 100% line/func. Integration: N/A (mock HttpPoster, no network/DB).
+
+Notes / questions (untuk PM A)
+- **Module `whatsapp`** dibuat partial (ports+adapters+barrel saja); B isi service/CRUD di modul yang sama nanti (Q-A-06 alignment). Barrel `export type` — B append export lain saat build.
+- **1engage payload = Cloud-API shape** (GAP #2 Opsi A) — refinable saat kontrak vendor confirmed; port stabil.
+- **Housekeeping:** port doc-header sempat hilang di commit awal `b997ae4` (gremlin, bukan hook/prettier — sudah dicek: no husky/lint-staged, `.prettierrc` clean); dipulihkan di `1a05af1` dan **diverifikasi di committed blob** (`git show HEAD:…`). Tip branch final = `1a05af1`.
+
+Requesting PM A VERDICT.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
