@@ -1013,6 +1013,48 @@ Requesting PM A VERDICT.
 
 **Executor A: T07 done — queue/retry/DLQ primitive ready for B (T14 outbound retry) & C (T21 OTA poller / T24 health cron).** Next in queue: **T08** (error catalog — extend existing `src/core/errors/app-errors.ts` with Integration-specific codes per spec §9). Post PLAN when ready.
 
+### ASSIGNMENT T08 — claimed by exec-A (Nathan) at H12 (2026-07-03)
+- Branch: `feat/error-catalog` (proposal, `feat/<short>`)
+- Routed from: PM-STATUS-A.md §1 T08 + VERDICT T07 hand-off. Spec: `04-integration-channels.md §9` (7 Integration codes + HTTP), guardrail (extend `src/core/errors/app-errors.ts`).
+
+#### PLAN T08 — exec-A (Nathan) at H12 (2026-07-03)
+
+**Scope recap**
+- T08 = extend `app-errors.ts` dengan 7 error class Integration-specific per spec §9 (kode + HTTP status). Error class = **pengecualian** dari preferensi no-class PO (hierarki `AppError` memang class-based per repo/ADR; `CryptoError` T03 ikut pola ini). Dikonsumsi B (config CRUD 422, dispatch 429/502) & C (health 503, config 422).
+
+**Session-start gate** (EXECUTOR-PROTOCOL §2)
+- Identity confirmed: Executor, Slot A (Nathan) ✓ · CLAUDE.md loaded ✓
+- Task spec read: `04 §9` (WEBHOOK_VERIFICATION_FAILED/WA_CONFIG_INVALID/TELEGRAM_CONFIG_INVALID/DND_BLOCK = 422, RATE_LIMIT = 429, THIRD_PARTY_UNREACHABLE = 502, CHANNEL_DEGRADED = 503).
+- Parent docs spot-read: `app-errors.ts` (AppError abstract {statusCode, code, details, toJson}; existing ValidationError 400 / RateLimitError 429 `RATE_LIMIT_EXCEEDED` / ExternalServiceError 502 `EXTERNAL_SERVICE_ERROR` / dst).
+- Dependencies: T01 ✓. Belum ada test app-errors; belum ada usage 422/DND_BLOCK.
+- `make check` clean baseline ✓. Scaffolder risk: none.
+
+**Files to modify**
+- `src/core/errors/app-errors.ts` — append 7 kelas Integration (tak ubah kelas existing).
+
+**Files to create**
+```
+src/core/errors/__tests__/app-errors.test.ts   (unit — status/code/message/toJson/instanceof)
+```
+
+**Approach**
+- Append 7 subclass `AppError` (statusCode + code literal sesuai §9), kode SCREAMING_SNAKE_CASE:
+  - `WebhookVerificationError` → 422 `WEBHOOK_VERIFICATION_FAILED`
+  - `WaConfigInvalidError` → 422 `WA_CONFIG_INVALID`
+  - `TelegramConfigInvalidError` → 422 `TELEGRAM_CONFIG_INVALID`
+  - `DndBlockError` → 422 `DND_BLOCK` (internal RPC only — doc di komentar kelas)
+  - `OutboundQuotaError` → 429 `RATE_LIMIT` (kode spec §9; lihat GAP #1)
+  - `ThirdPartyUnreachableError` → 502 `THIRD_PARTY_UNREACHABLE` (lihat GAP #1)
+  - `ChannelDegradedError` → 503 `CHANNEL_DEGRADED`
+- Semua inherit constructor base `(message, details={})` → `toJson()` = `{code, message, details}`. 422 = status baru di hierarki (belum ada; AppError.statusCode abstract → OK).
+- **Test**: per kelas assert `statusCode`, `code`, `instanceof AppError`, `toJson()` shape + `details` passthrough. ~100% atas kode baru.
+
+**GAPs / questions — butuh ACK PM A**
+- **GAP T08-#1 — 2 kode §9 overlap status dgn kelas generic existing.** `RATE_LIMIT`(429) vs `RateLimitError`(`RATE_LIMIT_EXCEEDED`,429); `THIRD_PARTY_UNREACHABLE`(502) vs `ExternalServiceError`(`EXTERNAL_SERVICE_ERROR`,502). **Intent (A)**: tambah kelas Integration-specific dgn **kode persis spec §9** (spec/API-CONTRACT = kontrak yg FE harapkan), **TIDAK** ubah kelas generic (shared hierarchy, dipakai lintas-service) dan **TIDAK** sentuh T06 (yg pakai `ExternalServiceError` di adapter-level — itu generic upstream, boundary-level pakai `ThirdPartyUnreachableError`). Konsekuensi: 2 kelas share status 429 & 502 tapi kode+semantik beda (generic vs quota / adapter vs boundary) — dapat diterima. B: reuse generic (deviasi kode dari §9). **Intent: A.**
+- **GAP T08-#2 — scope: catalog saja, bukan error-handler plugin.** Per hand-off PM "extend app-errors.ts". T08 = **catalog only** (kelas + test). Canonical-envelope Fastify error-handler (map AppError→HTTP envelope, non-AppError→500) = concern terpisah (api.ts assembly / task lain). **Intent: catalog only**; flag kalau PM mau plugin masuk T08.
+
+Awaiting PM A ACK (GAP #1/#2).
+
 <!--
 TEMPLATE — copy untuk task baru:
 
