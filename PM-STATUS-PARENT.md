@@ -15,8 +15,8 @@
 - **Day**: H12+ (bootstrapped 2026-06-29 from core-backend infra; scope per H12 PO ruling; task tracker activated 2026-06-30)
 - **Phase**: Bootstrap / pre-T01 — authoritative spec live di [`docs/spec/MVP-INTEGRATION-FIRST.md`](./docs/spec/MVP-INTEGRATION-FIRST.md) (Slice 3 of 3 backend MVP slices — ship after Auth + HC)
 - **Active gate**: G1 — Boilerplate + Prisma schema ready (kriteria default `PM-AGENT.md §5`; PO konfirmasi)
-- **Active devs**: A (Nathan) · B (Nanak) · C (Satrio) — T01-T03 + T10 + T17 assigned, sisanya backlog
-- **Progress (global)**: 0 / 25 task approved · 5 assigned · 20 backlog (T01-T09 = slot A · T10-T16 = slot B · T17-T25 = slot C; lihat MVP-INTEGRATION-FIRST §1)
+- **Active devs**: A (Nathan) · B (Nanak) · C (Satrio) — **slot A foundation T01-T09 = 9/9 MERGED**; B (T10+) & C (T17+) unblocked, not yet started
+- **Progress (global)**: **9 / 25 merged** (T01-T09 slot A, all attempt 1) · 0 slot B · 0 slot C · T10-T25 backlog (T10-T16 = slot B · T17-T25 = slot C)
 - **Dependencies**: Auth + Hotel Core MUST be deployed first. Integration RPCs HC for guest upsert + quota two-phase + per-dept dept write-through; webhook routes look up `hotels.code → hotels.id` from Auth.
 - **Reading order untuk fresh dev**: `KICKOFF.md` → `docs/SERVICE-CHARTER.md` → `docs/spec/MVP-INTEGRATION-FIRST.md` → `docs/spec/04-integration-channels.md` (full DDL + RPC catalog + retry strategy) → `docs/spec/data-model.md` → `docs/spec/open-questions.md` → claim task di §1a
 
@@ -40,7 +40,7 @@
 | T06 | BSP adapter interface + `1engage` impl                                           | A    | Nathan  | merged   | PM A (H12)  | module `whatsapp`, vendor-agnostic port + factory 1engage adapter, ExternalServiceError, injected HttpPoster, 100% adapter cov. Merged PR #6 `3c1274a`. Consumed by T13+T16. Q-A-06 (B align module) |
 | T07 | Queue + scheduler infra (BullMQ-based, retry policy + DLQ)                       | A    | Nathan  | merged   | PM A (H12)  | **Bull 4.x** (title "BullMQ" = misnomer), backoff [1s/5s/30s] attempts=3 configurable, DLQ `<mod>:dead` forwarder (exhaustion-gated), Redis-injected, logic 100% cov. Merged PR #7 `6654d46`. Consumed by T14+T19+T21+T24. Q-A-07 (retry count) |
 | T08 | Common error handlers (Integration-specific codes per spec §9)                   | A    | Nathan  | merged   | PM A (H12)  | F7 complete: 7 §9 error classes + canonical `{error:{…}}` envelope handler (README §2.3), non-AppError→500 INTERNAL no-leak, correlationId log. 100% new-code cov. Merged PR #8 `b503041`. Consumed by all B/C endpoints. Q-A-08 (generic-code drift) |
-| T09 | Internal RPC server (HTTP/mTLS auth scheme; spec §10 catalog)                    | A    | Nathan  | approved | PM A (H12)  | shared-secret guard (`X-Internal-Secret`), timingSafeEqual + empty-secret-reject, 401 native, injected secret, 100% line cov. Awaiting PO merge. Q-A-09 (cross-svc auth contract). **Closes slot-A foundation 9/9** |
+| T09 | Internal RPC server (HTTP/mTLS auth scheme; spec §10 catalog)                    | A    | Nathan  | merged   | PM A (H12)  | shared-secret guard (`X-Internal-Secret`), timingSafeEqual + empty-secret-reject, 401 native, injected secret, 100% line cov. Merged PR #9 `633b45f`. Q-A-09 (cross-svc auth contract). **Slot-A foundation 9/9 ALL MERGED** |
 | T10 | WA config CRUD (`GET, PUT /api/integrations/whatsapp`)                           | B    | Nanak   | assigned | —           | Spec reading + module skeleton OK; impl blocked on T02 + T03                |
 | T11 | Verify webhook action (`POST /api/integrations/whatsapp/verify-webhook`)         | B    | Nanak   | backlog  | —           | After T10                                                                   |
 | T12 | WA inbound webhook ingest (signature → persist → HC guest upsert → AI RPC)       | B    | Nanak   | backlog  | —           | After T04 + T05 + T10                                                       |

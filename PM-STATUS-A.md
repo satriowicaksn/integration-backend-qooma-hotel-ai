@@ -15,8 +15,8 @@
 ## 0. Current focus (slot A)
 
 - **Day**: H12+ (task tracker activated 2026-06-30)
-- **Active task**: T01-T08 MERGED · **T09 ✅ APPROVED** (internal-RPC auth guard) → **🎉 FOUNDATION T01-T09 COMPLETE (9/9, all attempt 1), awaiting PO merge of T09.** Open Qs: Q-A-01/02/04/07/09 (PO/PM B/HC/AI), Q-A-03/05/08 (shared-config/boilerplate → Parent PM), Q-A-06 (WA module → B align).
-- **Branch**: `feat/internal-rpc-auth` (T09, awaiting PO merge + CI)
+- **Active task**: **🎉 FOUNDATION T01-T09 ALL MERGED to main (PR #1-#9), 9/9 attempt 1.** No open slot-A tasks. Blocking next steps = PO rulings on 9 open Qs (see §3) + assembly wiring (mostly B/C). Open Qs: Q-A-01/02/04/07/09 (PO/HC/AI), Q-A-03/05/08 (shared-boilerplate), Q-A-06 (WA module → B).
+- **Branch**: — (all 9 feature branches merged; main green)
 - **Next gate (global)**: G1 — lihat `PM-STATUS-PARENT.md §5`
 - **My queue (preview)**: T01–T09 (foundation) — lihat §8 di bawah (mirror dari PARENT §1 filter Slot=A)
 - **Critical path**: T02 (Prisma migration) blokir implementasi Nanak (T10+) dan Satrio (T17+). Prioritaskan T01 → T02 → T03 sequence.
@@ -37,7 +37,7 @@
 | T06 | BSP adapter interface + `1engage` impl                                           | merged   | PM A (H12) ✓   | module `whatsapp`, vendor-agnostic port + factory 1engage adapter, ExternalServiceError, injected HttpPoster, 100% adapter cov. Merged PR #6 `3c1274a`. Consumed by T13. Q-A-06 (B align). |
 | T07 | Queue + scheduler infra (BullMQ + retry + DLQ)                                   | merged   | PM A (H12) ✓   | Bull 4.x, backoff [1s/5s/30s] attempts=3 configurable, DLQ-forwarder (exhaustion-gated), Redis-injected. logic 100% cov. Merged PR #7 `6654d46`. Consumed by T14/T21/T24. Q-A-07. |
 | T08 | Common error handlers (Integration-specific codes per spec §9)                   | merged   | PM A (H12) ✓   | 7 §9 classes + canonical `{error:{…}}` handler (README §2.3), non-AppError→500 INTERNAL no-leak, correlationId log. 100% new-code cov. Merged PR #8 `b503041`. Q-A-08 (generic-code drift). |
-| T09 | Internal RPC server (HTTP/mTLS; spec §10 catalog)                                | approved | PM A (H12) ✓   | shared-secret guard (`X-Internal-Secret`), timingSafeEqual, empty-secret-reject, 401 native, injected secret. 100% line cov. Awaiting PO merge. Q-A-09 (cross-svc contract). |
+| T09 | Internal RPC server (HTTP/mTLS; spec §10 catalog)                                | merged   | PM A (H12) ✓   | shared-secret guard (`X-Internal-Secret`), timingSafeEqual, empty-secret-reject, 401 native, injected secret. 100% line cov. Merged PR #9 `633b45f`. Q-A-09 (cross-svc contract). |
 
 ---
 
