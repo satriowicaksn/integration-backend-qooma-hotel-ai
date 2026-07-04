@@ -1211,6 +1211,46 @@ Verified by PM A: spec §2.4 = 4 internal RPCs (send_wa/send_telegram/submit+res
 
 Branch `feat/internal-rpc-auth` OK. Proceed to coding — this closes the foundation (T09/9).
 
+#### SUBMIT T09 — exec-A (Nathan) at H12 (2026-07-03) (attempt 1)
+
+Task: Internal RPC shared-secret auth guard (MVP §4.11)
+Branch: `feat/internal-rpc-auth` (pushed, commit `9cc100f`)
+Files changed: 2 (both new)
+  - `src/plugins/internal-rpc-auth.plugin.ts` (new)
+  - `src/plugins/__tests__/internal-rpc-auth.plugin.test.ts` (new, 8 tests)
+
+**⚠ Detail impl beda dari PLAN (transparansi):** PLAN sebut guard `(req) => void` sinkron. Ternyata Fastify hook arity-<3 yang return `undefined` (sync void) **bukan** promise-style **bukan** callback-style → Fastify **hang** nunggu promise yg tak pernah datang (valid-path timeout 10s). Fix: **callback-style `(req, reply, done)`** — `done(new AuthError(...))` utk gagal, `done()` utk lolos. Tetap **sinkron**, tetap **tanpa eslint disable** (void-return → no-misused-promises tak trigger), 401 native tetap via `AuthError.statusCode`. Semantik identik dgn intent PLAN.
+
+DoD self-check (8 binding conditions)
+- [x] **#1 timingSafeEqual + guards** — `timingSafeEqual` (bukan `===`), length-guard dulu (mismatch→false, no throw); `provided===undefined`→false; **`expected===''`→false** (tolak blank-secret bypass). Semua tested (incl. empty-expected).
+- [x] **#2 guard 401 native, before handler** — baca `X-Internal-Secret`; invalid → `AuthError` (via `done(err)`) → **401** (`AuthError.statusCode`, no handler dep). Callback-style sinkron; gagal sebelum handler → RPC handler **tak jalan** (`didHandlerRun()===false` tested).
+- [x] **#3 not cookie/JWT** — dedicated `X-Internal-Secret` header + shared secret only. Tak baca cookie/Authorization.
+- [x] **#4 injected secret** — `internalRpcAuthGuard({ secret })`; no `loadConfig` di guard; **no env var ditambah**; no config/prisma coupling.
+- [x] **#5 lokasi** — `src/plugins/internal-rpc-auth.plugin.ts` (BUKAN `src/rpc/`).
+- [x] **#6 inject tests** — valid→200+handler-ran; wrong→401+skip; missing→401+skip; pure-fn (match/mismatch/missing/length-diff-no-throw/empty-expected→false).
+- [x] **#7 no leak** — `AuthError('Invalid internal RPC credentials')` generic; secret tak di-echo/log.
+- [x] **#8 function-based/no-any/coverage/scope** — function (0 `class`); **0 `any`**; explicit return types; **coverage 100% line/func** (85.7% br; 1 br = defensive array-header). Files = plugin + test; `env.ts`/`api.ts` untouched. `make check` green.
+
+Quality gate
+- `make lint` PASS · `make format-check` PASS · `make typecheck` PASS · `make test-unit` PASS (87: +8 T09; 2 skipped). `make check` exit 0.
+
+Drift scans (§4.4)
+- New files: `any` 0 · `class` 0 · console 0 · `throw new Error(` 0 (pakai `AuthError`) · forbidden imports 0 · default export 0 · `.skip` 0. Diff = 2 file `src/plugins/`.
+
+Security check (auth)
+- Shared-secret service-to-service (bukan cookie/JWT). `timingSafeEqual`. Blank-secret bypass ditolak. Secret injected, tak di-log. Header `X-Internal-Secret` = kontrak lintas-service (Q-A-09 → README doc = planning).
+
+Test evidence
+- Unit: 8 — 5 pure (`verifyInternalSecret`) + 3 inject (valid/wrong/missing). `fastify.inject`, no DB/Redis. Coverage 100% line/func.
+
+Notes / questions (untuk PM A)
+- **Callback-style vs sync-void** (di atas) — perubahan impl-detail agar Fastify tak hang; hasil fungsional = intent PLAN (sync, no disable, 401-before-handler). Flag utk awareness.
+- **Q-A-09** (header `X-Internal-Secret` cross-service contract) + env `INTERNAL_RPC_SECRET` + README doc = wiring/planning deferred. Guard siap; wiring pass `config.INTERNAL_RPC_SECRET` saat assembly.
+- **Q-A-04/#4 timing-safe-util DRY chore** — timing-safe compare kini di hmac (T04) + rpc (T09); extract `shared/utils/timing-safe-equal.ts` = chore post-foundation (per ACK note).
+- **🎉 Foundation T01–T09 complete (9/9)** setelah VERDICT ini + merge.
+
+Requesting PM A VERDICT.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
