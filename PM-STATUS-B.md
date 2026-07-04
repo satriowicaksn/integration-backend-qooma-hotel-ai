@@ -422,6 +422,86 @@ Coding order (§Approach 1-10): codegen → types → schema → repo → servic
 
 Proceed. Run `make prisma-generate` → code per §Approach 2-9 → `make check` → SUBMIT.
 
+#### SUBMIT T10 — exec-B (Nanak) at H16 23:10 (attempt 2)
+
+Task: T10 — WA config CRUD **primitive** (types + schema + repository + service + unit tests). Narrow scope per T17-a2 precedent; routes + `api.ts` wiring parked as T10-followup awaiting Q-C-01/02/03. Branch: `feat/whatsapp-config-crud` @ commit `175faa5`.
+
+Files changed: **8** (7 create + 1 modify) — **806 insertions** total (795 new-file LOC + 11 net barrel delta).
+- `src/modules/whatsapp/whatsapp-config.types.ts` (new, 42 LOC)
+- `src/modules/whatsapp/whatsapp-config.schema.ts` (new, 51 LOC)
+- `src/modules/whatsapp/whatsapp-config.repository.ts` (new, 43 LOC)
+- `src/modules/whatsapp/whatsapp-config.service.ts` (new, 105 LOC)
+- `src/modules/whatsapp/__tests__/whatsapp-config.schema.test.ts` (new, 138 LOC, 16 tests)
+- `src/modules/whatsapp/__tests__/whatsapp-config.repository.test.ts` (new, 106 LOC, 3 tests)
+- `src/modules/whatsapp/__tests__/whatsapp-config.service.test.ts` (new, 310 LOC, 9 tests)
+- `src/modules/whatsapp/index.ts` (modified, +11 net) — barrel additive-only; T06 BSP re-export block byte-for-byte preserved at top
+
+DoD self-check — **all 14 ACK binding conditions**:
+- [x] **#1 `make check` PASS end-to-end** — lint 0/0 (`--max-warnings 0`), format-check clean, typecheck strict (0 errors), test-unit 12/12 suites passed 115/117 tests (2 skipped = pre-existing `_template/` baseline). PM B rerun invited.
+- [x] **#2 Drift scans (14 categories → mapped to 6 EXECUTOR §4.4 scans) — 0 hits on module scope**. Any pre-existing hits confined to `_template/*`, `core/config/env.ts`, `core/http/http-client.ts` — files explicitly listed in PLAN §Files-NOT-touched. Detail in §Drift scans below.
+- [x] **#3 Coverage 100% stmt/branch/func/line** on `src/modules/whatsapp/whatsapp-config.*.ts` (3 runtime files). `types.ts` erased at compile per ts-jest — expected per ACK caveat. See §Test evidence.
+- [x] **#4 PII-floor log test present** — `whatsapp-config.service.test.ts:239-263` "should NEVER include the plaintext accessToken, webhookVerifyToken, or raw phoneNumber in the log payload (PII floor)": asserts `JSON.stringify(logger.info.mock.calls[0]?.[0])` does not contain `PLAINTEXT_ACCESS_TOKEN` / `PLAINTEXT_WEBHOOK_VERIFY_TOKEN` / `PLAINTEXT_PHONE_NUMBER`.
+- [x] **#5 Round-trip mask stability test present** — same file "should produce a stable mask across two independent encrypt-decrypt cycles of the same plaintext (round-trip stability)": two `encrypt(PLAINTEXT_ACCESS_TOKEN)` produce distinct ciphertexts, both `decrypt → maskTokenForLog` yield identical `***<last3>` string, matching `maskTokenForLog(PLAINTEXT_ACCESS_TOKEN)` directly.
+- [x] **#6 Direct helper imports only** — `whatsapp-config.service.ts:14-15` literal `import { decrypt, encrypt } from '@shared/utils/crypto.js';` + `import { maskTokenForLog, maskWaPhone } from '@shared/utils/masking.js';`. Ctor is `(repo: WhatsappConfigRepository, logger: Logger)` — no cryptoDeps.
+- [x] **#7 `NotFoundError` (not raw Error)** — `whatsapp-config.service.ts:53` `throw new NotFoundError(RESOURCE, hotelId)` where `RESOURCE = 'WaConfig'`. Drift scan #3 confirms 0 `throw new Error(` in my touched files.
+- [x] **#8 Barrel additive-only** — `src/modules/whatsapp/index.ts:1-7` T06 BSP re-export block byte-for-byte preserved (`BspCredentials`, `BspSendResult`, `SendTemplateInput`, `SendTextInput`, `WhatsappBspPort` from `./ports/whatsapp-bsp.port.js`). New exports appended L9-18.
+- [x] **#9 `git diff --stat` scope** — 8 files total (7 create + 1 modify). Zero touches to `src/entrypoints/api.ts`, `src/core/prisma/prisma-client.ts`, `src/plugins/*`, `prisma/schema.prisma`, `prisma/migrations/*`, `package.json`, `pnpm-lock.yaml`, `src/modules/telegram/*`, `src/modules/_template/*`, T06 `whatsapp/ports/*` + `whatsapp/adapters/*` + `whatsapp/__tests__/1engage.adapter.test.ts`. `.gitignore` unchanged (existing `node_modules/` cover handles `.prisma/client/`). PM-STATUS-B.md commit separated per §0.6 2-commit discipline (in commit chain after `175faa5`, not in this file diff).
+- [x] **#10 `make prisma-generate` recorded** — ran 2026-07-04 22:36:30 → 22:36:43 WIB. Prisma Client v5.22.0 written to `./node_modules/.prisma/client/` only. `git status --short` before/after: both empty (no `src/`, `prisma/`, `package.json` mutation). Command: `pnpm prisma:generate` via `Makefile:87`.
+- [x] **#11 Prisma-mock stopgap declared** — see §Notes.
+- [x] **#12 Response-mask on `webhookVerifyToken` declared** — see §Notes.
+- [x] **#13 Q-A-03 test env workaround re-appearance noted** — see §Notes.
+- [x] **#14 Q-B-01 NOT filed** — T12 `app_secret` gap referenced as existing `Q-A-04` in §Notes; §3 mirror table stays empty (no duplicate).
+
+Quality gate
+- `make typecheck`: PASS (0 errors)
+- `make lint`: PASS (0 errors, 0 warnings — `eslint . --max-warnings 0`)
+- `make format-check`: PASS (all matched files use Prettier code style)
+- `make test-unit`: PASS (12 of 14 suites, 115 of 117 tests — 2 pre-existing baseline skips in `_template/`; my 3 new suites 28/28 pass)
+- `make check`: PASS end-to-end (concatenation of the above)
+
+Drift scans (all 6 EXECUTOR §4.4 categories — 0 hits on `src/modules/whatsapp/whatsapp-config.*`)
+- `any` types: 0 (pre-existing 2 hits in `_template/*`, untouched)
+- `console.log/info/debug`: 0 (repo-wide 0)
+- `throw new Error(` in `src/modules/` + `src/core/`: 0 in module scope (pre-existing 4 hits in `_template/_template.repository.ts:23`, `core/config/env.ts:75`, `core/http/http-client.ts:19,27` — all untouched)
+- Forbidden imports (`express`/`typeorm`/`sequelize`/`moment`/`node-fetch`): 0 (repo-wide 0)
+- `^export default ` outside entrypoints/config: 0 (repo-wide 0)
+- `.skip(` in `*.test.ts`: 0 in module scope (pre-existing 2 hits in `_template/*`, untouched)
+
+Security check (spec §4.1 encryption-at-rest + CLAUDE §6 PII floor)
+- `access_token` encrypted via T03 `encrypt()` from `@shared/utils/crypto.js` BEFORE persist — verified in test `should encrypt the plaintext accessToken before calling the repository`: `passedInput.accessTokenEnc` starts with `v1:` envelope prefix, is `!== PLAINTEXT_ACCESS_TOKEN`, and round-trips via `decrypt()` to the original plaintext.
+- PII-floor log line fires BEFORE `encrypt()` call — verified via ordering test `should emit the PII-floor log line BEFORE calling repo.upsert` (events array assertion `['log', 'upsert']`).
+- Plaintext never leaves service in view path — `getForHotel` returns domain projection with `accessToken = maskTokenForLog(decrypt(row.accessTokenEnc))` and `webhookVerifyToken = maskTokenForLog(row.webhookVerifyToken)`. Verified in test `should never expose the plaintext accessToken in the returned domain`.
+- No secret hardcoded — encryption key sourced from `loadConfig()` via `crypto.ts:16-18`; my code does not reference `ENCRYPTION_KEY` env directly.
+- No webhook route in this attempt — HMAC verify N/A (T12 concern).
+
+Test evidence
+- Unit: **28 tests, 3 suites** — `whatsapp-config.schema.test.ts` (16), `whatsapp-config.repository.test.ts` (3), `whatsapp-config.service.test.ts` (9)
+- Integration: **0 (deferred)** — T10-INTEG follow-up parked awaiting Q-C-01 (see §Notes)
+- Coverage (jest, scoped `--collectCoverageFrom='src/modules/whatsapp/whatsapp-config.*.ts'`):
+  ```
+  File                           | % Stmts | % Branch | % Funcs | % Lines
+  -------------------------------|---------|----------|---------|--------
+  All files                      |   100   |   100    |   100   |   100
+   whatsapp-config.repository.ts |   100   |   100    |   100   |   100
+   whatsapp-config.schema.ts     |   100   |   100    |   100   |   100
+   whatsapp-config.service.ts    |   100   |   100    |   100   |   100
+  ```
+  (`whatsapp-config.types.ts` — pure type declarations, erased at compile per ts-jest; not instrumented. Expected shape per ACK §Approach.)
+
+Notes / tolerated deviations (all pre-declared per ACK binding conditions)
+- **Item #11 · Prisma-mock stopgap in `whatsapp-config.repository.test.ts`** — Prisma client is mocked as a minimal test-double (`{ waConfig: { findUnique: jest.fn(), upsert: jest.fn() } } as unknown as PrismaClient`) to assert call-shape only. Real-DB integration test parked as **T10-INTEG follow-up** blocked on Q-C-01 (prisma singleton). Stopgap docstring at test file head. No `.skip` / `describe.skip`. Precedent: T17-a2 same shape.
+- **Item #12 · Defensive over-mask on `webhookVerifyToken` in GET response** — Spec §5 AC only mandates masking `access_token`; I additionally mask `webhookVerifyToken` in the domain projection (`toDomain(row)` applies `maskTokenForLog` to both). Rationale: `webhook_verify_token` is used by Meta for hub-challenge and is secret-adjacent per CLAUDE §6 spirit. If FE integration surfaces a read-back need in a later spec amendment, we can flip a boolean or split the projection. **Choice declared: KEEP over-mask** (defense-in-depth outweighs the theoretical read-back cost — Meta hub-challenge only requires the token during handshake, not display).
+- **Item #13 · Q-A-03 test-env workaround re-appears** — `whatsapp-config.service.test.ts:83-95` stamps a full `BASE_ENV` in `beforeEach` + `resetConfigCache()` and restores in `afterEach`, mirroring `src/shared/utils/__tests__/crypto.test.ts:9-32`. Shared-infra Q, not on slot B to solve.
+- **Prettier collapse — diff-stat +11 vs +17 quoted pre-format** — `pnpm prettier --write` collapsed two multi-line `export { … } from './whatsapp-config.schema.js';` blocks into single lines during the round-1 lint iteration. Semantic content identical; no exports added / removed / renamed vs. PLAN §Approach step 9.
+- **`types.ts` not in coverage output** — 42 LOC of pure type declarations. ts-jest erases at compile; nothing to instrument at runtime. Types are consumed via barrel re-export + at compile in repo/service imports. Normal ts-jest behavior; matches PM B ACK caveat.
+
+Q register / follow-ups
+- **T12 blocker — WA `app_secret` field absence**: `wa_configs` DDL §4.1 does not include an `app_secret` (or similar) column but spec §4.11 needs one for HMAC verify at T12. This is **existing Q-A-04** (Nathan raised at H12, still `open` per parent register per PM B binding #14). Not filing a duplicate Q-B-01. §3 mirror in this file stays empty.
+- **T10-followup** — routes + `api.ts` wiring + `hotelId` derivation from JWT session. Blocked on Q-C-01 (prisma singleton) + Q-C-02 (`api.ts` bootstrap) + Q-C-03 (JWT/gm_admin plugin). Parallel to Satrio's T17-followup.
+- **T10-INTEG** — real-DB integration test for repository (testcontainers Postgres per `CLAUDE.md §8` + `docs/TESTING.md`). Blocked on Q-C-01 (prisma singleton).
+
+Requesting PM B VERDICT.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
