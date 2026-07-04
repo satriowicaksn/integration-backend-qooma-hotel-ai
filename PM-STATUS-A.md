@@ -15,8 +15,8 @@
 ## 0. Current focus (slot A)
 
 - **Day**: H12+ (task tracker activated 2026-06-30)
-- **Active task**: T01-T08 MERGED · **T09 PLAN ACK'd, coding** (internal-RPC shared-secret auth guard, Opsi A×4; auth-guard scope confirmed vs MVP §4.11). **Closes foundation on merge.** Open Qs: Q-A-01/02/04/07/09 (PO/PM B/HC/AI), Q-A-03/05/08 (shared-config/boilerplate → Parent PM), Q-A-06 (WA module → B align).
-- **Branch**: `feat/internal-rpc-auth` (T09, in progress)
+- **Active task**: T01-T08 MERGED · **T09 ✅ APPROVED** (internal-RPC auth guard) → **🎉 FOUNDATION T01-T09 COMPLETE (9/9, all attempt 1), awaiting PO merge of T09.** Open Qs: Q-A-01/02/04/07/09 (PO/PM B/HC/AI), Q-A-03/05/08 (shared-config/boilerplate → Parent PM), Q-A-06 (WA module → B align).
+- **Branch**: `feat/internal-rpc-auth` (T09, awaiting PO merge + CI)
 - **Next gate (global)**: G1 — lihat `PM-STATUS-PARENT.md §5`
 - **My queue (preview)**: T01–T09 (foundation) — lihat §8 di bawah (mirror dari PARENT §1 filter Slot=A)
 - **Critical path**: T02 (Prisma migration) blokir implementasi Nanak (T10+) dan Satrio (T17+). Prioritaskan T01 → T02 → T03 sequence.
@@ -37,7 +37,7 @@
 | T06 | BSP adapter interface + `1engage` impl                                           | merged   | PM A (H12) ✓   | module `whatsapp`, vendor-agnostic port + factory 1engage adapter, ExternalServiceError, injected HttpPoster, 100% adapter cov. Merged PR #6 `3c1274a`. Consumed by T13. Q-A-06 (B align). |
 | T07 | Queue + scheduler infra (BullMQ + retry + DLQ)                                   | merged   | PM A (H12) ✓   | Bull 4.x, backoff [1s/5s/30s] attempts=3 configurable, DLQ-forwarder (exhaustion-gated), Redis-injected. logic 100% cov. Merged PR #7 `6654d46`. Consumed by T14/T21/T24. Q-A-07. |
 | T08 | Common error handlers (Integration-specific codes per spec §9)                   | merged   | PM A (H12) ✓   | 7 §9 classes + canonical `{error:{…}}` handler (README §2.3), non-AppError→500 INTERNAL no-leak, correlationId log. 100% new-code cov. Merged PR #8 `b503041`. Q-A-08 (generic-code drift). |
-| T09 | Internal RPC server (HTTP/mTLS; spec §10 catalog)                                | wip      | —              | PLAN ACK'd (Opsi A×4). shared-secret guard (`X-Internal-Secret`), timingSafeEqual, 401 native, injected secret. Scope=auth-guard (§4.11). Q-A-09 (cross-svc contract). |
+| T09 | Internal RPC server (HTTP/mTLS; spec §10 catalog)                                | approved | PM A (H12) ✓   | shared-secret guard (`X-Internal-Secret`), timingSafeEqual, empty-secret-reject, 401 native, injected secret. 100% line cov. Awaiting PO merge. Q-A-09 (cross-svc contract). |
 
 ---
 
@@ -1250,6 +1250,33 @@ Notes / questions (untuk PM A)
 - **🎉 Foundation T01–T09 complete (9/9)** setelah VERDICT ini + merge.
 
 Requesting PM A VERDICT.
+
+##### VERDICT T09 — APPROVED (H12, attempt 1) by PM A — 🎉 FOUNDATION COMPLETE
+
+✅ **APPROVE.** Full code audit vs MVP §4.11 + security floor; all 8 binding conditions independently verified.
+
+**Code ↔ spec/planning audit (PM):**
+- **Shared-secret, NOT cookie/JWT (MVP §4.11)** — reads `X-Internal-Secret` only; no cookie/`Authorization` read (the only "cookie" mention is the doc comment saying it does *not* use them). ✓
+- **`timingSafeEqual` (never `===`)** — length-guard first (mismatch → `false`, no throw), same hardened pattern as T04. ✓
+- **Empty-secret rejection (critical)** — `expected===''` → `false` (fail-closed: a blank/misconfigured secret never authenticates); `provided===undefined` → false. **Tested both ways** (`('','')→false`, `('anything','')→false`). ✓
+- **401 native, before handler** — invalid → `done(new AuthError('Invalid internal RPC credentials'))` → 401 via `AuthError.statusCode`; guard is a `preHandler` → RPC handler never runs (**`didHandlerRun()===false` tested**). ✓
+- **Injected secret** — `internalRpcAuthGuard({secret})`; no `loadConfig`, **no env var added**, deps+env UNCHANGED (avoids breaking `loadConfig` tests, per GAP #3). ✓
+- **Location** `src/plugins/internal-rpc-auth.plugin.ts` (NOT `src/rpc/`). ✓
+- **No leak** — generic `AuthError` message; secret never echoed/logged. ✓
+
+**Quality (PM rerun):** `make check` green; plugin **100% line/func** (85.7% br = 1 defensive array-header branch); 8/8 tests; function-based (0 `class`); 0 `any`; explicit return types; 2 files only.
+
+**On the callback-style impl change (accepted):** PLAN proposed a sync 1-arg `(req)=>void` hook, but Fastify treats arity-<3 hooks as promise-style and hung awaiting a non-promise (valid-path 10s timeout). Switching to callback-style `(req, reply, done)` — `done(err)` fail / `done()` pass — is the **correct Fastify hook API**, stays synchronous (no eslint async-hook friction), preserves 401-native + throw-before-handler. Semantically identical to the ACK'd intent; transparently flagged. Good catch.
+
+**Deferred (Q-A-09, not a T09 defect):** `X-Internal-Secret` header + `INTERNAL_RPC_SECRET` env + README doc = cross-service wiring/planning; guard is ready, wiring passes `config.INTERNAL_RPC_SECRET` at assembly. Escalated to Parent PM.
+
+→ §1 tracker: T09 `approved`, Verified by PM A.
+
+---
+
+### 🎉 SLOT A FOUNDATION COMPLETE — T01–T09 all APPROVED on attempt 1
+
+Pending PO merge of T09, the entire Integration foundation is delivered: `make check` baseline · 8-table Prisma migration · AES-256-GCM crypto · webhook HMAC guard · tenant slug-resolver · BSP port+1engage adapter · Bull queue/retry/DLQ · error catalog + canonical envelope · internal-RPC auth guard. **9/9, zero rejects.** Slots B & C are fully unblocked. Remaining slot-A work = consumer wiring at assembly + resolving the 9 open Qs (topology, WA-secret, retry-count, module-name, shared-boilerplate hygiene, RPC contract).
 
 <!--
 TEMPLATE — copy untuk task baru:
