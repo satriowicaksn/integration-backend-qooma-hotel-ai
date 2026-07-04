@@ -284,8 +284,68 @@ Requesting PM C VERDICT.
 **Awaiting Parent PM**: merge policy decision + Q-C-05 routing.
 
 
-<!--
-TEMPLATE — copy untuk task baru:
+### ASSIGNMENT T19 — claimed by exec-C (Satrio) at H14 (2026-07-05) 12:15
+- Branch: `feat/telegram-inbound-commands`
+- Routed from: PM-STATUS-C.md §8 queue (self-select — no explicit ASSIGNMENT after T17 merge; per §0.3(B) self-select allowed)
+- Dependency check per §1: T04 ✓ (webhook HMAC plugin merged in foundation), T05 ✓ (tenant-resolver merged in foundation), T17 ✓ (primitive merged PR #11 `0d89d76`). All deps met at primitive-scope.
+- **Precedent**: Following PM C T17 REJECT-PLAN §100 + APPROVED §227 narrow-primitive pattern.
+
+#### PLAN T19 — exec-C (Satrio) at H14 (2026-07-05) 12:15
+
+**Scope recap**
+Deliver C3 primitive per `docs/spec/04-integration-channels.md §3.2 Inbound` + `MVP-INTEGRATION-FIRST.md §1.3 (C3)` + `§5 L127 AC`: pure command parser for staff Telegram commands (`/take <ticket_id>`, `/release <ticket_id>`, `/done <ticket_id>`, `/help`), zod schema for Telegram webhook update body, service that maps parsed command → downstream RPC ports (dispatch to HC ticket action or `/help` reply), unit tests. **Consistent with T17 REJECT-PLAN §100 precedent**: primitive-only. Router (`telegram-inbound.routes.ts`), HMAC-guard wiring, RPC adapter impl, integration test — all deferred behind Q-C-01 (Prisma singleton), Q-C-02 (`api.ts` bootstrap), Q-C-03 (JWT / cross-service HC/AI RPC contract). External IO uses ADR-0001 port pattern (ctor-injected) so unit-testable with plain-object mocks.
+
+**Session-start gate** (EXECUTOR-PROTOCOL §2)
+- Identity confirmed: Executor, Slot C (Satrio) ✓
+- CLAUDE.md loaded ✓
+- Task spec read: `docs/spec/04-integration-channels.md §2.3 (webhook route), §3.2 (Inbound commands)`, `MVP-INTEGRATION-FIRST.md §1.3 (C3), §5 L127 AC`
+- Parent docs spot-read: `CLAUDE.md §4 (ports for external IO), §5 error handling`, `docs/MODULE_TEMPLATE.md §1 (external IO subshape)`, T17 primitive at `src/modules/telegram/*` as pattern anchor
+- Dependencies: T04 ✓ (deferred at HTTP boundary), T05 ✓ (deferred at HTTP boundary), T17 ✓ (primitive in module)
+- `make typecheck` clean ✓ / `make lint` clean ✓ / `make test-unit` PASS (108 tests) — verified locally on `main @ 0d89d76`.
+- Scaffolder risk: none — all new files under existing `src/modules/telegram/` (co-located with T17 config CRUD, same bounded context per spec §3.2).
+- Known shared-infra RED: Q-C-05 (Docker-build failure, pre-dates T17, affects any `@prisma/client`-consuming module type-check via `tsc -p tsconfig.build.json`). This module does NOT import from `@prisma/client` (parser + service consume ports, not Prisma), so should NOT compound Q-C-05. Flagged so PM aware.
+
+**Files to create**
+```
+src/modules/telegram/
+├── telegram-inbound.commands.ts             (pure parser + command discriminated union types)
+├── telegram-inbound.schema.ts               (zod TelegramUpdateSchema for webhook body per Telegram Bot API)
+├── telegram-inbound.types.ts                (StaffIdentity + DispatchResult types)
+├── telegram-inbound.service.ts              (orchestrator: parse → dispatch via ports; returns HelpReply | Ack | Ignored)
+├── ports/
+│   ├── staff-lookup.port.ts                 (external IO: RPC HC lookup staff by telegram_user_id)
+│   └── ticket-action.port.ts                (external IO: RPC HC take/release/done actions)
+└── __tests__/
+    ├── telegram-inbound.commands.test.ts    (parser: valid + malformed + unknown + edge whitespace/case)
+    ├── telegram-inbound.service.test.ts     (dispatch: happy path per command, staff-not-found → ignored, unknown → help, ports called correctly)
+    └── telegram-inbound.schema.test.ts      (webhook body: minimal valid + rejects malformed)
+```
+
+**Files to modify**
+- `src/modules/telegram/index.ts` — extend barrel to re-export new command parser + service + port types. No unrelated changes.
+
+**Files NOT touched** (Q-C-01/02/03 authority; per T17 REJECT-PLAN Item #2)
+- `src/entrypoints/api.ts` (still stub — Q-C-02)
+- `src/core/prisma/prisma-client.ts` (still stub — Q-C-01)
+- `src/plugins/hmac-validator.plugin.ts` (T04 primitive; wiring at route landing not part of T19 primitive)
+- `src/modules/telegram/telegram-inbound.routes.ts` — omit; route landing is a post-foundation follow-up
+
+**Approach**
+1. `telegram-inbound.commands.ts` — pure `parseCommand(text: string): ParsedCommand` returning discriminated union: `{ kind: 'take'|'release'|'done', ticketId: string } | { kind: 'help' } | { kind: 'unknown', raw: string }`. Case-insensitive prefix, trims leading whitespace, extracts numeric ticket_id via regex per spec `/take 1234`. Ticket ID validated as non-empty digit string (min 1, max 20 chars — over-conservative for future ticket-id widening).
+2. `telegram-inbound.schema.ts` — zod `TelegramUpdateSchema` mirroring Telegram Bot API "Update" object (`update_id`, optional `message` with `chat.id`, `from.id`, `text`). Strict `.strict()`? No — Telegram may add fields; use `.passthrough()` on top-level but strict on our extracted subset. Actually keep `.strict()` off since Telegram evolves; extract via zod `.pick`.
+3. `staff-lookup.port.ts` — interface `StaffLookupPort { lookupByTelegramUserId(hotelId: string, telegramUserId: string): Promise<StaffIdentity | null> }`. `StaffIdentity = { staffId: string; deptId: string; role: 'staff'|'supervisor'|'gm' }`.
+4. `ticket-action.port.ts` — interface `TicketActionPort { take(ticketId, staffId): Promise<TicketActionOutcome>; release(ticketId, staffId): Promise<TicketActionOutcome>; markDone(ticketId, staffId): Promise<TicketActionOutcome> }`. `TicketActionOutcome = { status: 'ok' } | { status: 'not_found' } | { status: 'forbidden' }`.
+5. `telegram-inbound.service.ts` — `TelegramInboundService.handleUpdate(hotelId, update)` → parses `.message.text` via `parseCommand`, looks up staff via `StaffLookupPort` (if null → `{ kind: 'ignored', reason: 'staff_not_recognized' }` — never reveal user probe), dispatches via `TicketActionPort`, returns `DispatchResult = { kind: 'reply', text: string } | { kind: 'ignored', reason: string }`. `/help` returns canned help text; unknown returns `{ kind: 'ignored', reason: 'unknown_command' }`. Logger info line per handle w/ maskedTelegramId (using existing `maskTokenForLog` or new tiny masker inside service — I'll reuse `maskTokenForLog` to avoid new util; if PM prefers separate `maskTelegramId`, callable follow-up).
+6. Unit tests: parser (~10 cases), service (~8 cases), schema (~4 cases). Zero mocking of Prisma or fastify. Ports mocked as plain jest.fn() per T17 pattern.
+
+**GAPs / questions**
+- **GAP T19-#1 — Help text content.** Spec §3.2 lists `/help` command but does not specify reply text. **My intent**: canned English (matching CRM tenor) — `"Available commands:\n/take <ticket_id> — assign ticket to you\n/release <ticket_id> — release your assignment\n/done <ticket_id> — mark ticket resolved\n/help — this message"`. If PM wants Indonesian or product-branded copy, easy tweak — 1 constant. Post as note, not blocker.
+- **GAP T19-#2 — Staff-not-recognized behavior.** Spec §3.2 says "identify the staff Telegram user" but doesn't specify what happens when the sender isn't a registered staff. **My intent**: log + return `{ kind: 'ignored', reason: 'staff_not_recognized' }` (never reveal via bot reply — anti-enumeration). Alternative: bot replies "Unauthorized" (leaks that this bot exists). Preferred: silent ignore. Confirm.
+- **GAP T19-#3 — Ticket ID format.** Spec examples show `1234` (numeric). Actual ticket IDs may be UUIDs (per data-model conventions). **My intent**: parser accepts `[A-Za-z0-9-]{1,64}` — permissive superset that covers both int shorthand + UUID. Service delegates validation to `TicketActionPort` (HC decides). Rejected-format returns `unknown`. Confirm range OK.
+- **GAP T19-#4 — Cross-service RPC auth for HC calls (Q-C-03 dep).** Ports abstract the RPC; adapters land later when `internal-rpc-auth` client patterns exist (T09 gave the server-side guard, not client). **My intent**: port interfaces only in T19 primitive; adapter impl deferred to T19-followup (mirrors T17 pattern). No change from PM C precedent.
+
+Awaiting PM C ACK — especially GAP-#2 (silent ignore vs "Unauthorized" reply, security posture).
+
 
 ### ASSIGNMENT T## — claimed by exec-C (Satrio) at H{N} HH:MM
 - Branch: feat/<modul>-<short>
