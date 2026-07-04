@@ -84,3 +84,45 @@ export class BillingRequiredError extends AppError {
   readonly statusCode = 402;
   readonly code = 'BILLING_REQUIRED';
 }
+
+// ---------------------------------------------------------------------------
+// Integration / Channels — service-specific catalog (spec 04 §9)
+// ---------------------------------------------------------------------------
+
+export class WebhookVerificationError extends AppError {
+  readonly statusCode = 422;
+  readonly code = 'WEBHOOK_VERIFICATION_FAILED';
+}
+
+export class WaConfigInvalidError extends AppError {
+  readonly statusCode = 422;
+  readonly code = 'WA_CONFIG_INVALID';
+}
+
+export class TelegramConfigInvalidError extends AppError {
+  readonly statusCode = 422;
+  readonly code = 'TELEGRAM_CONFIG_INVALID';
+}
+
+/** Outbound refused due to DND window — returned on internal RPC only (spec §9). */
+export class DndBlockError extends AppError {
+  readonly statusCode = 422;
+  readonly code = 'DND_BLOCK';
+}
+
+/** Outbound quota at 100% for the month. Distinct from generic RateLimitError. */
+export class OutboundQuotaError extends AppError {
+  readonly statusCode = 429;
+  readonly code = 'RATE_LIMIT';
+}
+
+/** Upstream (Meta / Telegram / Claude API) unreachable at the API boundary. */
+export class ThirdPartyUnreachableError extends AppError {
+  readonly statusCode = 502;
+  readonly code = 'THIRD_PARTY_UNREACHABLE';
+}
+
+export class ChannelDegradedError extends AppError {
+  readonly statusCode = 503;
+  readonly code = 'CHANNEL_DEGRADED';
+}
