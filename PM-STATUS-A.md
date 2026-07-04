@@ -15,8 +15,8 @@
 ## 0. Current focus (slot A)
 
 - **Day**: H12+ (task tracker activated 2026-06-30)
-- **Active task**: T01-T06 MERGED · **T07 PLAN ACK'd, coding** (Bull queue infra, Opsi A×4: Bull 4.x, attempts=3 configurable, DLQ-forwarder, logic-unit-tested). Open Qs: Q-A-01/02/04/07 (PO/PM B), Q-A-03/05 (shared-config), Q-A-06 (WA module → B align).
-- **Branch**: `feat/queue-infra` (T07, in progress)
+- **Active task**: T01-T06 MERGED · **T07 ✅ APPROVED** (Bull queue infra, logic 100% cov, no open handles, awaiting PO merge). **7/9 foundation done.** Next: T08 (error catalog). Open Qs: Q-A-01/02/04/07 (PO/PM B), Q-A-03/05 (shared-config), Q-A-06 (WA module → B align).
+- **Branch**: `feat/queue-infra` (T07, awaiting PO merge + CI)
 - **Next gate (global)**: G1 — lihat `PM-STATUS-PARENT.md §5`
 - **My queue (preview)**: T01–T09 (foundation) — lihat §8 di bawah (mirror dari PARENT §1 filter Slot=A)
 - **Critical path**: T02 (Prisma migration) blokir implementasi Nanak (T10+) dan Satrio (T17+). Prioritaskan T01 → T02 → T03 sequence.
@@ -35,7 +35,7 @@
 | T04 | Webhook signature-verification middleware (Meta `X-Hub-Signature-256` + Telegram)| merged   | PM A (H12) ✓   | plugin-level preHandler, timingSafeEqual, raw-byte HMAC, 401 native, no-insert invariant proven. 100% line cov. Merged PR #4 `ad46125`. |
 | T05 | Tenant resolution from `:hotel_slug` (LRU 5-min, hotels.code lookup)             | merged   | PM A (H12) ✓   | factory TTL-LRU (no-class per PO), injected lookup port, 404 native, never-trust-body proven, 100% resolver cov. Merged PR #5 `59e8218`. Consumed by T12+T19. |
 | T06 | BSP adapter interface + `1engage` impl                                           | merged   | PM A (H12) ✓   | module `whatsapp`, vendor-agnostic port + factory 1engage adapter, ExternalServiceError, injected HttpPoster, 100% adapter cov. Merged PR #6 `3c1274a`. Consumed by T13. Q-A-06 (B align). |
-| T07 | Queue + scheduler infra (BullMQ + retry + DLQ)                                   | wip      | —              | PLAN ACK'd (Opsi A×4). Bull 4.x (not bullmq), backoff [1s/5s/30s] attempts=3 configurable, DLQ `<mod>:dead` forwarder, logic-unit-tested. Q-A-07 (retry count). |
+| T07 | Queue + scheduler infra (BullMQ + retry + DLQ)                                   | approved | PM A (H12) ✓   | Bull 4.x, backoff [1s/5s/30s] attempts=3 configurable, DLQ-forwarder (exhaustion-gated), Redis-injected. logic 100% cov, no open handles. Awaiting PO merge. Consumed by T14/T21/T24. Q-A-07. |
 | T08 | Common error handlers (Integration-specific codes per spec §9)                   | backlog  | —              | After T01                                                          |
 | T09 | Internal RPC server (HTTP/mTLS; spec §10 catalog)                                | backlog  | —              | After T01 + T05                                                    |
 
@@ -992,6 +992,26 @@ Notes / questions (untuk PM A)
 - **Non-retryable** (quota/template-not-approved, spec §7) — caller set `attempts:1` (override) atau skip enqueue; foundation sediakan mekanisme, keputusan per-job = B.
 
 Requesting PM A VERDICT.
+
+##### VERDICT T07 — APPROVED (H12, attempt 1) by PM A
+
+✅ **APPROVE.** Full code-vs-spec audit done (read every line of the factory), all binding conditions independently verified.
+
+**Code ↔ spec/planning audit (PM):**
+- **Bull 4.x (CLAUDE §2 / `package.json`)** — `import Bull from 'bull'`, not bullmq; deps + lock UNCHANGED. ✓
+- **Backoff (spec §7 / MVP §4.9)** — `integrationBackoffStrategy` → `[1000,5000,30000]` at `attemptsMade-1`, clamp-high (4/99→30000) + clamp-low (0→1000); wired via `settings.backoffStrategies.integration` ↔ `backoff:{type:'integration'}` (correct Bull 4.x custom-strategy API). Default `attempts=3` (Q-A-07 restrictive reading), per-job configurable. ✓
+- **DLQ (spec §7)** — `attachDeadLetterForwarder` gates `attemptsMade >= attempts` → forwards **exactly once on exhaustion** (Bull fires `failed` every attempt — the gate is load-bearing and correct); `removeOnFail:false`; `<module>:dead` matches schema `status='dead'` enum. Both paths + `failedReason` precedence tested. ✓
+- **Naming (CLAUDE §9)** — `queueName`=`${module}:${jobType}`, `deadLetterQueueName`=`${module}:dead`. ✓
+- **Redis injected** — built at wiring, never in the factory; no `loadConfig` → no open handles; concurrency via `WORKER_CONCURRENCY_DEFAULT` param (no new constant, no `process.env`). ✓
+- **Non-retryable (spec §7)** — `attempts:1` override mechanism provided; per-job call = B. ✓
+
+**Quality (PM rerun):** `make check` green; **logic fns 100% covered**; file 88.9% line (>80 floor) — 3 uncovered (L73/123/133) are the `createQueue`/`registerProcessor`/`scheduleRepeatable` wrappers, which I read and confirmed are **genuinely logic-free 1-line Bull delegations** (ACK GAP #4 condition met); `--detectOpenHandles` **clean**; drift 0 (`any`/`class`/`console`/`bullmq`/hardcoded-redis/`loadConfig`); function-based; explicit return types; structural test mocks (no `as any`).
+
+**Q-A-07 (retry count)** — shipped default `attempts=3` (restrictive/majority reading per CLAUDE §14, configurable); still open for PO to ratify + fix the spec §7 self-contradiction before B's T14. Non-blocking.
+
+→ §1 tracker: T07 `approved`, Verified by PM A. → Code on `feat/queue-infra` awaiting **PO merge + CI**.
+
+**Executor A: T07 done — queue/retry/DLQ primitive ready for B (T14 outbound retry) & C (T21 OTA poller / T24 health cron).** Next in queue: **T08** (error catalog — extend existing `src/core/errors/app-errors.ts` with Integration-specific codes per spec §9). Post PLAN when ready.
 
 <!--
 TEMPLATE — copy untuk task baru:
