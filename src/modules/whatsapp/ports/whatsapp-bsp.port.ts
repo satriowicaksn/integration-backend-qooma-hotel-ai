@@ -1,3 +1,9 @@
+/**
+ * Vendor-agnostic BSP ABI for outbound WhatsApp (ADR-0001 / Q-OPS-04).
+ * `1engage` is the v1 adapter; swapping BSPs is a one-adapter change.
+ * Credentials arrive already decrypted — the caller decrypts
+ * `wa_configs.access_token_enc` via the crypto helper before dispatch.
+ */
 export interface BspCredentials {
   phoneNumberId: string;
   accessToken: string;
