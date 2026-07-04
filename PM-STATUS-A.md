@@ -15,8 +15,8 @@
 ## 0. Current focus (slot A)
 
 - **Day**: H12+ (task tracker activated 2026-06-30)
-- **Active task**: T01·T02·T03·T04 ✅ **MERGED** (PR #1-4). Next: T05 (tenant resolver) — planning open. Open Qs: Q-A-01/02/04 (PO/PM B), Q-A-03/05 (shared-infra/config → Parent PM).
-- **Branch**: — (T04 merged; T05 branch TBD at PLAN)
+- **Active task**: T01-T04 MERGED · **T05 PLAN ACK'd, coding** (tenant slug-resolver + hand-rolled TTL-LRU, Opsi A ×4; injected lookup port — spec §4.3 L71 blessed, unblocked from Q-A-01). Open Qs: Q-A-01/02/04 (PO/PM B), Q-A-03/05 (shared-config → Parent PM).
+- **Branch**: `feat/tenant-slug-resolver` (T05, in progress)
 - **Next gate (global)**: G1 — lihat `PM-STATUS-PARENT.md §5`
 - **My queue (preview)**: T01–T09 (foundation) — lihat §8 di bawah (mirror dari PARENT §1 filter Slot=A)
 - **Critical path**: T02 (Prisma migration) blokir implementasi Nanak (T10+) dan Satrio (T17+). Prioritaskan T01 → T02 → T03 sequence.
@@ -33,7 +33,7 @@
 | T02 | Prisma schema initial migration (8 Integration tables + indexes)                 | merged   | PM A (H12) ✓   | Clean-DB validated by PM (8 tbl, 6 chk, 2 partial idx, 0 auth). Opsi A. Merged PR #2 `53a4925`. Unblocks B+C. |
 | T03 | Encryption-at-rest helper (AES-256-GCM / KMS)                                    | merged   | PM A (H12) ✓   | Opsi A current-version. 100% cov, tamper+fail-fast verified. Merged PR #3 `ca9685b`. Consumed by T10+T17. |
 | T04 | Webhook signature-verification middleware (Meta `X-Hub-Signature-256` + Telegram)| merged   | PM A (H12) ✓   | plugin-level preHandler, timingSafeEqual, raw-byte HMAC, 401 native, no-insert invariant proven. 100% line cov. Merged PR #4 `ad46125`. |
-| T05 | Tenant resolution from `:hotel_slug` (LRU 5-min, hotels.code lookup)             | backlog  | —              | After T01                                                          |
+| T05 | Tenant resolution from `:hotel_slug` (LRU 5-min, hotels.code lookup)             | wip      | —              | PLAN ACK'd (Opsi A×4). injected lookup port, hand-rolled TTL-LRU, 404 native, never-trust-body. Consumed by T12+T19. |
 | T06 | BSP adapter interface + `1engage` impl                                           | backlog  | —              | After T01                                                          |
 | T07 | Queue + scheduler infra (BullMQ + retry + DLQ)                                   | backlog  | —              | After T02                                                          |
 | T08 | Common error handlers (Integration-specific codes per spec §9)                   | backlog  | —              | After T01                                                          |
@@ -663,6 +663,32 @@ src/plugins/__tests__/tenant-resolver.plugin.test.ts
 - **GAP T05-#4 — lokasi file.** PROPOSED: cache generic → `src/shared/utils/ttl-lru-cache.ts` (reusable B/C); resolver+hook → `src/plugins/tenant-resolver.plugin.ts`. Alternatif: fold cache inline ke plugin (kurang reusable). **Intent: split** (cache reusable + unit-test isolated). Minta ACK lokasi (guardrail: bukan `src/common/`).
 
 Awaiting PM A ACK (GAP #1–#4).
+
+##### PM A ACK — T05 PLAN APPROVED, proceed to coding (H12, 2026-07-03)
+
+Verified by PM A: `prisma-client.ts` = stub (`db = {} as ...placeholder`); `lru-cache` NOT in package.json (transitive only); `NotFoundError('resource', id?)` = 404 (app-errors.ts:42); **MVP §4.3** = "LRU 5-min TTL · slug not found → 404 · never trust `hotel_id` from body" (matches scope exactly). All 4 intents sound.
+
+**Decisive spec finding — MVP §4.3 line 71:** *"webhook routing uses `:hotel_slug` lookup against a cached `hotels.code → hotels.id` map (**RPC to Auth or shared-DB read, your choice**)."* → the injected-port design is **spec-blessed**, and T05's resolver logic is identical under either topology. **T05 is genuinely unblocked** regardless of Q-A-01 (only the injected `lookup` impl differs at wiring time). Line 71 also affirms own-DB/opaque `hotel_id` — reinforcing Q-A-01's recommended resolution (isolated), against the schema-header outlier.
+
+**GAP T05-#1 (lookup source) → Opsi A (injected `HotelSlugLookup` port). APPROVED.** Spec §4.3 L71 explicitly leaves the mechanism to implementation → port defers it cleanly; caching/404/no-trust-body logic completes + tests now with a stub. Do NOT block on Q-A-01 or live prisma.
+
+**GAP T05-#2 (negative cache) → Opsi A (positive-only). APPROVED.** Not an MVP AC; a newly-provisioned hotel must not eat a stale 404. Slug-enumeration/DoS is dampened by the webhook rate-limit (`RATE_LIMIT_WEBHOOK_PER_MIN=300`). **Wiring note for B/C (not T05):** rate-limit plugin MUST run before the tenant-resolver preHandler; negative-cache can be added if abuse is observed.
+
+**GAP T05-#3 (LRU impl) → Opsi A (hand-rolled Map-based TTL+LRU, zero-dep). APPROVED.** `lru-cache` is transitive → declaring it = PO-gated new dep (pnpm phantom-dep rule). Map insertion-order LRU + lazy TTL is ~40 lines and fully testable.
+
+**GAP T05-#4 (file location) → APPROVED as proposed.** `src/shared/utils/ttl-lru-cache.ts` (generic, reusable by B/C, unit-tested in isolation) + `src/plugins/tenant-resolver.plugin.ts` (resolver + preHandler). **Correctly avoids the MVP brief's forbidden `src/common/slug-lookup.ts`** (path-alignment guardrail — `src/common/` DILARANG). Split over inline = right call.
+
+**Binding conditions — verify at SUBMIT (multi-tenancy security floor):**
+1. **Never trust body** — `hotel_id` derived ONLY from `req.params[hotel_slug]`; body ignored. Prove it: send a body carrying a *different* `hotel_id`, assert the resolver uses the URL slug (this is the WAJIB tenant-isolation guard).
+2. **404 native** — unknown slug → `NotFoundError('hotel', slug)` → `inject` returns 404 via `statusCode=404` (no T08 dep).
+3. **LRU + 5-min TTL** — `ttlMs` default `300_000`; TTL lazy-evict on `get` (expired → miss → re-lookup); LRU evicts least-recently-used over `maxSize`; **recency updates on `get`**. Deterministic tests via injected `now()` mock — no real waits. Cover: hit, miss, TTL-expiry, over-cap eviction, recency-refresh.
+4. **preHandler-level** — resolver as `preHandler`; unknown slug throws before handler → handler-ran = `false` (tested).
+5. **Injected port** — `HotelSlugLookup` injected; no prisma/RPC coupling; cache-hit does NOT call `lookup` twice (spy call-count).
+6. **Zero new deps**; **files** = the 4 proposed only (NOT `src/common/`); `api.ts`/`env.ts`/prisma untouched; 0 `any`; explicit return types; coverage ≥ 80% each; `make check` green.
+7. **`now()` injection** — `Date.now` default in app-code is fine (the Date.now ban is workflow-script-only). Correct.
+8. eslint async-hook (Q-A-05) still unratified → reuse the same local 1-line disable if the inject test trips it.
+
+Branch `feat/tenant-slug-resolver` OK. Proceed to coding.
 
 <!--
 TEMPLATE — copy untuk task baru:
