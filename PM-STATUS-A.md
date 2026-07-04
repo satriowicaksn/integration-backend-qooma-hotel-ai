@@ -15,8 +15,8 @@
 ## 0. Current focus (slot A)
 
 - **Day**: H12+ (task tracker activated 2026-06-30)
-- **Active task**: T01-T07 ✅ **MERGED** (PR #1-7). **7/9 foundation done.** Next: T08 (error catalog) — planning open. Open Qs: Q-A-01/02/04/07 (PO/PM B), Q-A-03/05 (shared-config), Q-A-06 (WA module → B align).
-- **Branch**: — (T07 merged; T08 branch TBD at PLAN)
+- **Active task**: T01-T07 MERGED · **T08 PLAN ACK'd w/ scope-correction, coding** (7 error classes per spec §9 + **canonical-envelope error-handler per F7**). Open Qs: Q-A-01/02/04/07 (PO/PM B), Q-A-03/05 (shared-config), Q-A-06 (WA module → B align).
+- **Branch**: `feat/error-catalog` (T08, in progress)
 - **Next gate (global)**: G1 — lihat `PM-STATUS-PARENT.md §5`
 - **My queue (preview)**: T01–T09 (foundation) — lihat §8 di bawah (mirror dari PARENT §1 filter Slot=A)
 - **Critical path**: T02 (Prisma migration) blokir implementasi Nanak (T10+) dan Satrio (T17+). Prioritaskan T01 → T02 → T03 sequence.
@@ -36,7 +36,7 @@
 | T05 | Tenant resolution from `:hotel_slug` (LRU 5-min, hotels.code lookup)             | merged   | PM A (H12) ✓   | factory TTL-LRU (no-class per PO), injected lookup port, 404 native, never-trust-body proven, 100% resolver cov. Merged PR #5 `59e8218`. Consumed by T12+T19. |
 | T06 | BSP adapter interface + `1engage` impl                                           | merged   | PM A (H12) ✓   | module `whatsapp`, vendor-agnostic port + factory 1engage adapter, ExternalServiceError, injected HttpPoster, 100% adapter cov. Merged PR #6 `3c1274a`. Consumed by T13. Q-A-06 (B align). |
 | T07 | Queue + scheduler infra (BullMQ + retry + DLQ)                                   | merged   | PM A (H12) ✓   | Bull 4.x, backoff [1s/5s/30s] attempts=3 configurable, DLQ-forwarder (exhaustion-gated), Redis-injected. logic 100% cov. Merged PR #7 `6654d46`. Consumed by T14/T21/T24. Q-A-07. |
-| T08 | Common error handlers (Integration-specific codes per spec §9)                   | backlog  | —              | After T01                                                          |
+| T08 | Common error handlers (Integration-specific codes per spec §9)                   | wip      | —              | PLAN ACK'd + scope-correction: 7 classes (§9 codes) + canonical-envelope error-handler plugin (F7). GAP#1 Opsi A faithful. |
 | T09 | Internal RPC server (HTTP/mTLS; spec §10 catalog)                                | backlog  | —              | After T01 + T05                                                    |
 
 ---
@@ -1054,6 +1054,34 @@ src/core/errors/__tests__/app-errors.test.ts   (unit — status/code/message/toJ
 - **GAP T08-#2 — scope: catalog saja, bukan error-handler plugin.** Per hand-off PM "extend app-errors.ts". T08 = **catalog only** (kelas + test). Canonical-envelope Fastify error-handler (map AppError→HTTP envelope, non-AppError→500) = concern terpisah (api.ts assembly / task lain). **Intent: catalog only**; flag kalau PM mau plugin masuk T08.
 
 Awaiting PM A ACK (GAP #1/#2).
+
+##### PM A ACK — T08 PLAN APPROVED with SCOPE CORRECTION (H12, 2026-07-03)
+
+Verified by PM A against **spec §9** (read the full table) + existing `app-errors.ts`.
+
+**GAP T08-#1 (codes overlap status) → Opsi A. APPROVED — mapping is faithful.** I checked all 7 against spec §9: `WEBHOOK_VERIFICATION_FAILED`/`WA_CONFIG_INVALID`/`TELEGRAM_CONFIG_INVALID`/`DND_BLOCK` = 422, `RATE_LIMIT` = 429 (outbound quota — semantically distinct from generic `RateLimitError`/`RATE_LIMIT_EXCEEDED` = public-API 100/min), `THIRD_PARTY_UNREACHABLE` = 502 (distinct from generic `ExternalServiceError`/`EXTERNAL_SERVICE_ERROR`), `CHANNEL_DEGRADED` = 503. New classes with the **exact spec §9 code strings** (the FE contract) + leave generic classes and T06's adapter usage untouched = correct. Two classes sharing a status with distinct codes is fine.
+
+**GAP T08-#2 (scope) → SCOPE CORRECTION: catalog-only is INSUFFICIENT. T08 = F7 = "canonical envelope + Integration codes".**
+- My earlier "extend app-errors.ts" hand-off under-scoped it. The ratified scope (`MVP-INTEGRATION-FIRST §1` **F7**, which PARENT §1a maps to T08) is **"Common error handlers (canonical envelope + Integration codes)"** — the **canonical-envelope error-handler is in scope**, not deferred.
+- **Why it matters now:** without the handler, B/C endpoints that throw these AppErrors get Fastify's default body (`{statusCode,error,message}`) — the spec §9 `code` + `details` are **lost**, so FE can't key off the code. The handler is the thing that makes the catalog actually usable. Build it as a foundation plugin (unit-tested via `inject`, wired to `api.ts` later) exactly like T04/T05 — the stubbed `api.ts` is not a blocker.
+- **Add to T08:** `src/plugins/error-handler.plugin.ts` (Fastify `setErrorHandler`; **NOT** `src/common/`).
+
+**Binding conditions — verify at SUBMIT:**
+*Catalog (7 classes):*
+1. Exact spec §9 code strings + statuses (the 7 above); SCREAMING_SNAKE_CASE; all `extends AppError`, inherit `toJson()`. Error-class-as-class is the correct AppError-hierarchy exception to the no-class preference (you noted this — agreed).
+2. Do NOT modify existing generic classes; do NOT touch T06's `ExternalServiceError` adapter usage.
+3. `DndBlockError` — class comment noting "internal RPC only" per spec §9.
+4. Per-class unit test: `statusCode`, `code`, `instanceof AppError`, `toJson()` shape, `details` passthrough.
+
+*Canonical-envelope handler (F7):*
+5. `error-handler.plugin.ts` maps: `AppError` → `reply.code(err.statusCode).send(<envelope>)` where envelope = `err.toJson()` (`{code,message,details}`) — the repo's designated serialization; **non-`AppError` → 500** with a generic safe body (NO internal message/stack leak).
+6. **Structured log on error** with `correlationId` (CLAUDE §7) via `req.log`; winston redaction not bypassed — **no secret/PII in the response or log**.
+7. Unit tests via `fastify.inject`: a route throwing each representative AppError → assert status + envelope body (`code`/`message`/`details`); a route throwing a plain `Error` → 500 + safe body (assert internal message NOT leaked).
+8. If you find an API-CONTRACT doc pinning a different envelope wrapper (e.g. `{error:{…}}`), match it and flag; otherwise `toJson()` is canonical. Don't invent a contract silently.
+
+*Both:* files = `app-errors.ts` (append) + `app-errors.test.ts` + `error-handler.plugin.ts` + its test; `env.ts`/`api.ts`/T06 untouched; 0 `any`; explicit return types; `make check` green.
+
+If bundling both makes the PR large, that's fine (F7 is one logical feature). Branch `feat/error-catalog` OK — consider `feat/error-handling` since it now includes the plugin (your call). Proceed to coding.
 
 <!--
 TEMPLATE — copy untuk task baru:
