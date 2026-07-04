@@ -621,6 +621,49 @@ Requesting PM A VERDICT.
 
 **Executor A: T04 done — webhook signature primitive ready for B (WA ingest T12) & C (Telegram T19).** Next in queue: **T05** (tenant resolution from `:hotel_slug`, LRU 5-min, `hotels.code` lookup). Note T05 will need the `hotels`-lookup source — expect a topology dependency on Q-A-01; call it out in your PLAN's session-start gate. Post PLAN when ready.
 
+### ASSIGNMENT T05 — claimed by exec-A (Nathan) at H12 (2026-07-03)
+- Branch: `feat/tenant-slug-resolver` (proposal, `feat/<short>`)
+- Routed from: PM-STATUS-A.md §1 T05 + VERDICT T04 hand-off. Spec: `MVP-INTEGRATION-FIRST.md §4.3` (LRU 5-min, 404, never-trust-body), `04-integration-channels.md §2.3` (`:hotel_slug`→`hotel_id` via Auth `hotels.code`) + §8 (webhook no session; tenant guard derives `hotel_id` dari slug).
+
+#### PLAN T05 — exec-A (Nathan) at H12 (2026-07-03)
+
+**Scope recap**
+- T05 = resolusi tenant dari `:hotel_slug` (URL param) → `hotel_id`, di-cache **LRU 5-min TTL**. Slug tak ditemukan → **404** (`NotFoundError`). **Never trust `hotel_id` dari body** — hanya dari URL param. Foundation primitive; dikonsumsi webhook routes B (T12) & C (T19) sebagai preHandler, mendahului signature-verify handler.
+
+**Session-start gate** (EXECUTOR-PROTOCOL §2)
+- Identity confirmed: Executor, Slot A (Nathan) ✓ · CLAUDE.md loaded ✓
+- Task spec read: `MVP §4.3` (LRU 5-min, 404, no-trust-body), `04 §2.3` (slug→id via `hotels.code`, cache) + §8 (tenant guard).
+- Parent docs spot-read: `prisma-client.ts` (**STUB** `db={}`), `redis-client.ts` (stub), `app-errors.ts` (`NotFoundError` 404 ada), `hmac-validator.plugin.ts` (pola injected-port + Fastify hook + `declare module`).
+- **Topology dep (Q-A-01, per PM note)**: `hotels` = **Auth-owned**, TIDAK ada di schema repo ini (T02 = 8 tabel Integration saja); `prisma-client` masih stub. Sumber lookup `hotels.code`→`id` = cross-service (Auth RPC vs shared-DB read) — **belum diputus (Q-A-01 open)**. → T05 pakai **injected lookup port** (GAP #1), sama pola `resolveSecret` T04; impl data-source di-wire nanti.
+- **Dep availability**: `lru-cache` cuma **transitive** (10.4.3/5.1.1), TIDAK di `package.json` → pnpm strict = tak importable tanpa declare (PO-gated). → **hand-rolled** TTL+LRU cache, zero dep (GAP #3).
+- `make check` clean baseline ✓. Scaffolder risk: none.
+
+**Files to create (lokasi PROPOSED — minta ACK)**
+```
+src/shared/utils/ttl-lru-cache.ts              (generic TTL+LRU cache, injectable clock)
+src/shared/utils/__tests__/ttl-lru-cache.test.ts
+src/plugins/tenant-resolver.plugin.ts          (slug→hotelId resolver + Fastify preHandler)
+src/plugins/__tests__/tenant-resolver.plugin.test.ts
+```
+
+**Files to modify**
+- (none) — `api.ts` stub; primitive tak di-wire ke server hidup (deferred). `env.ts`/prisma UNTOUCHED.
+
+**Approach (arsitektur — mirror T04 hexagonal)**
+1. **`TtlLruCache<V>`** (pure, unit-test): `constructor({ maxSize, ttlMs, now? })`; `get/set/has/delete/clear`. Eviksi TTL lazy saat `get`; eviksi LRU (Map insertion-order: delete+set saat akses, buang terlama saat > maxSize). **Inject `now()`** (default `Date.now`) → test TTL/LRU deterministik tanpa real-wait. `now()` di app-code diperbolehkan (batasan Date.now hanya untuk workflow script).
+2. **`HotelSlugLookup`** port: `(code: string) => Promise<string | null>` (null = tak ada). 
+3. **`createSlugResolver({ lookup, ttlMs=300_000, maxSize=1000, now? })`** → `resolve(slug): Promise<string>` — cek cache → miss: `lookup(slug)` → null → **`throw NotFoundError('hotel', slug)`** (404); non-null → cache (positif saja, lihat GAP #2) + return.
+4. **Fastify preHandler**: `resolveTenantFromSlug({ resolver, paramName='hotel_slug' })` → baca `req.params[paramName]` (URL only, **abaikan body**), `resolver.resolve`, set `req.hotelId`. `declare module 'fastify'` augment `hotelId?: string`. Gagal → `NotFoundError` → **404 native** (via `NotFoundError.statusCode=404`, sama pola T04 tanpa T08).
+5. **Test**: cache unit (hit, miss, TTL-expiry via mock `now`, LRU eviksi saat over-cap, negative tak-di-cache); resolver (miss→lookup→cache, hit→no-2nd-lookup [spy call count], not-found→NotFoundError); Fastify inject (valid slug→200 + `req.hotelId` benar via echo handler; unknown slug→**404** + handler tak jalan; body `hotel_id` diabaikan — kirim body beda, pastikan pakai slug URL).
+
+**GAPs / questions — butuh ACK PM A**
+- **GAP T05-#1 — hotels-lookup source (Q-A-01 dep).** A (default): T05 expose **injected `HotelSlugLookup` port**; impl (Auth RPC vs shared-DB `hotels.code` query) di-wire saat Q-A-01 resolved + prisma-client hidup. Test pakai stub lookup. B: blokir T05 sampai Q-A-01 + prisma live. **Intent: A** — primitive + caching/404/no-trust-body logic bisa selesai & teruji sekarang; data-source plug belakangan.
+- **GAP T05-#2 — cache negatives?** A (default): cache **positif saja**. Hotel baru dibuat → slug-nya tak ke-blokir 404 stale sampai 5 menit. B: cache negatif TTL pendek (mis. 30s) utk redam brute-force slug-enum. **Intent: A** (correctness > micro-opt; negative-cache bisa ditambah nanti kalau ada abuse).
+- **GAP T05-#3 — LRU impl.** A (default): hand-rolled Map-based TTL+LRU, zero dep. B: declare `lru-cache` (new dep → PO). **Intent: A** (kecil, teruji, no PO-gate).
+- **GAP T05-#4 — lokasi file.** PROPOSED: cache generic → `src/shared/utils/ttl-lru-cache.ts` (reusable B/C); resolver+hook → `src/plugins/tenant-resolver.plugin.ts`. Alternatif: fold cache inline ke plugin (kurang reusable). **Intent: split** (cache reusable + unit-test isolated). Minta ACK lokasi (guardrail: bukan `src/common/`).
+
+Awaiting PM A ACK (GAP #1–#4).
+
 <!--
 TEMPLATE — copy untuk task baru:
 
