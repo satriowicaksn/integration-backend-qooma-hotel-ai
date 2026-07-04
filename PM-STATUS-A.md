@@ -954,6 +954,45 @@ Verified by PM A: `bull-factory.ts` = stub (`queueFactory = {} placeholder`, nam
 
 Branch `feat/queue-infra` OK. Proceed to coding.
 
+#### SUBMIT T07 — exec-A (Nathan) at H12 (2026-07-03) (attempt 1)
+
+Task: Queue + scheduler infra — Bull factory + retry/backoff + DLQ (extend `bull-factory.ts`)
+Branch: `feat/queue-infra` (pushed, commit `04f2e04`)
+Files changed: 2
+  - `src/core/queue/bull-factory.ts` (modified — stub → factory + helpers)
+  - `src/core/queue/__tests__/bull-factory.test.ts` (new, 11 tests)
+
+DoD self-check (binding conditions)
+- [x] **Bull 4.x, zero-dep** — `import Bull from 'bull'` (declared `bull@4.16.3`); `package.json`+lock UNCHANGED. Bukan `bullmq`.
+- [x] **backoff [1000,5000,30000] + clamp** — `integrationBackoffStrategy(attemptsMade)` → 1→1000, 2→5000, 3→30000, ≥4→30000 (clamp), 0→1000. Registered via `settings.backoffStrategies.integration`. Tested.
+- [x] **DLQ forwarder only on exhaustion** — `attachDeadLetterForwarder(queue, sink)` on `'failed'`: `attemptsMade >= opts.attempts` → `sink.add({originalQueue,jobId,name,data,failedReason})`; else no-op. Both paths + failedReason-precedence tested (via structural mock, no Bull). `removeOnFail:false` agar failed inspectable.
+- [x] **Redis injected (not constructed in factory)** — `buildQueueOptions(redis, …)` + `createQueue({name, redis, …})` terima `redis` injected; factory tak `loadConfig`/tak buka koneksi (→ tak ada open handle di unit test).
+- [x] **concurrency from `WORKER_CONCURRENCY_DEFAULT`** — `registerProcessor(queue, jobName, concurrency, processor)` terima concurrency param; wiring pass `config.WORKER_CONCURRENCY_DEFAULT` (di-doc di JSDoc; factory tak coupling ke env).
+- [x] **≥80% coverage on logic; no hanging Redis handles** — **logic fns = 100%** (backoff/naming/job-options/queue-options/DLQ-forwarder). File overall 88.9% line / 80% br; 3 uncovered = thin Bull wrappers `createQueue`/`registerProcessor`/`scheduleRepeatable` (integration-deferred per ACK GAP #4, genuinely logic-free 1-liner delegasi). `jest --detectOpenHandles` → **0 open handles**.
+- [x] **function-based, 0 `any`** — semua factory/helper = function (0 `class`); 0 `any` di bull-factory.ts (mock test pakai struktural `DeadLetterSink`/`FailableQueue`, bukan `as any`). Explicit return types.
+- [x] **make check green; extend bull-factory.ts** — hanya `core/queue/`; `_template`/`api.ts`/`env.ts`/`redis-client.ts` untouched.
+
+Quality gate
+- `make lint`: PASS · `make format-check`: PASS · `make typecheck`: PASS · `make test-unit`: PASS (61: +11 T07; 2 skipped template). `make check` exit 0.
+
+Drift scans (§4.4)
+- bull-factory.ts: `any` 0 · `class` 0 · console 0 · `throw new Error(` 0 · forbidden imports 0 (bull = official stack). Diff = 2 file `core/queue/` saja.
+
+Security check
+- N/A langsung (infra queue). Job-data convention = minimal context (ids), bukan full domain / secret (di-doc). DLQ payload = ids + failedReason (no secret).
+
+Test evidence
+- Unit: 11 — backoff (sequence, clamp-high, clamp-zero), naming (queue + dead-letter), default-job-options (defaults + override-wins), queue-options (backoffStrategies wired + redis passthrough), DLQ-forwarder (exhaustion→forward, retries-remain→no-op, failedReason-precedence).
+- Coverage: logic 100% line/func; 3 thin wrappers integration-deferred. `--detectOpenHandles`: clean.
+- Integration: N/A unit (Bull instantiation needs Redis; wrappers wired + integration-tested when server assembled).
+
+Notes / questions (untuk PM A)
+- **3 thin wrappers** (`createQueue`/`registerProcessor`/`scheduleRepeatable`) = 1-liner delegasi ke Bull, uncovered by design (butuh live Redis) — per ACK GAP #4 "stay genuinely logic-free". Semua keputusan (backoff/naming/options/DLQ) di logic fns yang 100% tested.
+- **Q-A-07 (retry count)** — shipped `attempts=3` (backoff pakai 1s+5s; 30s reserved kalau attempts≥4), per-job configurable via `buildDefaultJobOptions({attempts})`. Menunggu ruling PO sebelum B's T14.
+- **Non-retryable** (quota/template-not-approved, spec §7) — caller set `attempts:1` (override) atau skip enqueue; foundation sediakan mekanisme, keputusan per-job = B.
+
+Requesting PM A VERDICT.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
