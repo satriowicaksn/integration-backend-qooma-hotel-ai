@@ -15,8 +15,8 @@
 ## 0. Current focus (slot A)
 
 - **Day**: H12+ (task tracker activated 2026-06-30)
-- **Active task**: T01-T06 MERGED · **T07 ✅ APPROVED** (Bull queue infra, logic 100% cov, no open handles, awaiting PO merge). **7/9 foundation done.** Next: T08 (error catalog). Open Qs: Q-A-01/02/04/07 (PO/PM B), Q-A-03/05 (shared-config), Q-A-06 (WA module → B align).
-- **Branch**: `feat/queue-infra` (T07, awaiting PO merge + CI)
+- **Active task**: T01-T07 ✅ **MERGED** (PR #1-7). **7/9 foundation done.** Next: T08 (error catalog) — planning open. Open Qs: Q-A-01/02/04/07 (PO/PM B), Q-A-03/05 (shared-config), Q-A-06 (WA module → B align).
+- **Branch**: — (T07 merged; T08 branch TBD at PLAN)
 - **Next gate (global)**: G1 — lihat `PM-STATUS-PARENT.md §5`
 - **My queue (preview)**: T01–T09 (foundation) — lihat §8 di bawah (mirror dari PARENT §1 filter Slot=A)
 - **Critical path**: T02 (Prisma migration) blokir implementasi Nanak (T10+) dan Satrio (T17+). Prioritaskan T01 → T02 → T03 sequence.
@@ -35,7 +35,7 @@
 | T04 | Webhook signature-verification middleware (Meta `X-Hub-Signature-256` + Telegram)| merged   | PM A (H12) ✓   | plugin-level preHandler, timingSafeEqual, raw-byte HMAC, 401 native, no-insert invariant proven. 100% line cov. Merged PR #4 `ad46125`. |
 | T05 | Tenant resolution from `:hotel_slug` (LRU 5-min, hotels.code lookup)             | merged   | PM A (H12) ✓   | factory TTL-LRU (no-class per PO), injected lookup port, 404 native, never-trust-body proven, 100% resolver cov. Merged PR #5 `59e8218`. Consumed by T12+T19. |
 | T06 | BSP adapter interface + `1engage` impl                                           | merged   | PM A (H12) ✓   | module `whatsapp`, vendor-agnostic port + factory 1engage adapter, ExternalServiceError, injected HttpPoster, 100% adapter cov. Merged PR #6 `3c1274a`. Consumed by T13. Q-A-06 (B align). |
-| T07 | Queue + scheduler infra (BullMQ + retry + DLQ)                                   | approved | PM A (H12) ✓   | Bull 4.x, backoff [1s/5s/30s] attempts=3 configurable, DLQ-forwarder (exhaustion-gated), Redis-injected. logic 100% cov, no open handles. Awaiting PO merge. Consumed by T14/T21/T24. Q-A-07. |
+| T07 | Queue + scheduler infra (BullMQ + retry + DLQ)                                   | merged   | PM A (H12) ✓   | Bull 4.x, backoff [1s/5s/30s] attempts=3 configurable, DLQ-forwarder (exhaustion-gated), Redis-injected. logic 100% cov. Merged PR #7 `6654d46`. Consumed by T14/T21/T24. Q-A-07. |
 | T08 | Common error handlers (Integration-specific codes per spec §9)                   | backlog  | —              | After T01                                                          |
 | T09 | Internal RPC server (HTTP/mTLS; spec §10 catalog)                                | backlog  | —              | After T01 + T05                                                    |
 
