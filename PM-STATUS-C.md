@@ -30,7 +30,7 @@
 
 | T## | Title                                                                            | Status   | Verified by PM | Notes                                                              |
 | --- | -------------------------------------------------------------------------------- | -------- | -------------- | ------------------------------------------------------------------ |
-| T17 | Telegram config CRUD (`GET, PUT /api/integrations/telegram`)                     | wip      | PM C partial   | PLAN attempt 1 REJECT-PLAN + scope-narrowed (H13). Primitive (types/schema/repo/service + unit tests) proceeding; router+api.ts wiring escalated as Q-C-01/02/03/04 |
+| T17 | Telegram config CRUD (`GET, PUT /api/integrations/telegram`)                     | approved (primitive) | PM C (H13, a2) | Primitive shipped: types+zod+repo(Prisma-direct ctor-inject)+service(encrypt+mask+PII-floor)+22 unit tests, 100% module cov, make check green on PM rerun. Router+api.ts wiring = T17-followup blocked on Q-C-01/02/03. Branch `feat/telegram-config-crud @ 98f098b`, PR pending push |
 | T18 | Per-dept Telegram routing write-through (HC `departments` table)                 | backlog  | —              | After T17; per Q-OPS-06 shared-DB direct write                     |
 | T19 | Telegram inbound webhook + commands (`/take`, `/release`, `/done`, `/help`)      | backlog  | —              | After T04 (Nathan) + T05 + T17                                     |
 | T20 | Outbound Telegram dispatch RPC                                                   | backlog  | —              | After T06 + T09 (Nathan); per-dept routing per T18                 |
@@ -224,6 +224,34 @@ Notes / open items
 
 Requesting PM C VERDICT.
 
+##### VERDICT T17 — APPROVED (attempt 2, narrow-primitive) by PM C (H13)
+
+**Scope**: T17 primitive-only per REJECT-PLAN §142 ("primitive shipped, unit-tested; endpoint reachability deferred"). Router + `api.ts` wiring + integration test correctly deferred behind Q-C-01/02/03.
+
+**PM independent verification** (checked out `feat/telegram-config-crud` @ `98f098b` into local worktree, re-ran gate + drift scans):
+
+- ✅ **REJECT Item #1 (masking fix)** — `telegram.service.ts:49` `decrypt(domain.botTokenEnc)` → `maskTokenForLog(plaintext)` at line 52 → `view.botToken`. Stable across encrypts of same plaintext. Round-trip test (`telegram.service.test.ts:275-276`) asserts `getView.botToken === upsertView.botToken === maskTokenForLog(BOT_TOKEN_PLAINTEXT)`. ✓
+- ✅ **REJECT Item #2 (scope containment)** — verified via `git diff main..feat/telegram-config-crud --stat`: only `src/modules/telegram/**` + `PM-STATUS-C.md`. Zero touches to `src/core/prisma/prisma-client.ts`, `src/entrypoints/api.ts`, `src/plugins/**`, or `telegram.routes.ts`. ✓
+- ✅ **REJECT Item #3 (Prisma-direct + ctor-inject)** — `telegram.repository.ts:17` `constructor(private readonly db: PrismaClient)`. Imports `PrismaClient` + `TelegramConfig` types from `@prisma/client` directly (no wrap-interface). ADR-0001 preserved. ✓
+- ✅ **Quality gate (PM rerun)** — `make check` PASS: lint 0/0, format clean, typecheck strict clean, `test:unit` 108 passed / 12 of 14 suites (2 skipped = pre-existing integration suites, unchanged by T17). +22 new tests from T17. ✓
+- ✅ **Drift scans (PM rerun, scope `src/modules/telegram/`)** — 0 `any`, 0 `console.log/info/debug`, 0 `throw new Error(`, 0 `default export`, 0 forbidden imports (express/typeorm/moment/node-fetch), 0 `.skip`. Hardcoded URLs = `example.com` + `localhost` in test fixtures + env-override for `resetConfigCache` (allowed exception per PM-AGENT §3 Step 2). ✓
+- ✅ **Security floor (CLAUDE §6)** — AES-256-GCM via `crypto.encrypt` T03 (service.ts:37), no plaintext in DB write (repo receives `botTokenEnc` only), no plaintext/ciphertext in GET view (masked at service.ts:52), no plaintext in log line (`maskTokenForLog(input.botToken)` at service.ts:34; test `should log masked bot_token BEFORE encrypt (PII floor)` asserts `JSON.stringify(loggedPayload)` excludes plaintext). `ENCRYPTION_KEY` from `@core/config/env.js`, no hardcode. ✓
+- ✅ **Spec alignment** — `telegram_configs` model (`prisma/schema.prisma:49-61`) matches spec §4.2 DDL fields 1:1; PUT accepts `{ bot_token, bot_username, default_chat_id?, gm_telegram_id?, webhook_url? }` per §2.1 row; GET returns view w/ masked token per MVP §5 L118 WA-parallel pattern. Zod schema `strict()` rejects unknown fields (`telegram.schema.test.ts:45-47`). ✓
+- ✅ **File inventory vs SUBMIT §163-171** — all 8 files present, no unexpected files, coverage claim `100% stmt/branch/func/line` on module scope aligns with observed test counts (22 tests exercising every branch of get/upsert/toView/toDomain). ✓
+- ✅ **Test naming** — `should <expected> when <condition>` pattern honored across all 22 tests. ✓
+
+**Tolerated deviations (flagged, non-blocking)**:
+
+1. **Repository unit test uses mock Prisma** (`telegram.repository.test.ts:29-36` `buildDbMock` cast `as unknown as PrismaClient`). CLAUDE §8 + PM-AGENT §3 Step 7 explicitly disallow mocking Prisma at unit-test tier ("pakai integration test dengan real DB"). **Tolerated here** because integration test is blocked on Q-C-01 (Prisma singleton `{}` placeholder) — executor cannot ship a real DB test yet. The mock test is legitimately verifying **call-shape translation** (`upsert` payload structure, `where` clause, `toDomain` mapping) rather than mocking business logic. **Required follow-up**: when Q-C-01 lands, executor must add `telegram.repository.integration.test.ts` (testcontainers per `docs/TESTING.md`) that exercises real Postgres round-trip. Mock unit test may remain (call-shape regression pressure) or be removed at executor discretion. Tracked in `Notes / open items` (§219-223 above) — no separate incident.
+2. **Q-A-03 workaround reappears** (`telegram.service.test.ts:16-26` in-test `BASE_ENV` w/ `NODE_ENV: 'development'` + `resetConfigCache`) — same pattern PM A used for T03/T04. Confirms Q-A-03 (baseline test env in `shared/utils/test-setup.ts`) still needed as shared-infra follow-up; not slot-C's fix to make.
+
+**T17 status**: `wip` → **approved (narrow primitive)**. Router / integration deliverable = separate follow-up task (T17-followup) after Q-C-01/02/03 resolved. Slot C row in §1 tracker + PARENT §1 updated.
+
+**Next actions**:
+- Executor C: push `feat/telegram-config-crud` to remote + open PR to `main` (CI must run). PM C will re-verify on green CI + auto-approve merge post-PR-CI-green. Meanwhile, executor C may pick a self-contained task from §8 that doesn't need router/JWT (all remaining C-tasks depend on foundation — parked pending Parent PM).
+- PM C: post PARENT §2 roll-up + PARENT §1 status update. Q-C-01/02/03/04 remain open pending Parent PM/PO.
+- Parent PM: please prioritize Q-C-01/02/03 — B (T10) + C (T18+) are otherwise blocked from any HTTP endpoint or repo integration test.
+
 
 <!--
 TEMPLATE — copy untuk task baru:
@@ -344,6 +372,7 @@ Re-run `make check` after fix, confirm pass, resubmit (attempt N+1).
 | Run | Touched files | `any` | console.log | `throw new Error(` | forbidden imports | default export (di luar entry) | `.skip` | hardcoded URL | webhook tanpa HMAC | wrap-Prisma interface |
 | --- | ------------- | ----- | ----------- | ------------------ | ----------------- | ------------------------------ | ------- | ------------- | ------------------ | --------------------- |
 | H12 baseline | (no src/ touched) | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| H13 T17 a2 | 8 files in `src/modules/telegram/` | 0 | 0 | 0 | 0 | 0 | 0 | 0 (test fixtures only: `example.com` + `localhost` env-overrides — allowed) | n/a (no webhook this task) | 0 (Prisma-direct + ctor-inject, ADR-0001) |
 
 > PM C jalankan drift scan per `PM-AGENT.md §3 Step 2` setiap SUBMIT + end-of-day full scan untuk slot C's touched files.
 
@@ -354,6 +383,38 @@ Re-run `make check` after fix, confirm pass, resubmit (attempt N+1).
 > PM C post daily standup di sini, lalu post 1-2 baris ringkas ke `PM-STATUS-PARENT.md §6` (yang Parent PM consolidate jadi cross-team report).
 >
 > Format: per `PM-AGENT.md §7`.
+
+### H13 — 2026-07-04 (T17 primitive APPROVED attempt 2; foundation gaps escalated)
+
+```
+QOOMA INT C (Satrio) — Standup — H13/TBD
+
+✅ Approved hari ini
+- T17 primitive (types+zod+repo+service+22 unit tests, 100% module cov, make check green on PM rerun) — attempt 2 after REJECT-PLAN + narrow scope. Branch `feat/telegram-config-crud @ 98f098b`, PR push pending.
+
+🔄 In progress
+- (idle) — router+api.ts wiring for T17 blocked; awaiting Parent PM ratification on Q-C-01/02/03.
+
+⛔ Rejected
+- T17 PLAN attempt 1 (scope bundling shared-infra + broken masking design)
+
+🚨 Eskalasi ke Parent PM
+- Q-C-01 (Prisma singleton wiring — foundation gap, affects B+C)
+- Q-C-02 (api.ts bootstrap — foundation gap, affects all HTTP)
+- Q-C-03 (Session/JWT auth plugin — cross-service contract w/ Auth svc repo; needs PO ratification)
+- Q-C-04 (Tenant-id source on CRUD endpoints; cascades Q-C-03)
+
+📅 Gate status (global)
+- Next gate: G1 — lihat PARENT §5. Foundation task list 9/9, but assembly (prisma+api+JWT) not yet primitive-shipped.
+
+📈 Progress slot C
+- 1 / 9 task approved (T17 primitive; router follow-up parked)
+- Blocked: T18-T25 all await Q-C-01 at minimum; T19+ await Q-C-03 (JWT).
+
+🎯 Fokus besok
+- Executor: push PR for T17 primitive branch; then idle on foundation ratification. Optional: draft OTA-parser types (T21 has same Prisma dep but no HTTP surface — small forward progress possible).
+- PM C: wait Parent PM verdict on Q-C-01/02/03; re-verify T17 PR on CI green.
+```
 
 ### H12 — TBD (Satrio onboard, T17 assigned — skeleton-only sampai T02 land)
 
