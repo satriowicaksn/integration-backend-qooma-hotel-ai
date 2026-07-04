@@ -156,6 +156,75 @@ DoD self-check reformulation for T17 attempt 1: shrink to "primitive shipped, un
 
 Executor C: proceed pada Files-boleh-touch list di atas; ship SUBMIT saat primitif + unit test ≥80% + `make check` green. Router + integration + api.ts wiring = follow-up task setelah Q-C-01/02/03 resolved.
 
+#### SUBMIT T17 — exec-C (Satrio) at H13 10:35 (attempt 2, narrow-scope per PM C REJECT-PLAN)
+
+Task: Telegram config CRUD primitive (C1) — types, schema (zod), Prisma-direct repository, service with encrypt-on-write + decrypt+mask-on-read + PII-floor log, unit tests. Router + api.ts wiring deferred per Q-C-01/02/03.
+
+Files changed: 8 (all new; scope strictly `src/modules/telegram/**`)
+  - src/modules/telegram/index.ts (new — barrel, types + service + repository + schema exports; no route export)
+  - src/modules/telegram/telegram.types.ts (new — `TelegramConfigDomain`, `TelegramConfigView`)
+  - src/modules/telegram/telegram.schema.ts (new — zod `TelegramConfigPutSchema` strict, `TelegramConfigResponseSchema`)
+  - src/modules/telegram/telegram.repository.ts (new — Prisma-direct, ctor-injected `PrismaClient` per REJECT Item #3)
+  - src/modules/telegram/telegram.service.ts (new — `get` (decrypt→mask→view) + `upsert` (mask-log→encrypt→persist→view))
+  - src/modules/telegram/__tests__/telegram.service.test.ts (new — 11 tests: get, NotFound, no-plaintext-in-view, upsert-encrypts, upsert-view-masked, PII-floor log, nullish-coerce, passthrough, round-trip)
+  - src/modules/telegram/__tests__/telegram.repository.test.ts (new — 3 tests: findByHotelId null, findByHotelId row-map, upsert create/update payload shape)
+  - src/modules/telegram/__tests__/telegram.schema.test.ts (new — 8 tests: put valid/optional/rejects, response valid/rejects)
+
+Files NOT touched (per PM C REJECT Item #2 — foundation authority):
+  - src/core/prisma/prisma-client.ts (still `{}` stub — Q-C-01 open)
+  - src/entrypoints/api.ts (still stub — Q-C-02 open)
+  - src/plugins/ (no JWT plugin authored — Q-C-03 open)
+  - src/modules/telegram/telegram.routes.ts (not created — post-foundation follow-up)
+
+DoD self-check (narrowed per REJECT-PLAN §142)
+- [x] **Item #1 (masking fix)** — GET view calls `decrypt(botTokenEnc)` → `maskTokenForLog(plaintext)` at `telegram.service.ts:47`; stable across encrypts of same plaintext. Test `service.test.ts:186 'should return view with masked bot_token, not plaintext or ciphertext'` + round-trip test verify.
+- [x] **Item #2 (scope narrowed)** — zero touches to `prisma-client.ts` / `api.ts` / any auth plugin / `telegram.routes.ts`. Verified: `git status` shows only `src/modules/telegram/`.
+- [x] **Item #3 (Prisma-direct + ctor-inject)** — `telegram.repository.ts:14` `constructor(private readonly db: PrismaClient)`; no wrap-interface. Import `PrismaClient` + `TelegramConfig` types directly from `@prisma/client`. ADR-0001 preserved.
+- [x] **GAP #5 ACK (make install)** — `pnpm install --frozen-lockfile` + `pnpm prisma:generate` ran once (no lockfile mutation; both `pnpm-lock.yaml` and `package.json` unchanged in `git status`).
+- [x] **Spec §4.1 encryption at rest** — `bot_token` encrypted via `encrypt()` (T03) at `telegram.service.ts:38` BEFORE `repository.upsert`. Verified in test: `decrypt(receivedInput.botTokenEnc) === plaintext`.
+- [x] **Spec §5 L124 CRUD AC (behavior)** — `PUT { bot_token, bot_username } succeeds`: `upsert` returns `TelegramConfigView` with masked token + persists ciphertext; GET reciprocates. Endpoint reachability defers to post-foundation router-landing task.
+- [x] **PII floor** — `logger.info` at `telegram.service.ts:29` receives `maskTokenForLog(input.botToken)`, not plaintext. Test `should log masked bot_token BEFORE encrypt (PII floor)` asserts `JSON.stringify(loggedPayload)` does not contain the plaintext.
+
+Quality gate
+- `make lint`: PASS (0 errors, 0 warnings, --max-warnings 0)
+- `make format-check`: PASS (prettier --check clean)
+- `make typecheck`: PASS (tsc --noEmit, strict + exactOptionalPropertyTypes + noUncheckedIndexedAccess)
+- `make test-unit`: PASS (108 tests, 12 suites; +22 new tests in `src/modules/telegram/__tests__/`)
+- `make check` (combined): **PASS**
+- Module coverage (isolated to `src/modules/telegram/**`): **100% stmts / 100% branch / 100% funcs / 100% lines** — verified via `pnpm test:coverage --collectCoverageFrom='src/modules/telegram/**/*.ts'`
+
+Drift scans (per EXECUTOR-PROTOCOL §4.4, scoped to `src/modules/telegram/`)
+- `any` / `<any>` / `as any`: 0 hits
+- `console.log|info|debug`: 0 hits
+- `throw new Error(`: 0 hits (service uses `NotFoundError` from `@core/errors/app-errors.js`)
+- forbidden imports (express/typeorm/sequelize/moment/node-fetch): 0 hits
+- default export outside entrypoints/config: 0 hits
+- `.skip(` in tests: 0 hits
+- Pre-existing hits outside my scope (informational, not caused by T17): `throw new Error(` in `src/core/config/env.ts:75` (boot-time fail-fast) + `src/core/http/http-client.ts:19,27` (foundation stub).
+
+Security check (per CLAUDE §6)
+- Token encryption via `@shared/utils/crypto.encrypt` (T03 AES-256-GCM): yes — `telegram.service.ts:38`.
+- No plaintext token in DB write: verified — repository receives `botTokenEnc` only.
+- No plaintext / ciphertext in GET response view: verified — `view.botToken` = `maskTokenForLog(decrypt(...))` at `telegram.service.ts:47-49`.
+- No plaintext in log line (PII floor): verified — `logger.info(...maskTokenForLog(input.botToken)...)` at `telegram.service.ts:29-35`; unit test asserts.
+- No secret hardcoded: verified — `ENCRYPTION_KEY` sourced from `@core/config/env.js` via `crypto.ts`. Test-only literal `VALID_KEY = 'a'.repeat(64)` lives in test file, matches existing crypto.test pattern.
+- HMAC / webhook / N/A this scope.
+
+Test evidence (unit only; integration deferred per REJECT `Do NOT touch` list)
+- Suites added: 3 (`telegram.service.test.ts`, `telegram.repository.test.ts`, `telegram.schema.test.ts`)
+- Tests added: 22 (11 service + 3 repository + 8 schema)
+- Round-trip coverage: `upsert` view.botToken === `get` view.botToken === `maskTokenForLog(plaintext)`
+- PII floor coverage: `JSON.stringify(loggedPayload)` asserted to not contain plaintext token
+
+Notes / open items
+- Router landing (`telegram.routes.ts` + Fastify plugin `requireGmAdmin` + `/api/integrations/telegram` mount) blocked on Q-C-01 (prisma singleton) + Q-C-02 (`api.ts` bootstrap) + Q-C-03 (JWT plugin / cross-service contract). Ready to pick up as T17-followup once PO ratifies + foundation follow-ups land.
+- Integration test (`telegram.repository.integration.test.ts`) deferred by PM C — same blockers. Repository is Prisma-direct against real client shape from `@prisma/client` (types match schema exactly), so integration should be a plug-in once singleton lands.
+- `docs/spec/04-integration-channels.md §4.2` DDL vs Prisma model `TelegramConfig` @ `prisma/schema.prisma:49-61` — all fields aligned (hotel_id PK, bot_token_enc TEXT, bot_username VARCHAR(40), default_chat_id/gm_telegram_id/webhook_url nullable, created/updated timestamptz).
+- Branch: `feat/telegram-config-crud` (not yet pushed to remote; will push with this SUBMIT commit).
+
+Requesting PM C VERDICT.
+
+
 <!--
 TEMPLATE — copy untuk task baru:
 
