@@ -15,8 +15,8 @@
 ## 0. Current focus (slot A)
 
 - **Day**: H12+ (task tracker activated 2026-06-30)
-- **Active task**: T01-T07 MERGED · **T08 ✅ APPROVED** (7 §9 error classes + canonical-envelope handler, F7 complete, awaiting PO merge). **8/9 foundation done.** Next: T09 (RPC server — last one). Open Qs: Q-A-01/02/04/07 (PO/PM B), Q-A-03/05/08 (shared-config/boilerplate → Parent PM), Q-A-06 (WA module → B align).
-- **Branch**: `feat/error-handling` (T08, awaiting PO merge + CI)
+- **Active task**: T01-T08 ✅ **MERGED** (PR #1-8). **8/9 foundation done — only T09 left.** Next: T09 (RPC server) — planning open. Open Qs: Q-A-01/02/04/07 (PO/PM B), Q-A-03/05/08 (shared-config/boilerplate → Parent PM), Q-A-06 (WA module → B align).
+- **Branch**: — (T08 merged; T09 branch TBD at PLAN)
 - **Next gate (global)**: G1 — lihat `PM-STATUS-PARENT.md §5`
 - **My queue (preview)**: T01–T09 (foundation) — lihat §8 di bawah (mirror dari PARENT §1 filter Slot=A)
 - **Critical path**: T02 (Prisma migration) blokir implementasi Nanak (T10+) dan Satrio (T17+). Prioritaskan T01 → T02 → T03 sequence.
@@ -36,7 +36,7 @@
 | T05 | Tenant resolution from `:hotel_slug` (LRU 5-min, hotels.code lookup)             | merged   | PM A (H12) ✓   | factory TTL-LRU (no-class per PO), injected lookup port, 404 native, never-trust-body proven, 100% resolver cov. Merged PR #5 `59e8218`. Consumed by T12+T19. |
 | T06 | BSP adapter interface + `1engage` impl                                           | merged   | PM A (H12) ✓   | module `whatsapp`, vendor-agnostic port + factory 1engage adapter, ExternalServiceError, injected HttpPoster, 100% adapter cov. Merged PR #6 `3c1274a`. Consumed by T13. Q-A-06 (B align). |
 | T07 | Queue + scheduler infra (BullMQ + retry + DLQ)                                   | merged   | PM A (H12) ✓   | Bull 4.x, backoff [1s/5s/30s] attempts=3 configurable, DLQ-forwarder (exhaustion-gated), Redis-injected. logic 100% cov. Merged PR #7 `6654d46`. Consumed by T14/T21/T24. Q-A-07. |
-| T08 | Common error handlers (Integration-specific codes per spec §9)                   | approved | PM A (H12) ✓   | 7 §9 classes + canonical `{error:{…}}` handler (README §2.3 wrapper), non-AppError→500 INTERNAL no-leak, correlationId log. 100% new-code cov. Merged-pending. Q-A-08 (generic-code drift). |
+| T08 | Common error handlers (Integration-specific codes per spec §9)                   | merged   | PM A (H12) ✓   | 7 §9 classes + canonical `{error:{…}}` handler (README §2.3), non-AppError→500 INTERNAL no-leak, correlationId log. 100% new-code cov. Merged PR #8 `b503041`. Q-A-08 (generic-code drift). |
 | T09 | Internal RPC server (HTTP/mTLS; spec §10 catalog)                                | backlog  | —              | After T01 + T05                                                    |
 
 ---
