@@ -15,8 +15,8 @@
 ## 0. Current focus (slot A)
 
 - **Day**: H12+ (task tracker activated 2026-06-30)
-- **Active task**: T01-T05 MERGED · **T06 PLAN ACK'd, coding** (BSP port + 1engage adapter, module `whatsapp`, Opsi A×3). Open Qs: Q-A-01/02/04 (PO/PM B), Q-A-03/05 (shared-config), Q-A-06 (WA module name → B align).
-- **Branch**: `feat/wa-bsp-adapter` (T06, in progress)
+- **Active task**: T01-T05 MERGED · **T06 ✅ APPROVED** (BSP port + 1engage adapter, 100% adapter cov, awaiting PO merge). **6/9 foundation done.** Next: T07 (queue infra). Open Qs: Q-A-01/02/04 (PO/PM B), Q-A-03/05 (shared-config), Q-A-06 (WA module name → B align).
+- **Branch**: `feat/wa-bsp-adapter` (T06, awaiting PO merge + CI)
 - **Next gate (global)**: G1 — lihat `PM-STATUS-PARENT.md §5`
 - **My queue (preview)**: T01–T09 (foundation) — lihat §8 di bawah (mirror dari PARENT §1 filter Slot=A)
 - **Critical path**: T02 (Prisma migration) blokir implementasi Nanak (T10+) dan Satrio (T17+). Prioritaskan T01 → T02 → T03 sequence.
@@ -34,7 +34,7 @@
 | T03 | Encryption-at-rest helper (AES-256-GCM / KMS)                                    | merged   | PM A (H12) ✓   | Opsi A current-version. 100% cov, tamper+fail-fast verified. Merged PR #3 `ca9685b`. Consumed by T10+T17. |
 | T04 | Webhook signature-verification middleware (Meta `X-Hub-Signature-256` + Telegram)| merged   | PM A (H12) ✓   | plugin-level preHandler, timingSafeEqual, raw-byte HMAC, 401 native, no-insert invariant proven. 100% line cov. Merged PR #4 `ad46125`. |
 | T05 | Tenant resolution from `:hotel_slug` (LRU 5-min, hotels.code lookup)             | merged   | PM A (H12) ✓   | factory TTL-LRU (no-class per PO), injected lookup port, 404 native, never-trust-body proven, 100% resolver cov. Merged PR #5 `59e8218`. Consumed by T12+T19. |
-| T06 | BSP adapter interface + `1engage` impl                                           | wip      | —              | PLAN ACK'd (Opsi A×3). module `whatsapp`, port+factory adapter, ExternalServiceError, injected HttpPoster. Q-A-06 (B align name). |
+| T06 | BSP adapter interface + `1engage` impl                                           | approved | PM A (H12) ✓   | module `whatsapp`, vendor-agnostic port + factory 1engage adapter, ExternalServiceError, injected HttpPoster, 100% adapter cov. Awaiting PO merge. Consumed by T13. Q-A-06 (B align). |
 | T07 | Queue + scheduler infra (BullMQ + retry + DLQ)                                   | backlog  | —              | After T02                                                          |
 | T08 | Common error handlers (Integration-specific codes per spec §9)                   | backlog  | —              | After T01                                                          |
 | T09 | Internal RPC server (HTTP/mTLS; spec §10 catalog)                                | backlog  | —              | After T01 + T05                                                    |
@@ -864,6 +864,29 @@ Notes / questions (untuk PM A)
 - **Housekeeping:** port doc-header sempat hilang di commit awal `b997ae4` (gremlin, bukan hook/prettier — sudah dicek: no husky/lint-staged, `.prettierrc` clean); dipulihkan di `1a05af1` dan **diverifikasi di committed blob** (`git show HEAD:…`). Tip branch final = `1a05af1`.
 
 Requesting PM A VERDICT.
+
+##### VERDICT T06 — APPROVED (H12, attempt 1) by PM A
+
+✅ **APPROVE.** All 9 binding conditions verified independently on `feat/wa-bsp-adapter` (`1a05af1`).
+
+**Independent verification (PM rerun):**
+- **#1 hexagonal (ADR-0001)** — `WhatsappBspPort` = `interface`, fully vendor-agnostic (PM read the port: no axios/1engage/Cloud-API leak in any type). Adapter = factory implementing it via injected `HttpPoster`. ✓
+- **#2 barrel discipline** — `index.ts` = `export type { port + 4 domain types }` ONLY; `grep adapter index.ts` = 0 → **adapter not exported** (MODULE_TEMPLATE respected). ✓
+- **#3 module-scoped** — `src/modules/whatsapp/{ports,adapters,__tests__}`; not top-level `src/adapters/`. ✓
+- **#4 error mapping** — all three failure paths → `ExternalServiceError('1engage', msg, {status?, body})`: http-throw (incl. non-Error via `String(err)`), non-2xx, missing/empty `messageId`. All tested (7 cases). Not raw `Error`. ✓
+- **#5 injected `HttpPoster`** — narrow structural type, mocked; no real network; adapter takes **plaintext** token as Bearer, does NOT decrypt. ✓
+- **#6 no hardcoded URL** — `messagesUrl` built from injected `config.baseUrl`/`apiVersion`; `grep https?:// / graph.facebook / axios` in module = 0. ✓
+- **#7 factory/no-any/coverage** — factory (0 `class`); **0 `any`** (mock via `as unknown as`, not `as any`); explicit return types. PM rerun coverage = **100 line / 100 func / 92.3 branch** (line 111 = unreachable `?? []` defensive). ✓
+- **#8 Cloud-API payload** — text + template (components/parameters mapping; components omitted when no variables) verified via `toHaveBeenCalledWith`. ✓
+- **#9 make check green (PM rerun)** — 4 files only; `_template`/`api.ts`/`env.ts` untouched. ✓
+
+**Design quality:** clean single `dispatch()` helper shared by `sendText`/`sendTemplate`, `ExternalServiceError.upstream` carries `{status, body}` for Sentry (never the token), port stays stable regardless of vendor payload. Textbook ADR-0001 + Q-OPS-04.
+
+**Housekeeping note (verified):** the port doc-header that vanished in `b997ae4` is present in the final committed blob (`1a05af1`) — PM confirmed by reading `index`/port on the branch tip. Transparent, resolved, no residue.
+
+→ §1 tracker: T06 `approved`, Verified by PM A. → Code on `feat/wa-bsp-adapter` awaiting **PO merge + CI**.
+
+**Executor A: T06 done — BSP dispatch primitive ready for B4 (`send_wa_message`, T13).** `src/modules/whatsapp/` now seeded (ports+adapters+barrel); **B fills service/CRUD in this same module** (Q-A-06 — pending Parent PM confirm B aligns). Next in queue: **T07** (queue + scheduler infra — extend existing `src/core/queue/bull-factory.ts`, Bull + retry/backoff + DLQ). Post PLAN when ready.
 
 <!--
 TEMPLATE — copy untuk task baru:
