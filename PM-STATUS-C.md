@@ -30,7 +30,7 @@
 
 | T## | Title                                                                            | Status   | Verified by PM | Notes                                                              |
 | --- | -------------------------------------------------------------------------------- | -------- | -------------- | ------------------------------------------------------------------ |
-| T17 | Telegram config CRUD (`GET, PUT /api/integrations/telegram`)                     | approved (primitive) | PM C (H13, a2) | Primitive shipped: types+zod+repo(Prisma-direct ctor-inject)+service(encrypt+mask+PII-floor)+22 unit tests, 100% module cov, make check green on PM rerun. Router+api.ts wiring = T17-followup blocked on Q-C-01/02/03. Branch `feat/telegram-config-crud @ 98f098b`, PR pending push |
+| T17 | Telegram config CRUD (`GET, PUT /api/integrations/telegram`)                     | pr-open (red-docker) | PM C (H13 approved code · H14 PR review) | PR #11 open, CI 3/4 SUCCESS (lint+typecheck/unit/integration all green) + Docker-build FAILURE. RED = shared-infra bug (Q-C-05 pnpm×prisma-custom-output); NOT T17 code defect. T10 (PR #10) merged red with same failure → main is red since; precedent conflict PM-AGENT §4. Merge escalated to Parent PM |
 | T18 | Per-dept Telegram routing write-through (HC `departments` table)                 | backlog  | —              | After T17; per Q-OPS-06 shared-DB direct write                     |
 | T19 | Telegram inbound webhook + commands (`/take`, `/release`, `/done`, `/help`)      | backlog  | —              | After T04 (Nathan) + T05 + T17                                     |
 | T20 | Outbound Telegram dispatch RPC                                                   | backlog  | —              | After T06 + T09 (Nathan); per-dept routing per T18                 |
@@ -252,6 +252,37 @@ Requesting PM C VERDICT.
 - PM C: post PARENT §2 roll-up + PARENT §1 status update. Q-C-01/02/03/04 remain open pending Parent PM/PO.
 - Parent PM: please prioritize Q-C-01/02/03 — B (T10) + C (T18+) are otherwise blocked from any HTTP endpoint or repo integration test.
 
+##### PR REVIEW T17 — PR #11 CI verdict by PM C (H14, 2026-07-05)
+
+**PR**: [#11 `feat(telegram): T17 Telegram config CRUD primitive (C1)`](https://github.com/satriowicaksn/integration-backend-qooma-hotel-ai/pull/11), head `feat/telegram-config-crud` @ `d8def13` (rebase-merge w/ main resolved PM-STATUS-C.md conflict).
+
+**CI status** (post-push, PM re-verified via `gh pr checks 11`):
+- ✅ Lint + Typecheck — SUCCESS (41s)
+- ✅ Unit tests — SUCCESS (27s)
+- ✅ Integration tests — SUCCESS (39s)
+- ❌ **Docker build (api/worker) — FAILURE (33s)** — `pnpm build` (tsc -p tsconfig.build.json) fails with `TS2305: Module '@prisma/client' has no exported member 'TelegramConfig'` AND `no exported member 'WaConfig'`.
+
+**Root-cause analysis** (PM independent investigation):
+
+1. **NOT a T17 code defect.** The failing imports (`TelegramConfig` in `telegram.repository.ts:4`, `WaConfig` in `whatsapp-config.repository.ts:10`) are correct Prisma-generated exports (schema.prisma models line 33 & 49). Locally `make check` green, CI unit + integration + lint + typecheck green — because those steps run `pnpm prisma:generate` before `tsc`.
+2. **Dockerfile IS calling `pnpm prisma:generate`** at stage 2 line 25, and stage 3 (build) inherits from stage 2. Generator `output = "../node_modules/.prisma/client"` (schema.prisma:3) resolves to `/app/node_modules/.prisma/client`. In principle types should be visible to `tsc` in stage 3.
+3. **Suspected pnpm-strict-hoisting × prisma-custom-output interaction**: `@prisma/client` package's re-export chain isn't picking up the generated `.prisma/client` types when pnpm's strict node_modules layout is used. Known upstream category (pnpm + prisma). Fix candidates: (a) remove custom `output` (use Prisma default `node_modules/@prisma/client/.prisma/client`), (b) add `.npmrc` `public-hoist-pattern[]=*prisma*`, (c) add explicit `RUN ln -s` in Dockerfile between stages, (d) hoist `.prisma/client` before build in Dockerfile.
+4. **This bug already exists on `main` — pre-dates T17.** T10 (PM B / Nanak) merged **red** at 2026-07-04T16:28:09Z with the same Docker-build failure (verified via `gh pr view 10`). Main CI has been red since (`gh run list --branch main`: 2 red runs since T10 merge). T17's PR-11 red is inheriting + adding the same class of failure, NOT introducing it.
+5. **Precedent conflict flagged for Parent PM**: `PM-AGENT.md §4` explicitly forbids "Merge tanpa lulus CI" — yet T10 was merged in that state. Either (a) T10 rollback for consistency, (b) fix Dockerfile as shared-infra follow-up before any further merges, or (c) Parent PM/PO ratifies that Docker-build check is non-blocking in current CI policy (least preferred).
+
+**PM C verdict on PR #11**:
+
+- **Code approval stands** — T17 code passes all applicable checks (lint, typecheck, unit, integration).
+- **Merge decision escalated to Parent PM** — not a per-slot call. If T10 precedent is honored (Docker-build red is not a merge blocker for this batch until Dockerfile fix lands), PR #11 is merge-ready. If PM-AGENT §4 is enforced strictly, both PR #11 AND T10 need the Dockerfile fix first (and T10 should arguably be reverted). PM C does not unilaterally merge with red CI.
+- **New Q raised**: **Q-C-05** — Dockerfile × pnpm × prisma custom-output; shared-infra bug affecting every slot with a `@prisma/client` type import. Mirrored to PARENT §3b (tooling).
+
+**Files verified in PR #11 diff vs local review** (`gh pr view 11 --json files`):
+- 8 files, 661 additions, 0 deletions — matches local `98f098b` inspection exactly (repository, service, schema, types, index, 3 test files).
+- Second commit `d8def13` = clean rebase-merge with main (PM-STATUS-C.md conflict resolution only, no src/ change).
+- Mergeable = MERGEABLE (no git conflicts on main).
+
+**Awaiting Parent PM**: merge policy decision + Q-C-05 routing.
+
 
 <!--
 TEMPLATE — copy untuk task baru:
@@ -364,6 +395,7 @@ Re-run `make check` after fix, confirm pass, resubmit (attempt N+1).
 | Q-C-02 | **`src/entrypoints/api.ts` bootstrap — foundation gap; affects all HTTP endpoints.** File still stub (line 38 `console.warn`). Fastify server + error-handler plugin (T08) + correlation-id + tenant-resolver (T05) + config load + graceful shutdown not wired. Blocks endpoint reachability for T10-T20 + T23. Q-A-05 (eslint async-hook `checksVoidReturn.properties: false`) recommended land **before** or bundled with this so all future async `preHandler`/hook code passes lint cleanly. **Ask Parent PM**: prioritize/assign api.ts bootstrap task (F11?). | PM C (Satrio) H13 | src/entrypoints/api.ts:11-45; T17 PLAN GAP-#2 | open | — |
 | Q-C-03 | **Session/JWT auth plugin absent — cross-service contract Q; blocks all `gm_admin` CRUD (spec §2.1).** `src/plugins/` has hmac-validator + tenant-resolver + internal-rpc-auth + error-handler only. `env.ts:36-39` declares `JWT_ACCESS_SECRET`/`JWT_REFRESH_SECRET` but no plugin consumer. Auth service lives in separate repo (KICKOFF §1 L11); Integration verifies JWTs signed by Auth. Cross-service ratification needed: (a) verification method — JWKS URL fetch vs HS256 shared secret? (b) JWT payload shape — `{ sub, hotel_id, role, exp }`? (c) refresh-token flow — irrelevant to Integration (doesn't issue)? Preferred MVP: HS256 shared secret + `{ sub, hotel_id, role }` + verify-only plugin. Blocks T10 (B), T17 route (C), T18-T20, T23. **Ask Parent PM**: route to PO — cross-service contract. | PM C (Satrio) H13 | KICKOFF §1 L11; env.ts:36-39; src/plugins/*; T17 PLAN GAP-#3 | open | — |
 | Q-C-04 | **Tenant identification for CRUD endpoints — cascading from Q-C-03.** Spec `/api/integrations/telegram` has no `:hotel_slug` in path (unlike webhook routes at `/webhooks/wa/:hotel_slug` spec §2.2). Alternatives: (a) JWT payload `hotel_id` (session-bound; preferred if Q-C-03 lands JWT); (b) header `X-Hotel-Id` (weak); (c) path rewrite `/api/hotels/:hotel_slug/...` (spec-drift). Locked to Q-C-03 outcome. | PM C (Satrio) H13 | spec §2.1 vs §2.2; T17 PLAN GAP-#4 | open | — |
+| Q-C-05 | **Dockerfile × pnpm × Prisma custom-output — SHARED-INFRA BUG; main is currently RED.** Docker build fails on `pnpm build` (tsc -p tsconfig.build.json) with `TS2305: Module '@prisma/client' has no exported member 'TelegramConfig'` + `no exported member 'WaConfig'`. Locally + on CI unit/integration/lint/typecheck: green. Dockerfile stage 2 line 25 explicitly runs `pnpm prisma:generate`; schema.prisma:3 uses custom `output = "../node_modules/.prisma/client"`. Suspected pnpm strict-hoisting × prisma custom-output interaction (known upstream category). **T10 (PM B PR #10) merged RED with same failure at 2026-07-04T16:28:09Z**, meaning main has been red on Docker-build since T10 landed — this pre-dates T17. Precedent conflict with `PM-AGENT.md §4` "Merge tanpa lulus CI". PR #11 (T17) inherits + repeats same failure; not a T17 code defect. **Ask Parent PM**: (a) which fix candidate — remove custom output, add `.npmrc public-hoist-pattern`, or hoist step in Dockerfile? (b) route as slot-A shared-infra follow-up (F12?)? (c) merge-policy ratify for T10 + T17 pending fix (rollback T10 or waive Docker-build check batch-wide)? | PM C (Satrio) H14 (2026-07-05) | Dockerfile L22-32; prisma/schema.prisma:1-5; GH Actions run 28716832757 job Docker-build FAILURE | open | — |
 
 ---
 
