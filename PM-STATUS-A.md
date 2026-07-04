@@ -15,8 +15,8 @@
 ## 0. Current focus (slot A)
 
 - **Day**: H12+ (task tracker activated 2026-06-30)
-- **Active task**: T01-T05 ✅ **MERGED** (PR #1-5). **5/9 foundation done.** Next: T06 (BSP adapter) — planning open. Open Qs: Q-A-01/02/04 (PO/PM B), Q-A-03/05 (shared-config → Parent PM).
-- **Branch**: — (T05 merged; T06 branch TBD at PLAN)
+- **Active task**: T01-T05 MERGED · **T06 PLAN ACK'd, coding** (BSP port + 1engage adapter, module `whatsapp`, Opsi A×3). Open Qs: Q-A-01/02/04 (PO/PM B), Q-A-03/05 (shared-config), Q-A-06 (WA module name → B align).
+- **Branch**: `feat/wa-bsp-adapter` (T06, in progress)
 - **Next gate (global)**: G1 — lihat `PM-STATUS-PARENT.md §5`
 - **My queue (preview)**: T01–T09 (foundation) — lihat §8 di bawah (mirror dari PARENT §1 filter Slot=A)
 - **Critical path**: T02 (Prisma migration) blokir implementasi Nanak (T10+) dan Satrio (T17+). Prioritaskan T01 → T02 → T03 sequence.
@@ -34,7 +34,7 @@
 | T03 | Encryption-at-rest helper (AES-256-GCM / KMS)                                    | merged   | PM A (H12) ✓   | Opsi A current-version. 100% cov, tamper+fail-fast verified. Merged PR #3 `ca9685b`. Consumed by T10+T17. |
 | T04 | Webhook signature-verification middleware (Meta `X-Hub-Signature-256` + Telegram)| merged   | PM A (H12) ✓   | plugin-level preHandler, timingSafeEqual, raw-byte HMAC, 401 native, no-insert invariant proven. 100% line cov. Merged PR #4 `ad46125`. |
 | T05 | Tenant resolution from `:hotel_slug` (LRU 5-min, hotels.code lookup)             | merged   | PM A (H12) ✓   | factory TTL-LRU (no-class per PO), injected lookup port, 404 native, never-trust-body proven, 100% resolver cov. Merged PR #5 `59e8218`. Consumed by T12+T19. |
-| T06 | BSP adapter interface + `1engage` impl                                           | backlog  | —              | After T01                                                          |
+| T06 | BSP adapter interface + `1engage` impl                                           | wip      | —              | PLAN ACK'd (Opsi A×3). module `whatsapp`, port+factory adapter, ExternalServiceError, injected HttpPoster. Q-A-06 (B align name). |
 | T07 | Queue + scheduler infra (BullMQ + retry + DLQ)                                   | backlog  | —              | After T02                                                          |
 | T08 | Common error handlers (Integration-specific codes per spec §9)                   | backlog  | —              | After T01                                                          |
 | T09 | Internal RPC server (HTTP/mTLS; spec §10 catalog)                                | backlog  | —              | After T01 + T05                                                    |
@@ -796,6 +796,33 @@ src/modules/whatsapp/__tests__/1engage.adapter.test.ts   (unit, mock HttpPoster)
 
 Awaiting PM A ACK (GAP #1–#3, esp. nama modul lintas-slot).
 
+##### PM A ACK — T06 PLAN APPROVED, proceed to coding (H12, 2026-07-03)
+
+Verified by PM A: merged schema provider enum = `('whatsapp','telegram')`; spec routes `/api/integrations/whatsapp` + `/webhook/whatsapp` (only `send_wa_message`/`wa_configs` use the `wa` abbrev); `http-client.ts` = stub (`throw 'HttpClient not implemented'`); MODULE_TEMPLATE `index.ts` = barrel public API; **Q-OPS-04 explicitly recommends a thin BSP-agnostic interface** ("Backend's call... keeps options open"). All intents sound.
+
+**GAP T06-#1 (module name — CROSS-SLOT) → DECISION: `whatsapp`. APPROVED, + routed to Parent PM for B alignment.**
+- Evidence is decisive: the **ratified provider enum is `'whatsapp'`** and the public API/webhook routes are `/whatsapp`. `wa` only appears as the DB-column/RPC abbreviation — not the bounded-context name. → `src/modules/whatsapp/`.
+- **Cross-slot:** B builds WA config CRUD (T10) in this same module. T10 is now schema-unblocked, so alignment matters soon. Raised as **Q-A-06** to Parent PM (§3c) so PM B uses `whatsapp` too. T06 proceeds on `whatsapp`; if overruled it's a cheap pre-B `git mv` (no consumers yet).
+
+**GAP T06-#2 (1engage concrete contract absent) → Opsi A (Cloud-API shape now, config-injected `baseUrl`/`apiVersion`). APPROVED.** 1engage is a WA Cloud-API BSP; building to the Meta Graph shape with injected endpoint is correct, and the **vendor-agnostic port stays stable** even if 1engage's real payload differs (only the adapter changes). Q-OPS-04 backs the thin interface. Don't block on the vendor contract.
+
+**GAP T06-#3 (port scope) → Opsi A (messaging only: `sendText` + `sendTemplate`). APPROVED.** YAGNI — B4 dispatch needs exactly these. Correctly EXCLUDE B8 template-management relay (different Meta API) + C8 health `getMe` (different concern) → separate ports later. Don't speculate an ABI for unclear contracts.
+
+**Nota (factory + interface) — ENDORSED.** Adapter = factory function (no class, per PO preference + T05 endorsement); port = `interface` (a contract, which CLAUDE.md §5 wants as `interface`, not a class). Correct distinction.
+
+**Binding conditions — verify at SUBMIT:**
+1. **Hexagonal (ADR-0001)** — `WhatsappBspPort` = `interface`, vendor-agnostic (NO axios/1engage/Cloud-API leak in the port types); adapter = factory implementing it via an injected narrow `HttpPoster`.
+2. **Barrel discipline** — `index.ts` exports the **port + domain types ONLY, NOT the adapter** (MODULE_TEMPLATE). Adapter imported only by its test (+ future entrypoint wiring).
+3. **Module-scoped path** — `src/modules/whatsapp/{ports,adapters,__tests__}` — **NOT** top-level `src/adapters/` (guardrail). 
+4. **Error mapping** — non-2xx / missing `messageId` / http-throw → `ExternalServiceError('1engage', msg, { status, body })` (502, Sentry-friendly). Both non-2xx and http-throw paths tested. Not raw `Error`.
+5. **Injected `HttpPoster`** — narrow structural type, mocked in tests; **no real network**. Adapter receives **plaintext** access token (B decrypts via T03 before calling) — adapter does NOT decrypt.
+6. **No hardcoded vendor URL** — `baseUrl`/`apiVersion` from injected config (drift: hardcoded-URL). 
+7. **Factory (no class); 0 `any`** (typed mock, no `as any`); explicit return types; coverage ≥ 80%.
+8. **Cloud-API payload shape** — text `{messaging_product:'whatsapp',to,type:'text',text:{body}}` + template components/parameters mapping (incl. template-without-variables path). Tested.
+9. `make check` green; 4 proposed files only; `_template`/`api.ts`/`env.ts` untouched.
+
+Minor: `1engage.adapter.ts` filename (leading digit) is acceptable — matches the vendor brand and the factory identifier `create1engageAdapter` is letter-first so imports are fine; adjust only if a lint/tooling rule objects. Branch `feat/wa-bsp-adapter` OK. Proceed to coding.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
@@ -908,6 +935,7 @@ Re-run `make check` after fix, confirm pass, resubmit (attempt N+1).
 | Q-A-03 (infra) | `NODE_ENV=test` (Jest default) not in `env.ts` enum (`development\|staging\|production`) → any test calling `loadConfig()` throws. **Shared-infra: affects T04/T05… + slots B/C.** T03 used a localized `NODE_ENV:'development'` in-test workaround (no env.ts edit). Global fix = baseline env in `src/shared/utils/test-setup.ts` (recommended) OR add `'test'` to enum. Raised to Parent PM (affects >1 dev). | env.ts:16, Jest default; T03 SUBMIT Notes #2 | raised → PARENT (shared-infra) | — |
 | Q-A-04 (contract) | **WA signature secret (affects slot B, T12).** Meta signs `X-Hub-Signature-256` with the **App Secret**; `webhook_verify_token` is only for the GET verify-challenge (`hub.verify_token`). Spec §4.2 conflates them, and `wa_configs` has no `app_secret` column. T04 is secret-agnostic (injected resolver) → not blocked; but B's webhook ingest will verify against the wrong secret unless resolved, likely needing a schema follow-up (`app_secret_enc` column). PO/PM B to rule. | spec §4.2 vs Meta WA Cloud API; schema `wa_configs`; T04 PLAN nota | escalated → PARENT §3a | — |
 | Q-A-05 (tooling) | `@typescript-eslint/no-misused-promises` flags async Fastify hooks passed to route-option **properties** (`checksVoidReturn.properties`) — false-positive (Fastify awaits async hooks; typecheck passes). **Affects B/C** on every async `preHandler`/hook. T04 used a local 1-line `eslint-disable` (test only; `.eslintrc.cjs` untouched). Recommended project-level fix: `['error', { checksVoidReturn: { properties: false } }]` (keeps `no-floating-promises`). Shared-config → Parent PM. | T04 SUBMIT Notes; `.eslintrc.cjs` | raised → PARENT §3b (shared-config) | — |
+| Q-A-06 (arch, cross-slot) | **WA module name — A + B share one bounded context.** T06 (BSP adapter, slot A) + T10 (WA config CRUD, slot B) live in the SAME module. **PM A decision: `whatsapp`** (matches ratified provider enum `'whatsapp'` + API routes `/whatsapp`; `wa` is only the DB/RPC abbrev). T06 proceeds on `src/modules/whatsapp/`. Parent PM: confirm **PM B aligns T10 to `whatsapp`**. | schema provider enum; spec routes; T06 PLAN GAP-#1 | PM A decided `whatsapp` → PARENT §3c (B alignment) | — |
 
 ---
 
