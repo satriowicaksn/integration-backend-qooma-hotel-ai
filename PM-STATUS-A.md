@@ -15,8 +15,8 @@
 ## 0. Current focus (slot A)
 
 - **Day**: H12+ (task tracker activated 2026-06-30)
-- **Active task**: T01-T08 ✅ **MERGED** (PR #1-8). **8/9 foundation done — only T09 left.** Next: T09 (RPC server) — planning open. Open Qs: Q-A-01/02/04/07 (PO/PM B), Q-A-03/05/08 (shared-config/boilerplate → Parent PM), Q-A-06 (WA module → B align).
-- **Branch**: — (T08 merged; T09 branch TBD at PLAN)
+- **Active task**: T01-T08 MERGED · **T09 PLAN ACK'd, coding** (internal-RPC shared-secret auth guard, Opsi A×4; auth-guard scope confirmed vs MVP §4.11). **Closes foundation on merge.** Open Qs: Q-A-01/02/04/07/09 (PO/PM B/HC/AI), Q-A-03/05/08 (shared-config/boilerplate → Parent PM), Q-A-06 (WA module → B align).
+- **Branch**: `feat/internal-rpc-auth` (T09, in progress)
 - **Next gate (global)**: G1 — lihat `PM-STATUS-PARENT.md §5`
 - **My queue (preview)**: T01–T09 (foundation) — lihat §8 di bawah (mirror dari PARENT §1 filter Slot=A)
 - **Critical path**: T02 (Prisma migration) blokir implementasi Nanak (T10+) dan Satrio (T17+). Prioritaskan T01 → T02 → T03 sequence.
@@ -37,7 +37,7 @@
 | T06 | BSP adapter interface + `1engage` impl                                           | merged   | PM A (H12) ✓   | module `whatsapp`, vendor-agnostic port + factory 1engage adapter, ExternalServiceError, injected HttpPoster, 100% adapter cov. Merged PR #6 `3c1274a`. Consumed by T13. Q-A-06 (B align). |
 | T07 | Queue + scheduler infra (BullMQ + retry + DLQ)                                   | merged   | PM A (H12) ✓   | Bull 4.x, backoff [1s/5s/30s] attempts=3 configurable, DLQ-forwarder (exhaustion-gated), Redis-injected. logic 100% cov. Merged PR #7 `6654d46`. Consumed by T14/T21/T24. Q-A-07. |
 | T08 | Common error handlers (Integration-specific codes per spec §9)                   | merged   | PM A (H12) ✓   | 7 §9 classes + canonical `{error:{…}}` handler (README §2.3), non-AppError→500 INTERNAL no-leak, correlationId log. 100% new-code cov. Merged PR #8 `b503041`. Q-A-08 (generic-code drift). |
-| T09 | Internal RPC server (HTTP/mTLS; spec §10 catalog)                                | backlog  | —              | After T01 + T05                                                    |
+| T09 | Internal RPC server (HTTP/mTLS; spec §10 catalog)                                | wip      | —              | PLAN ACK'd (Opsi A×4). shared-secret guard (`X-Internal-Secret`), timingSafeEqual, 401 native, injected secret. Scope=auth-guard (§4.11). Q-A-09 (cross-svc contract). |
 
 ---
 
@@ -1185,6 +1185,32 @@ src/plugins/__tests__/internal-rpc-auth.plugin.test.ts
 
 Awaiting PM A ACK (GAP #1–#4, esp. lokasi #1).
 
+##### PM A ACK — T09 PLAN APPROVED, proceed to coding (H12, 2026-07-03)
+
+Verified by PM A: spec §2.4 = 4 internal RPCs (send_wa/send_telegram/submit+resubmit_template) → handlers are B (T13/T16) & C (T20), **not T09**; MVP §4.11 = "auth via shared secret **or** mTLS, NOT cookies; service-to-service; document in README"; `AuthError` (401) exists pre-T08; `env.ts` has no `INTERNAL_RPC_SECRET`.
+
+**Scope check — auth-guard-only is CORRECT (not under-scoped).** Unlike T08's F7 (which explicitly bundled the envelope), **MVP §4.11 scopes the foundation requirement to the auth SCHEME**, and §2.4's concrete RPC methods are B/C's. This matches the whole-foundation pattern (T04 hmac-guard, T05 tenant-resolver, T06 BSP-port = primitives; consumers mount routes). B/C mount their RPC routes with this guard — no orphaned "server scaffold." I checked; no expansion needed.
+
+**GAP T09-#1 (location) → `src/plugins/internal-rpc-auth.plugin.ts`. APPROVED.** Consistent with `hmac-validator`/`tenant-resolver`/`error-handler` plugins; NOT `src/rpc/` (guardrail). Correct — T09 is a Fastify guard, plugins/ is its home.
+
+**GAP T09-#2 (mechanism + header) → shared-secret + `X-Internal-Secret`. APPROVED — cross-service contract escalated (Q-A-09).** shared-secret is the MVP §4.11 default; mTLS = TLS/LB infra layer, correctly NOT app-code. Dedicated `X-Internal-Secret` header (avoids `Authorization` JWT collision) is sound. BUT this is a **cross-service contract** (HC/AI must send the same header+secret) and MVP §4.11 mandates documenting it in README — a shared-doc change affecting >1 service, so per PM-AGENT §0.6 I escalate to Parent PM (Q-A-09) to ratify + document, rather than editing unilaterally. T09 proceeds on this scheme; if PO/HC ratify differently, only the header string changes (trivial).
+
+**GAP T09-#3 (secret source) → inject-only in T09; env var deferred. APPROVED.** Adding a required `INTERNAL_RPC_SECRET` now would break existing `loadConfig` tests (same class as Q-A-03). Inject the secret into the guard (like `resolveSecret`/redis/HttpClient), defer the env var + wiring to assembly. Consistent, decoupled, testable.
+
+**GAP T09-#4 (timing-safe compare) → inline local. APPROVED, with a follow-up note.** Inline in the plugin avoids touching merged T04. Accepted for min blast radius on the finale. **Note:** timing-safe compare now exists in both `hmac-validator` (T04) and this plugin — a small **follow-up chore** to extract `shared/utils/timing-safe-equal.ts` and DRY both guards would centralize a security-critical primitive. Recommended post-foundation (not blocking T09; flag to Parent PM as a chore).
+
+**Binding conditions — verify at SUBMIT (security floor):**
+1. **`timingSafeEqual`** (never `===`), length-guard first (mismatch → `false`, no throw); `provided===undefined` → false; **`expected===''` → false** (reject empty-secret bypass — critical: a blank configured secret must never authenticate). All tested.
+2. **Guard** reads `X-Internal-Secret`; invalid → `throw new AuthError('Invalid internal RPC credentials')` → **401 native** (via `AuthError.statusCode`, no handler dep). Synchronous `preHandler` → throws before handler → RPC handler never runs (handler-ran = `false` tested).
+3. **NOT cookie/JWT auth** (MVP §4.11) — dedicated header + shared secret only.
+4. **Injected secret** — no `loadConfig` in the guard; **no env var added** in T09 (deferred). No config/prisma coupling.
+5. **Location** `src/plugins/internal-rpc-auth.plugin.ts` (NOT `src/rpc/`).
+6. **inject tests** — valid → 200 + handler-ran; wrong → 401 + skip; missing → 401 + skip; pure-fn (match/mismatch/missing/length-diff-no-throw/empty-expected→false).
+7. **No leak** — `AuthError` message generic, secret never echoed/logged.
+8. Function-based; 0 `any`; explicit return types; coverage ≥ 80%; `make check` green; files = plugin + test only; `env.ts`/`api.ts` untouched.
+
+Branch `feat/internal-rpc-auth` OK. Proceed to coding — this closes the foundation (T09/9).
+
 <!--
 TEMPLATE — copy untuk task baru:
 
@@ -1298,6 +1324,7 @@ Re-run `make check` after fix, confirm pass, resubmit (attempt N+1).
 | Q-A-04 (contract) | **WA signature secret (affects slot B, T12).** Meta signs `X-Hub-Signature-256` with the **App Secret**; `webhook_verify_token` is only for the GET verify-challenge (`hub.verify_token`). Spec §4.2 conflates them, and `wa_configs` has no `app_secret` column. T04 is secret-agnostic (injected resolver) → not blocked; but B's webhook ingest will verify against the wrong secret unless resolved, likely needing a schema follow-up (`app_secret_enc` column). PO/PM B to rule. | spec §4.2 vs Meta WA Cloud API; schema `wa_configs`; T04 PLAN nota | escalated → PARENT §3a | — |
 | Q-A-05 (tooling) | `@typescript-eslint/no-misused-promises` flags async Fastify hooks passed to route-option **properties** (`checksVoidReturn.properties`) — false-positive (Fastify awaits async hooks; typecheck passes). **Affects B/C** on every async `preHandler`/hook. T04 used a local 1-line `eslint-disable` (test only; `.eslintrc.cjs` untouched). Recommended project-level fix: `['error', { checksVoidReturn: { properties: false } }]` (keeps `no-floating-promises`). Shared-config → Parent PM. | T04 SUBMIT Notes; `.eslintrc.cjs` | raised → PARENT §3b (shared-config) | — |
 | Q-A-06 (arch, cross-slot) | **WA module name — A + B share one bounded context.** T06 (BSP adapter, slot A) + T10 (WA config CRUD, slot B) live in the SAME module. **PM A decision: `whatsapp`** (matches ratified provider enum `'whatsapp'` + API routes `/whatsapp`; `wa` is only the DB/RPC abbrev). T06 proceeds on `src/modules/whatsapp/`. Parent PM: confirm **PM B aligns T10 to `whatsapp`**. | schema provider enum; spec routes; T06 PLAN GAP-#1 | PM A decided `whatsapp` → PARENT §3c (B alignment) | — |
+| Q-A-09 (contract, cross-service) | **Internal RPC auth scheme — HC/AI must implement caller side.** T09 ships shared-secret guard reading header `X-Internal-Secret` (per MVP §4.11 "shared secret or mTLS, not cookie; document in README"). HC + AI (callers per §2.4) must send the same header + shared secret. **Needs: (a) README doc of the scheme (MVP §4.11), (b) cross-service ratification of header name + secret provisioning, (c) transport decision — internal routes on main API vs dedicated internal server/port (F8 `rpc/server.ts`).** Parent PM to route to PO + HC/AI. | MVP §4.11; spec §2.4; F8; T09 PLAN GAP-#2 | escalated → PARENT §3a | — |
 | Q-A-08 (arch, cross-service) | **Generic `AppError` codes drift from README §2.3 canonical — shared boilerplate, all services.** `AuthError`=`AUTH_ERROR` (FE expects `UNAUTHENTICATED`), `RateLimitError`=`RATE_LIMIT_EXCEEDED` (canonical `RATE_LIMIT`), `ExternalServiceError`=`EXTERNAL_SERVICE_ERROR`. FE won't recognize these codes. T08 left generic classes untouched (binding #2). Needs a boilerplate-reconcile task (Parent PM/PO). Note: reconciling `RateLimitError`→`RATE_LIMIT` collides with T08 `OutboundQuotaError` code — decide merge-or-keep. | app-errors.ts vs README §2.3; T08 SUBMIT | escalated → PARENT §3c | — |
 | Q-A-07 (contract) | **Outbound retry count — spec self-contradicts (affects B's T14).** spec §7 L344 "3 retries (1s,5s,30s)" vs §7 L345 "after 3 attempts→failed" vs MVP §4.9 "3-attempt". Is it 3 total attempts (30s delay unused) or 3 retries = 4 attempts (30s used)? **T07 ships default `attempts=3` (restrictive, configurable) + `[1s,5s,30s]` strategy.** PO: ratify + fix spec §7 wording before B builds T14. | spec §7 L344-345 vs MVP §4.9; T07 PLAN GAP-#2 | escalated → PARENT §3a | — |
 
