@@ -15,8 +15,8 @@
 ## 0. Current focus (slot A)
 
 - **Day**: H12+ (task tracker activated 2026-06-30)
-- **Active task**: T01-T06 ✅ **MERGED** (PR #1-6). **6/9 foundation done.** Next: T07 (queue infra) — planning open. Open Qs: Q-A-01/02/04 (PO/PM B), Q-A-03/05 (shared-config), Q-A-06 (WA module name → B align).
-- **Branch**: — (T06 merged; T07 branch TBD at PLAN)
+- **Active task**: T01-T06 MERGED · **T07 PLAN ACK'd, coding** (Bull queue infra, Opsi A×4: Bull 4.x, attempts=3 configurable, DLQ-forwarder, logic-unit-tested). Open Qs: Q-A-01/02/04/07 (PO/PM B), Q-A-03/05 (shared-config), Q-A-06 (WA module → B align).
+- **Branch**: `feat/queue-infra` (T07, in progress)
 - **Next gate (global)**: G1 — lihat `PM-STATUS-PARENT.md §5`
 - **My queue (preview)**: T01–T09 (foundation) — lihat §8 di bawah (mirror dari PARENT §1 filter Slot=A)
 - **Critical path**: T02 (Prisma migration) blokir implementasi Nanak (T10+) dan Satrio (T17+). Prioritaskan T01 → T02 → T03 sequence.
@@ -35,7 +35,7 @@
 | T04 | Webhook signature-verification middleware (Meta `X-Hub-Signature-256` + Telegram)| merged   | PM A (H12) ✓   | plugin-level preHandler, timingSafeEqual, raw-byte HMAC, 401 native, no-insert invariant proven. 100% line cov. Merged PR #4 `ad46125`. |
 | T05 | Tenant resolution from `:hotel_slug` (LRU 5-min, hotels.code lookup)             | merged   | PM A (H12) ✓   | factory TTL-LRU (no-class per PO), injected lookup port, 404 native, never-trust-body proven, 100% resolver cov. Merged PR #5 `59e8218`. Consumed by T12+T19. |
 | T06 | BSP adapter interface + `1engage` impl                                           | merged   | PM A (H12) ✓   | module `whatsapp`, vendor-agnostic port + factory 1engage adapter, ExternalServiceError, injected HttpPoster, 100% adapter cov. Merged PR #6 `3c1274a`. Consumed by T13. Q-A-06 (B align). |
-| T07 | Queue + scheduler infra (BullMQ + retry + DLQ)                                   | backlog  | —              | After T02                                                          |
+| T07 | Queue + scheduler infra (BullMQ + retry + DLQ)                                   | wip      | —              | PLAN ACK'd (Opsi A×4). Bull 4.x (not bullmq), backoff [1s/5s/30s] attempts=3 configurable, DLQ `<mod>:dead` forwarder, logic-unit-tested. Q-A-07 (retry count). |
 | T08 | Common error handlers (Integration-specific codes per spec §9)                   | backlog  | —              | After T01                                                          |
 | T09 | Internal RPC server (HTTP/mTLS; spec §10 catalog)                                | backlog  | —              | After T01 + T05                                                    |
 
@@ -930,6 +930,30 @@ src/core/queue/__tests__/bull-factory.test.ts   (unit — pure/logic parts, mock
 
 Awaiting PM A ACK (GAP #1–#4).
 
+##### PM A ACK — T07 PLAN APPROVED, proceed to coding (H12, 2026-07-03)
+
+Verified by PM A: `bull-factory.ts` = stub (`queueFactory = {} placeholder`, naming convention `<module>:<job-type>` documented); CLAUDE §2 stack = **Bull 4.x** + `package.json` `bull@4.16.3` (no bullmq); env has `REDIS_URL`/`REDIS_QUEUE_DB`/`REDIS_TLS_ENABLED`/`WORKER_CONCURRENCY_DEFAULT`; CLAUDE §9 naming matches. Intents sound.
+
+**GAP T07-#1 (Bull vs BullMQ) → DECISION: Bull 4.x. APPROVED.** Task title says "BullMQ" but CLAUDE §2 (ratified stack) + `package.json` = Bull 4.x; BullMQ would be a new dep + API change (PO-gated). CLAUDE §14 → ratified wins. The "BullMQ" wording in PARENT §1/§8 is a misnomer (noted for Parent PM to clean up — cosmetic, no code impact; B/C consume whatever T07 ships = Bull).
+
+**GAP T07-#2 (retry count semantics) → ACK the configurable mechanism; DEFAULT `attempts=3`; escalated as Q-A-07.** The spec **self-contradicts**: §7 L344 "3 retries (1s,5s,30s)" vs §7 L345 "after 3 attempts → failed" vs MVP §4.9 "3-attempt". Majority reading + CLAUDE §14 (most-restrictive-until-confirmed) → **default `attempts=3`** (uses 1s+5s; 30s reserved), exactly your Intent A. Keep it **per-job configurable** + the `[1s,5s,30s]` strategy faithful. Raised **Q-A-07** (§3a) for PO to ratify "3 attempts vs 3 retries / is 30s meant to be exercised" and fix the spec **before B's T14** (outbound retry queue needs the exact count). Non-blocking — B sets attempts per-job.
+
+**GAP T07-#3 (DLQ) → Opsi A (dead-letter queue `<module>:dead` + `attachDeadLetterForwarder` on exhaustion, `removeOnFail:false`). APPROVED.** Bull 4.x has no native DLQ; forwarder-on-`failed`-at-exhaustion is the standard pattern. Bonus: `<module>:dead` aligns with the schema's `outbound_dispatch_queue.status` CHECK (`'dead'` enum from T02) — consistent vocabulary.
+
+**GAP T07-#4 (test w/o live Redis) → Opsi A. APPROVED.** Separating pure/logic (backoff/naming/options/DLQ-forwarder — unit-tested with mock queue/job) from the thin `new Bull()` + worker/scheduler wrappers (integration-only, deferred) is correct (CLAUDE §8 / TESTING.md; `new Queue()` opens a Redis handle). **Condition:** the deferred wrappers MUST be genuinely logic-free passthroughs — no untested logic hides in them; ≥80% coverage on the logic-bearing exports.
+
+**Binding conditions — verify at SUBMIT:**
+1. **Bull 4.x**, zero new deps (bull+ioredis already declared).
+2. **Backoff** `integrationBackoffStrategy(attemptsMade)` → `[1000,5000,30000]` indexed `attemptsMade-1`, clamp to last; default `attempts=3` (overridable). Unit-tested incl. clamp (4→30000).
+3. **Naming** `queueName`=`${module}:${jobType}`, `deadLetterQueueName`=`${module}:dead` (CLAUDE §9). Tested.
+4. **DLQ forwarder** moves to dead-queue ONLY on exhaustion (`attemptsMade >= attempts`); `removeOnFail:false`. Tested: exhausted→`add` called, not-exhausted→not called (fake EventEmitter queue + mock `.add`).
+5. **Redis injected** (constructed at wiring from config, not inside the factory); concurrency from `config.WORKER_CONCURRENCY_DEFAULT` (no new constant, no direct `process.env`).
+6. **Non-retryable knob** (quota/template-not-approved) — mechanism provided (`attempts:1`/discard); per-job decision documented as B's call.
+7. **Testing** — logic-bearing exports unit-tested with mocks, **NO Redis** (no open handles hanging `make check`); thin wrappers logic-free + integration-deferred (noted). ≥80% coverage on logic code.
+8. **Files** — modify `bull-factory.ts` + create its test only; function-based (0 `class`); 0 `any` (typed mocks); explicit return types; `env.ts`/others untouched. `make check` green.
+
+Branch `feat/queue-infra` OK. Proceed to coding.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
@@ -1043,6 +1067,7 @@ Re-run `make check` after fix, confirm pass, resubmit (attempt N+1).
 | Q-A-04 (contract) | **WA signature secret (affects slot B, T12).** Meta signs `X-Hub-Signature-256` with the **App Secret**; `webhook_verify_token` is only for the GET verify-challenge (`hub.verify_token`). Spec §4.2 conflates them, and `wa_configs` has no `app_secret` column. T04 is secret-agnostic (injected resolver) → not blocked; but B's webhook ingest will verify against the wrong secret unless resolved, likely needing a schema follow-up (`app_secret_enc` column). PO/PM B to rule. | spec §4.2 vs Meta WA Cloud API; schema `wa_configs`; T04 PLAN nota | escalated → PARENT §3a | — |
 | Q-A-05 (tooling) | `@typescript-eslint/no-misused-promises` flags async Fastify hooks passed to route-option **properties** (`checksVoidReturn.properties`) — false-positive (Fastify awaits async hooks; typecheck passes). **Affects B/C** on every async `preHandler`/hook. T04 used a local 1-line `eslint-disable` (test only; `.eslintrc.cjs` untouched). Recommended project-level fix: `['error', { checksVoidReturn: { properties: false } }]` (keeps `no-floating-promises`). Shared-config → Parent PM. | T04 SUBMIT Notes; `.eslintrc.cjs` | raised → PARENT §3b (shared-config) | — |
 | Q-A-06 (arch, cross-slot) | **WA module name — A + B share one bounded context.** T06 (BSP adapter, slot A) + T10 (WA config CRUD, slot B) live in the SAME module. **PM A decision: `whatsapp`** (matches ratified provider enum `'whatsapp'` + API routes `/whatsapp`; `wa` is only the DB/RPC abbrev). T06 proceeds on `src/modules/whatsapp/`. Parent PM: confirm **PM B aligns T10 to `whatsapp`**. | schema provider enum; spec routes; T06 PLAN GAP-#1 | PM A decided `whatsapp` → PARENT §3c (B alignment) | — |
+| Q-A-07 (contract) | **Outbound retry count — spec self-contradicts (affects B's T14).** spec §7 L344 "3 retries (1s,5s,30s)" vs §7 L345 "after 3 attempts→failed" vs MVP §4.9 "3-attempt". Is it 3 total attempts (30s delay unused) or 3 retries = 4 attempts (30s used)? **T07 ships default `attempts=3` (restrictive, configurable) + `[1s,5s,30s]` strategy.** PO: ratify + fix spec §7 wording before B builds T14. | spec §7 L344-345 vs MVP §4.9; T07 PLAN GAP-#2 | escalated → PARENT §3a | — |
 
 ---
 
