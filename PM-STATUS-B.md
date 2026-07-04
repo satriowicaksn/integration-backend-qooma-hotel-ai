@@ -360,6 +360,68 @@ Coding order per PM B direction:
 
 Awaiting PM B ACK on attempt 2 PLAN before touching `src/`. Will run `make prisma-generate` immediately after ACK, then code per §Approach ordering.
 
+##### PM B ACK — T10 PLAN attempt 2 APPROVED, proceed to coding (H16) by PM B (Nanak)
+
+All 5 REJECT items independently verified in text; all 6 GAP decisions applied per PM B verdict; scope collapses cleanly to T17-a2 shape. **T10 PLAN attempt 2 APPROVED — proceed to coding.**
+
+**Verification trace** (what I checked in your attempt-2 text before ACK — not just claim, but evidence):
+
+- **Item #1 (routes.ts dropped)**: Files-to-create L253-262 lists exactly 7 files, none is a routes plugin. Barrel append L332-346 exports classes/types/schemas only — no `WhatsappConfigRoutes` / plugin symbol. §Files-explicitly-NOT-touched L271 confirms `api.ts` untouched. ✓
+- **Item #2 (mask helper + round-trip)**: L217 statement + L311 service `getForHotel` explicit chain `decrypt(row.accessTokenEnc)` → `maskTokenForLog(plaintext)` (`***<last3>`) + L328 round-trip stability test spec. Directly imports from `@shared/utils/masking.js` per L306. No roll-own format. ✓
+- **Item #3 (direct crypto import)**: L305 `import { decrypt, encrypt } from '@shared/utils/crypto.js'`. Ctor L310 `(repo, logger)` — cryptoDeps gone. Unit test uses real crypto with ephemeral key from env (L323, mirrors `crypto.test.ts`). Mirrors Satrio's `telegram.service.ts:5-6` on `98f098b`. ✓
+- **Item #4 (PII-floor log line + Logger dep)**: L308 `import type { Logger } from '@core/logger/logger.js'`. L310 ctor accepts. L312 upsertForHotel first line = log. L327 test asserts JSON.stringify excludes plaintext `accessToken`, `webhookVerifyToken`, raw `phoneNumber`. Log fires BEFORE `encrypt()` per L219 explicit. Matches T17-a2 pattern verbatim. ✓
+- **Item #5 (attribution)**: L220 + L274 both say "T06 Nathan's BSP port/adapter (merged `3c1274a`, PR #6)". Correct. ✓
+
+GAP decisions L224-229: #1 B, #2 A, #3 moot, #4 B (stopgap declared, T10-INTEG follow-up), #5 A, #6 moot — 6/6 match PM B verdict. ✓
+
+Scope + file inventory: 7-create + 1-modify + explicit NOT-touched list = mirror of PM B direction verbatim. `api.ts` / `prisma-client.ts` / `plugins/*` / `package.json` / T06 BSP / T17 Telegram / `_template` all off-limits. ✓
+
+Coding order (§Approach 1-10): codegen → types → schema → repo → service → schema.test → repo.test → service.test → barrel → `make check`. Respects layering (types-first, tests reference concrete implementations). T17-a2 shape ✓.
+
+---
+
+**Binding conditions for SUBMIT** (PM B will independent-verify these on rerun — mirrors PM A T02/T03 + PM C T17-a2 rigor):
+
+**Quality gate**
+1. `make check` PASS on your push — PM B will rerun independently. Zero test failures, zero lint warnings, zero typecheck errors.
+2. Drift scans per `PM-AGENT.md §3 Step 2` — all 14 categories = 0 hits on touched files: `any`, `console.log/info/debug`, `throw new Error(`, default export outside entrypoints, forbidden HTTP/ORM/time/fetch imports, package-lock/yarn.lock, hardcoded secrets/URLs, webhook w/o HMAC (N/A here — no routes), `setTimeout` delay (N/A), cross-module internal import, wrap-Prisma interface (N/A — direct Prisma), migrations w/o descriptive name (N/A), logger w/o correlationId in request scope (N/A — no handler), `.skip` / `describe.skip`.
+3. Coverage: **100% stmt/branch/func/line** on `src/modules/whatsapp/whatsapp-config.*` (mirror T17-a2 attained per PARENT §2 L120). Report coverage delta in SUBMIT.
+
+**Design gate (each MUST be present in SUBMIT + provable via test evidence)**
+4. **PII-floor log test present** — `service.test.ts` asserts `JSON.stringify(logSpy.info.mock.calls[0][0])` does NOT contain plaintext `accessToken`, plaintext `webhookVerifyToken`, or raw `phoneNumber` string. Fail-open would be catastrophic; test is non-negotiable.
+5. **Round-trip mask stability test present** — two independent encrypt→decrypt→mask cycles of same plaintext token yield identical `***<last3>` mask string.
+6. **Direct helper imports only** — `service.ts` top has literal `import { decrypt, encrypt } from '@shared/utils/crypto.js'` + `import { maskTokenForLog, maskWaPhone } from '@shared/utils/masking.js'`. No ctor-inject of pure helpers.
+7. **`NotFoundError` (not raw `Error`)** — `getForHotel` throws `NotFoundError('WaConfig', hotelId)` or equivalent AppError subclass. `throw new Error(` MUST be 0 hits.
+8. **Barrel additive-only** — `index.ts` top-of-file T06 BSP re-export block (`export type { BspCredentials, BspSendResult, SendTemplateInput, SendTextInput, WhatsappBspPort } from './ports/whatsapp-bsp.port.js';`) byte-for-byte unchanged. Only appends below.
+
+**Scope gate**
+9. `git diff --stat` in SUBMIT — must show exactly the 7-create + 1-modify list. Any unexpected file = REJECT-scope. `PM-STATUS-B.md` (this file) and `package.json` / `pnpm-lock.yaml` explicitly NOT in the diff. If `.gitignore` needs a `.prisma/client` line, mention separately and justify (default is: `.gitignore` already covers `node_modules/` so no change needed).
+10. `make prisma-generate` run explicitly called out in SUBMIT §Notes — timestamp + confirmation it wrote only under `node_modules/.prisma/client/` (no `src/` or `prisma/` mutation). Include `git status --short` before-and-after evidence.
+
+**Tolerated deviations to declare explicitly in SUBMIT §Notes** (PM B pre-accepts these; do NOT hide them):
+11. Prisma-mock in `repository.test.ts` — stopgap per GAP #4 B, T17-a2 precedent. State "T10-INTEG follow-up parked awaiting Q-C-01 (prisma singleton)".
+12. Response-mask on `webhookVerifyToken` — spec §5 AC L118 only mandates `access_token` masked; you additionally mask `webhookVerifyToken` in the GET response. Defensive over-mask (defense-in-depth), non-violating. Flag it: "If FE integration surfaces read-back need, spec-amend post-hoc". Alternatively drop the response-mask (keep only log-mask) — your call, either is ACK-able; just declare which and why.
+13. Q-A-03 workaround (env-set for `NODE_ENV=test`) — re-appears in your `service.test.ts` `beforeAll`. Note it. This is not on you to fix (shared-infra Q).
+
+**Do NOT file** these in SUBMIT:
+14. **No Q-B-01 for `app_secret`** — that gap already lives at PARENT §3a as **Q-A-04** (Nathan raised at H12, still `open`). Reference `Q-A-04` directly in SUBMIT §Notes as T12 blocker. Filing Q-B-01 duplicate = noise + register drift. §3 mirror table in this file stays empty; PM B routes any new blocker to PARENT only after checking §3a for existing.
+
+**Follow-ups you will file in SUBMIT** (list them, do not implement):
+- **T10-followup** — routes + `api.ts` wiring + `hotelId` derivation. Blocked on Q-C-01 + Q-C-02 + Q-C-03. Parallel to Satrio's T17-followup — same triple-block.
+- **T10-INTEG** — real-DB integration test for repository (testcontainers Postgres per `CLAUDE.md §8` + `docs/TESTING.md`). Blocked on Q-C-01 (prisma singleton).
+
+**Commit + branch discipline**:
+- Branch `feat/whatsapp-config-crud` per `CLAUDE.md §12`.
+- Conventional commit — recommended: `feat(whatsapp): T10 config CRUD primitive (types + schema + repo + service + tests)`. Use `make commit MSG="…"` for auto lint+typecheck+format-check.
+- ONE commit for the primitive (matches T17-a2 single-commit shape `98f098b`). If you split, PM B will still ACK, but noise up.
+- Push branch; **do not open PR yet** — PM B rerun locally on your branch first (per PM-AGENT §3 Step 4 "trust but verify"), then PM B says "open PR" in VERDICT block. This mirrors Satrio T17-a2 flow.
+
+**On rebuttal**: if any of the above 14 conditions feels wrong for T10 (mis-scoped, spec-conflict, etc.), post a one-sentence `REBUTTAL T10 item-#N` sub-block before coding — PM B re-checks in-session. Do not silently override.
+
+**Timeline expectation**: T17-a2 shipped 22 tests / 100% module cov / drift-clean single commit. Same envelope reasonable for T10 (est. 3 test files × 5-10 cases each = ~20 tests). Not a hard deadline — quality > velocity.
+
+Proceed. Run `make prisma-generate` → code per §Approach 2-9 → `make check` → SUBMIT.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
