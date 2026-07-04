@@ -1083,6 +1083,53 @@ Verified by PM A against **spec §9** (read the full table) + existing `app-erro
 
 If bundling both makes the PR large, that's fine (F7 is one logical feature). Branch `feat/error-catalog` OK — consider `feat/error-handling` since it now includes the plugin (your call). Proceed to coding.
 
+#### SUBMIT T08 — exec-A (Nathan) at H12 (2026-07-03) (attempt 1)
+
+Task: Error catalog (spec §9) + canonical-envelope error handler (F7)
+Branch: `feat/error-handling` (pushed, commit `cab3551`)
+Files changed: 4
+  - `src/core/errors/app-errors.ts` (modified — append 7 classes; existing untouched, 0 deletions)
+  - `src/core/errors/__tests__/app-errors.test.ts` (new, 14 tests)
+  - `src/plugins/error-handler.plugin.ts` (new)
+  - `src/plugins/__tests__/error-handler.plugin.test.ts` (new, 4 tests)
+
+**⚠ Condition #8 — canonical envelope IS a wrapper (found + matched + flagging):** `docs/spec/README.md §2.3` pins the canonical envelope for **every service/endpoint** as `{ "error": { code, message, details } }` — a **wrapper**, NOT bare `toJson()`. So handler sends `{ error: err.toJson() }`, and non-AppError 500 uses code **`INTERNAL`** (README §2.3 list: `INTERNAL` for 500, not `INTERNAL_ERROR`). This **overrides** ACK binding #5's assumed shape (`= err.toJson()`); per your #8 instruction I matched the doc + flagged rather than invent. `toJson()` remains the inner payload (repo-designated). Observed pre-existing generic-class code drift vs README §2.3 (`AUTH_ERROR` vs `UNAUTHENTICATED`, `RATE_LIMIT_EXCEEDED` vs `RATE_LIMIT`, `EXTERNAL_SERVICE_ERROR`) — **not touched** (binding #2), flagged for later cleanup.
+
+DoD self-check (binding conditions)
+*Catalog:*
+- [x] **#1 exact §9 codes+status** — 7 classes: WEBHOOK_VERIFICATION_FAILED/WA_CONFIG_INVALID/TELEGRAM_CONFIG_INVALID/DND_BLOCK=422, RATE_LIMIT=429, THIRD_PARTY_UNREACHABLE=502, CHANNEL_DEGRADED=503; SCREAMING_SNAKE_CASE; all `extends AppError`, inherit `toJson()`.
+- [x] **#2 existing untouched** — `git diff` app-errors.ts = **42 insertions, 0 deletions**; generic `RateLimitError`/`ExternalServiceError`/etc. + T06 adapter usage intact.
+- [x] **#3 DndBlockError comment** — class doc "internal RPC only" per §9.
+- [x] **#4 per-class test** — statusCode, code, `instanceof AppError`, `toJson()` shape, details passthrough (14 tests = 7×2).
+*Handler:*
+- [x] **#5 envelope** — `AppError` → `reply.code(statusCode).send({ error: toJson() })` (wrapper per §2.3, see flag above).
+- [x] **#5 non-AppError → safe 500** — code `INTERNAL`, message `Internal server error`, **no internal message/stack in body** (test asserts `res.body` NOT contains the thrown secret string).
+- [x] **#6 structured log + correlationId** — `req.log.warn`(AppError)/`req.log.error`(unhandled) with `correlationId` (`x-correlation-id` header ?? `req.id`); request body NOT logged → no secret/PII leak.
+- [x] **#7 inject tests** — WA_CONFIG_INVALID→422 envelope, RATE_LIMIT→429, NotFoundError→404 (hierarchy), plain Error→500 safe (leak-check). 4 tests.
+- [x] **#8** — see flag above (wrapper matched, not invented).
+
+Quality gate
+- `make lint` PASS · `make format-check` PASS · `make typecheck` PASS · `make test-unit` PASS (79: +18 T08; 2 skipped). `make check` exit 0.
+
+Coverage
+- **error-handler.plugin.ts = 100% line / 100% func / 80% br** (1 br = defensive array-header). **7 new Integration classes = 100% covered.** app-errors.ts file-level = 68% **only because it includes pre-existing generic classes (ValidationError/AuthError/…) never tested by the boilerplate** — out of T08 scope (binding #2). New code fully covered.
+
+Drift scans (§4.4)
+- New/modified files: `any` 0 · console 0 · `throw new Error(` 0 (error classes only) · forbidden imports 0 · default export 0 · `.skip` 0. Diff = `app-errors.ts` (append) + 3 new files.
+
+Security check
+- Non-AppError 500 = generic body, internal message/stack NEVER sent (tested). Log has `correlationId` + err (server-side), no request body/secret. AppError messages are developer-set (callers must not embed secrets — convention).
+
+Test evidence
+- Unit: 18 — 14 catalog (7 classes × status/code/instanceof + toJson/details) + 4 handler (AppError envelope, quota 429, NotFound 404 hierarchy, non-AppError safe-500 + leak assertion). `fastify.inject`, no DB/Redis.
+
+Notes / questions (untuk PM A)
+- **Envelope wrapper `{error:{…}}`** (README §2.3) — the one deviation from ACK #5's literal wording; matched-not-invented per #8. Confirm OK.
+- **Pre-existing generic-code drift vs README §2.3** (`AUTH_ERROR`↔`UNAUTHENTICATED`, `RATE_LIMIT_EXCEEDED`↔`RATE_LIMIT`) — left untouched (binding #2); candidate for a separate boilerplate-reconcile task (affects >1 service → Parent PM).
+- **Handler not wired to `api.ts`** (stub) — foundation plugin, wired at assembly like T04/T05.
+
+Requesting PM A VERDICT.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
