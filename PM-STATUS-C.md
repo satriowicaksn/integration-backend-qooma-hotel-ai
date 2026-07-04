@@ -30,7 +30,7 @@
 
 | T## | Title                                                                            | Status   | Verified by PM | Notes                                                              |
 | --- | -------------------------------------------------------------------------------- | -------- | -------------- | ------------------------------------------------------------------ |
-| T17 | Telegram config CRUD (`GET, PUT /api/integrations/telegram`)                     | assigned | —              | Spec read + skeleton OK; impl blocked on T02 + T03                 |
+| T17 | Telegram config CRUD (`GET, PUT /api/integrations/telegram`)                     | wip      | PM C partial   | PLAN attempt 1 REJECT-PLAN + scope-narrowed (H13). Primitive (types/schema/repo/service + unit tests) proceeding; router+api.ts wiring escalated as Q-C-01/02/03/04 |
 | T18 | Per-dept Telegram routing write-through (HC `departments` table)                 | backlog  | —              | After T17; per Q-OPS-06 shared-DB direct write                     |
 | T19 | Telegram inbound webhook + commands (`/take`, `/release`, `/done`, `/help`)      | backlog  | —              | After T04 (Nathan) + T05 + T17                                     |
 | T20 | Outbound Telegram dispatch RPC                                                   | backlog  | —              | After T06 + T09 (Nathan); per-dept routing per T18                 |
@@ -97,6 +97,64 @@ src/modules/telegram/
 
 Awaiting PM C ACK — terutama GAP #1/#2/#3 shape scope keputusan.
 
+##### PM C REJECT-PLAN T17 (attempt 1) — narrow scope + escalate foundation gaps (H13)
+
+**Executive summary**: PLAN akurat vs spec §2.1 + §4.2 (endpoint contract, DDL match, deps T02+T03 tepat) — **tapi 3 dari 5 GAPs adalah shared-infra edits di luar otoritas slot C**, dan 1 item Approach (masking-of-envelope) salah. Precedent: PM A untuk T04–T09 secara eksplisit **tidak menyentuh** `api.ts`, `prisma-client.ts`, atau assembly wiring — semua primitif dibuat unit-testable dan deferred ke "assembly" (lihat PM A T04 SUBMIT L1066 & T08 GAP-#2 L1054). T17 mengikuti pola yang sama: narrow, unit-testable primitif — router + integration + JWT stub + api.ts + prisma singleton **dikeluarkan dari scope T17**.
+
+Verdict: **REJECT-PLAN**. Fix-path di bawah. Foundation gap dieskalasi ke Parent PM (Q-C-01/02/03/04).
+
+---
+
+⛔ **Items to fix in PLAN (executor-side, before resubmitting PLAN)**
+
+**Item #1 — Masking design broken** — PLAN Approach step 2
+- **Violation**: GET view mask derived from `bot_token_enc` envelope prefix/suffix → hash of ciphertext, bukan plaintext. Random IV per encrypt (crypto.ts:53) berarti mask **berubah tiap PUT walau token sama** → tidak konfirmasi token yang benar tersimpan. Pattern spec (MVP §5 L118 WA "MASKED in response") mengasumsikan mask stabil terhadap plaintext.
+- **Fix**: pada GET, `decrypt(botTokenEnc)` → `maskTokenForLog(plaintext)` → return `***<last3-of-plaintext>`. Helper sudah ada di `src/shared/utils/masking.ts:34` (menerima plaintext). Perf cost: 1 AES-GCM decrypt per GM view — negligible. PUT-time log masking (mask BEFORE encrypt) tetap benar — no change.
+
+**Item #2 — Scope bundling shared-infra edits** — PLAN GAPs #1, #2, #3
+- **Violation**: PLAN bundles 3 shared-infra changes (`src/core/prisma/prisma-client.ts` uncomment, `src/entrypoints/api.ts` bootstrap, stub `requireGmAdmin` in `telegram.routes.ts`) ke dalam slot-C task. Per `PM-AGENT.md §0.6`: "bila gap affect > 1 dev, escalate ke Parent PM SEBELUM edit." Semua tiga affect >1 slot (Prisma singleton enables T10 Nanak; api.ts affects semua endpoint; JWT contract lintas repo Auth). PM A precedent selama 6 primitif (T04–T09) = **never wire, always defer to assembly** — PLAN T17 melanggar precedent.
+- **Fix**: strip semua 3 shared-infra edits dari `Files to modify`. Remove `telegram.routes.ts` dari `Files to create` untuk attempt ini (needs JWT plugin + api.ts wiring — post-foundation). Prosisi PLAN revisi = primitif unit-testable saja.
+
+**Item #3 — Repository as concrete Prisma-direct**, bukan interface
+- **Clarification** (bukan violation, PLAN sudah benar tapi kontradiktif dengan Approach step 1 vs GAP #1): PLAN Approach step 1 correct ("no interface, direct Prisma per ADR-0001"). Tapi karena `db = {}` placeholder, repository **tidak bisa compile against real client** sampai foundation land. Fix: repository consumes an **injected `PrismaClient`-shaped argument** via ctor (typed dari `@prisma/client` import — dep sudah declared). Service consumes repository via ctor. Kedua-nya unit-testable dengan plain-object mock in tests. Pola sama seperti PM A T05 (`HotelSlugLookup` injected port pattern). Repository **file itself** tetap Prisma-direct (bukan wrap interface) — ADR-0001 aman.
+
+---
+
+🟢 **What Executor C MAY proceed on now (narrow, self-contained)**
+
+Boleh langsung tanpa ACK tambahan (mengikuti PM A T04–T09 precedent):
+
+- ✅ `src/modules/telegram/telegram.types.ts` — `TelegramConfigDomain`, `TelegramConfigView` types.
+- ✅ `src/modules/telegram/telegram.schema.ts` — zod `TelegramConfigPutSchema`, `TelegramConfigResponseSchema`.
+- ✅ `src/modules/telegram/telegram.repository.ts` — Prisma-direct impl, ctor-injected `PrismaClient` (import from `@prisma/client`); wraps `findUnique` + `upsert`. Not a wrap-interface. Compiles standalone; runs against real DB later saat foundation land.
+- ✅ `src/modules/telegram/telegram.service.ts` — ctor-injected repository + `encrypt`/`maskTokenForLog`. Implements `get(hotelId)` (decrypt → mask → view), `upsert(hotelId, dto)` (mask-log → encrypt → repo.upsert → view).
+- ✅ `src/modules/telegram/index.ts` — barrel: **types + service factory only** (no routes yet, no adapter concept since repository is Prisma-direct).
+- ✅ `src/modules/telegram/__tests__/telegram.service.test.ts` — unit test w/ plain-object mock repo. Cover: `get` decrypt+mask roundtrip, `get` NotFoundError on null, `upsert` encrypt-then-persist, `upsert` returns view w/ masked token, log-line contains masked token only (PII floor). Coverage ≥ 80% line for service.
+- ✅ `pnpm install --frozen-lockfile` + `pnpm prisma:generate` (GAP #5). No lockfile mutation, no new dep. **ACK GAP-#5.**
+
+**Do NOT touch this attempt (foundation authority; blocked on Q-C-01/02/03)**:
+- ❌ `src/core/prisma/prisma-client.ts` — leave `db = {}` placeholder. (Q-C-01)
+- ❌ `src/entrypoints/api.ts` — leave stub. (Q-C-02)
+- ❌ Any auth/JWT plugin work; do NOT create stub `requireGmAdmin`. (Q-C-03)
+- ❌ `src/modules/telegram/telegram.routes.ts` — omit from PLAN entirely. Route landing = post-foundation follow-up task.
+- ❌ `src/modules/telegram/__tests__/telegram.repository.integration.test.ts` — defer. Cannot run without live Prisma singleton.
+
+DoD self-check reformulation for T17 attempt 1: shrink to "primitive shipped, unit-tested" (spec §5 L124 CRUD *behavior* covered by service unit tests via decrypt+mask+upsert semantics; endpoint reachability deferred to foundation follow-up + T17-followup route landing).
+
+---
+
+🚨 **Escalations to Parent PM (foundation gaps)** — see slot C §3 below; mirror to PARENT §3 posted.
+
+- **Q-C-01** — Prisma client singleton wiring (still `{}` placeholder at prisma-client.ts:29). Not in T01–T09 scope; foundation "9/9 complete" berlaku untuk task-list tapi assembly primitif ini belum shipped. Affects T10 (B) + T17-T25 (C). **Ask**: (a) route as slot-A foundation follow-up, atau (b) authorize slot-C ship (1-line uncomment). Preferred (a).
+- **Q-C-02** — `src/entrypoints/api.ts` bootstrap (Fastify server + error-handler + correlation-id + tenant-resolver + config load + graceful shutdown). No routes reachable sampai landed. Q-A-05 (eslint async-hook `checksVoidReturn.properties:false`) recommended landed **before** or **with** api.ts.
+- **Q-C-03** — Session/JWT auth plugin absent. All CRUD endpoints spec'd `gm_admin` (spec §2.1) tidak reachable. `env.ts:36-39` declares `JWT_ACCESS_SECRET/TTL/REFRESH_*` — no plugin consumer. Auth svc lives in separate repo (KICKOFF §1 L11) — Integration verifies JWTs issued by Auth. **Cross-service contract Qs untuk PO**: (a) verification method (JWKS URL vs HS256 shared secret)? (b) JWT payload shape (`sub`, `hotel_id`, `role`, exp)? (c) refresh-token relevance (this svc doesn't issue)? Preferred MVP: HS256 shared secret + `{ sub, hotel_id, role }` payload + verify-only plugin. Blocks T10–T20 + T23.
+- **Q-C-04** (cascading Q-C-03) — Tenant identification pada CRUD endpoints (spec `/api/integrations/telegram` tidak punya `:hotel_slug` di path, beda dari webhook `/webhooks/wa/:hotel_slug` §2.2). Preferred: JWT payload `hotel_id`. Locked ke Q-C-03 outcome.
+
+---
+
+**T17 status**: keep `wip` (turun dari `assigned`) untuk narrow primitive; endpoint deliverable = escalated waiting on Q-C-01/02/03.
+
+Executor C: proceed pada Files-boleh-touch list di atas; ship SUBMIT saat primitif + unit test ≥80% + `make check` green. Router + integration + api.ts wiring = follow-up task setelah Q-C-01/02/03 resolved.
 
 <!--
 TEMPLATE — copy untuk task baru:
@@ -205,7 +263,10 @@ Re-run `make check` after fix, confirm pass, resubmit (attempt N+1).
 
 | ID            | Question | Source         | Status | Resolution |
 | ------------- | -------- | -------------- | ------ | ---------- |
-| —             | —        | —              | —      | —          |
+| Q-C-01 | **Prisma client singleton wiring — foundation gap; affects B+C.** `src/core/prisma/prisma-client.ts:29` still `export const db = {} as unknown as Record<string, unknown>` placeholder. Not delivered by any T01-T09 (PM A explicit precedent: primitives shipped, wiring deferred to "assembly"). Blocks any repository / integration test in T10 (B) + T17-T25 (C). **Ask Parent PM**: (a) route as slot-A foundation follow-up (F10?), or (b) authorize slot-B/C to ship (1-line uncomment; dep already declared). Preferred (a) for ownership clarity. | PM C (Satrio) H13 | src/core/prisma/prisma-client.ts:11-29; T17 PLAN GAP-#1 | open | — |
+| Q-C-02 | **`src/entrypoints/api.ts` bootstrap — foundation gap; affects all HTTP endpoints.** File still stub (line 38 `console.warn`). Fastify server + error-handler plugin (T08) + correlation-id + tenant-resolver (T05) + config load + graceful shutdown not wired. Blocks endpoint reachability for T10-T20 + T23. Q-A-05 (eslint async-hook `checksVoidReturn.properties: false`) recommended land **before** or bundled with this so all future async `preHandler`/hook code passes lint cleanly. **Ask Parent PM**: prioritize/assign api.ts bootstrap task (F11?). | PM C (Satrio) H13 | src/entrypoints/api.ts:11-45; T17 PLAN GAP-#2 | open | — |
+| Q-C-03 | **Session/JWT auth plugin absent — cross-service contract Q; blocks all `gm_admin` CRUD (spec §2.1).** `src/plugins/` has hmac-validator + tenant-resolver + internal-rpc-auth + error-handler only. `env.ts:36-39` declares `JWT_ACCESS_SECRET`/`JWT_REFRESH_SECRET` but no plugin consumer. Auth service lives in separate repo (KICKOFF §1 L11); Integration verifies JWTs signed by Auth. Cross-service ratification needed: (a) verification method — JWKS URL fetch vs HS256 shared secret? (b) JWT payload shape — `{ sub, hotel_id, role, exp }`? (c) refresh-token flow — irrelevant to Integration (doesn't issue)? Preferred MVP: HS256 shared secret + `{ sub, hotel_id, role }` + verify-only plugin. Blocks T10 (B), T17 route (C), T18-T20, T23. **Ask Parent PM**: route to PO — cross-service contract. | PM C (Satrio) H13 | KICKOFF §1 L11; env.ts:36-39; src/plugins/*; T17 PLAN GAP-#3 | open | — |
+| Q-C-04 | **Tenant identification for CRUD endpoints — cascading from Q-C-03.** Spec `/api/integrations/telegram` has no `:hotel_slug` in path (unlike webhook routes at `/webhooks/wa/:hotel_slug` spec §2.2). Alternatives: (a) JWT payload `hotel_id` (session-bound; preferred if Q-C-03 lands JWT); (b) header `X-Hotel-Id` (weak); (c) path rewrite `/api/hotels/:hotel_slug/...` (spec-drift). Locked to Q-C-03 outcome. | PM C (Satrio) H13 | spec §2.1 vs §2.2; T17 PLAN GAP-#4 | open | — |
 
 ---
 
