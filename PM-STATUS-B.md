@@ -209,6 +209,157 @@ After you address Items #1–#5 + follow GAP decisions above: rewrite the PLAN a
 
 Re-run `make check` after implementation, self-verify drift scans (per `PM-AGENT.md §3 Step 2`), then SUBMIT.
 
+#### PLAN T10 — exec-B (Nanak) at H16 22:18 (attempt 2)
+
+**REJECT items addressed** (attempt 1 → attempt 2):
+
+- **Item #1 (scope creep: routes.ts)** → **DROPPED** `whatsapp-config.routes.ts` from Files-to-create. Attempt 2 = narrow **primitive** matching T17-a2 shape (types + schema + repository + service + unit tests, no router). Routes filed as **T10-followup** parked for post-Q-C-01/02/03. Barrel `index.ts` appends primitive exports only — no routes plugin.
+- **Item #2 (mask helper drift)** → GET path decrypts `row.accessTokenEnc` and applies `maskTokenForLog(plaintext)` from `@shared/utils/masking.js` — the mandated `***<last3>` format. NO roll-own `***<last4>` variant. Round-trip stability test added (`service.test.ts` — mask stable across two independent encrypt→decrypt cycles of the same plaintext).
+- **Item #3 (crypto ctor-inject → ADR-0001 wrap-on-wrap)** → Service imports `encrypt`, `decrypt` **directly** from `@shared/utils/crypto.js`. Service ctor collapses to `(repo: WhatsappConfigRepository, logger: Logger)`. Unit tests use a real ephemeral `ENCRYPTION_KEY` (64-hex) + `ENCRYPTION_KEY_VERSION` seeded in test-setup (or `beforeAll` env override) — no crypto mock.
+- **Item #4 (PII-floor log line missing + `Logger` dep)** → Service ctor accepts `logger: Logger` from `@core/logger/logger.js`. `upsertForHotel(hotelId, dto)` first line logs `{ msg: 'whatsapp_config.upsert', module: 'whatsapp', hotelId, bsp: dto.bsp, phoneNumberId: dto.phoneNumberId, phoneNumber: maskWaPhone(dto.phoneNumber), accessToken: maskTokenForLog(dto.accessToken), webhookUrl: dto.webhookUrl, webhookVerifyToken: maskTokenForLog(dto.webhookVerifyToken) }` **BEFORE** any `encrypt()` call. Unit test asserts `JSON.stringify(logSpy.mock.calls[0][0])` does NOT contain plaintext `dto.accessToken` NOR plaintext `dto.webhookVerifyToken` NOR the raw phone. (`webhook_verify_token` is `VARCHAR(80)` per DDL §4.1 and used by Meta for hub-challenge — treating as secret-adjacent; masking it in logs matches CLAUDE §6 spirit.)
+- **Item #5 (attribution: T06 Nathan not T17 Satrio)** → §Files-explicitly-NOT-touched (attempt 2) says "T06 Nathan's BSP port/adapter (merged `3c1274a`, PR #6)". T17 = Satrio Telegram, unmerged at `98f098b`, out-of-scope for slot B.
+
+**GAP decisions applied** (per PM B verdict):
+
+- **#1** → **B** skeleton primitive (types+schema+repo+service+tests), no routes/wiring/integration.
+- **#2** → **A** authorized to run `make prisma-generate` (`pnpm prisma:generate`) as prerequisite codegen — safe (writes only `node_modules/.prisma/client/`, no `schema.prisma` mutation, no DB hit, no `src/` scaffold). Verified `Makefile:87` + `package.json:28`. Will run **before** first typecheck; called out again in SUBMIT.
+- **#3** → **moot** (routes deferred).
+- **#4** → **B** defer integration test → **T10-INTEG** follow-up parked after Q-C-01. Attempt 2 repository unit test mocks Prisma client as a minimal test-double (call-shape verification), tolerated per T17-a2 stopgap precedent. No `it.skip` / `describe.skip`.
+- **#5** → **A** subject-prefixed at module root: `whatsapp-config.<layer>.ts`.
+- **#6** → **moot** (routes deferred).
+
+**Scope recap** (unchanged from attempt 1)
+
+T10 primitive = types + zod schemas + Prisma-backed repository + service (crypto + logger + masking) + unit tests for the WA config CRUD contract. Public API surface exposed via `index.ts` barrel is the shape that a future T10-followup (routes + `api.ts` wiring) will consume once Q-C-01/02/03 land. Spec refs unchanged: `MVP-INTEGRATION-FIRST.md §1.2 B1` + `04-integration-channels.md §2.1 + §4.1 + §9`.
+
+**Session-start gate** (EXECUTOR-PROTOCOL §2 — re-verified for attempt 2)
+
+- Identity confirmed: Executor, Slot B (Nanak) ✓
+- CLAUDE.md loaded ✓
+- Task spec re-read: `MVP-INTEGRATION-FIRST.md §1.2/§4/§5` · `04-integration-channels.md §2.1/§4.1/§8/§9` ✓
+- PM B REJECT block read + digested (all 5 Items + 6 GAP decisions) ✓
+- Parent docs / helpers spot-verified:
+  - `src/shared/utils/masking.ts:34` — `maskTokenForLog(token)` returns `***<last3>` ✓
+  - `src/shared/utils/masking.ts:13` — `maskWaPhone(phone)` returns `+628****<last4>` shape ✓
+  - `src/shared/utils/crypto.ts` — `encrypt/decrypt/CryptoError` public API confirmed ✓
+  - `src/core/logger/logger.ts` — `Logger` type + `createLogger` factory (boilerplate stub returns no-op fns; unit tests will inject spy `Logger` — construct via `{ debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() }`) ✓
+  - `prisma/schema.prisma` — `WaConfig` model matches spec §4.1 DDL byte-for-byte ✓
+  - `Makefile:87` + `package.json:28` — `make prisma-generate` wired ✓
+- `make typecheck`: PASS on `main` (Node 22 nvm + pnpm 9 corepack) ✓
+- `make lint`: PASS on `main` ✓
+- Scaffolder risk: **one authorized codegen** — `make prisma-generate` (writes only `node_modules/.prisma/client/`, per GAP T10-#2 A). NO other generators. NO scaffolders. NO `pnpm add`.
+
+**Files to create** (7 — mirrors PM B attempt-2 direction verbatim)
+
+```
+src/modules/whatsapp/whatsapp-config.types.ts
+src/modules/whatsapp/whatsapp-config.schema.ts
+src/modules/whatsapp/whatsapp-config.repository.ts
+src/modules/whatsapp/whatsapp-config.service.ts
+src/modules/whatsapp/__tests__/whatsapp-config.schema.test.ts
+src/modules/whatsapp/__tests__/whatsapp-config.repository.test.ts
+src/modules/whatsapp/__tests__/whatsapp-config.service.test.ts
+```
+
+**Files to modify** (1)
+
+- `src/modules/whatsapp/index.ts` — append primitive exports (types + service class + repository class + zod schemas). **Preserve** existing T06 BSP re-exports byte-for-byte (`BspCredentials`, `BspSendResult`, `SendTemplateInput`, `SendTextInput`, `WhatsappBspPort` from `./ports/whatsapp-bsp.port.js`).
+
+**Files explicitly NOT touched in this attempt**
+
+- `prisma/schema.prisma`, `prisma/migrations/*` — T02/T06 territory
+- `src/entrypoints/api.ts` — stub (Q-C-02); no wiring
+- `src/core/prisma/prisma-client.ts` — stub (Q-C-01); repository imports `PrismaClient` type directly from `@prisma/client` (after `make prisma-generate`)
+- Auth/JWT plugin — MISSING (Q-C-03); moot since routes deferred
+- `src/modules/whatsapp/ports/whatsapp-bsp.port.ts`, `src/modules/whatsapp/adapters/1engage.adapter.ts`, `src/modules/whatsapp/__tests__/1engage.adapter.test.ts` — **T06 Nathan's** merged BSP primitive (`3c1274a`, PR #6), byte-for-byte preserved
+- `src/modules/telegram/*` — slot C territory
+- `src/modules/_template/*` — reference, do not edit
+- `src/plugins/*` — foundation, out of slot B scope
+- `package.json` / `pnpm-lock.yaml` — no dep add
+
+**Approach** (post-REJECT, T17-a2 discipline)
+
+Coding order per PM B direction:
+
+1. **`make prisma-generate`** (authorized codegen) — writes `node_modules/.prisma/client/`. Verify by re-running `make typecheck` on `main` — must remain PASS.
+
+2. **`whatsapp-config.types.ts`** — domain types with camelCase (matches Prisma model field names):
+   ```
+   WhatsappConfigDomain = { hotelId, bsp, phoneNumberId, phoneNumber, accessTokenMasked, webhookUrl, webhookVerifyTokenMasked, verifiedAt: Date | null, createdAt, updatedAt }
+   WhatsappConfigUpsertInput = { bsp?, phoneNumberId, phoneNumber, accessToken /* plaintext */, webhookUrl, webhookVerifyToken /* plaintext */ }
+   ```
+   No `any`, no numeric enum, no `interface` for internal shape (use `type` per CLAUDE §5). Public types re-exported through barrel.
+
+3. **`whatsapp-config.schema.ts`** — zod source of truth for the future wire contract (routes will parse against these):
+   - `WhatsappConfigPutSchema` — `{ bsp?: z.enum(['1engage']).default('1engage'), phoneNumberId: z.string().min(1).max(80), phoneNumber: z.string().regex(/^\+[1-9]\d{1,14}$/), accessToken: z.string().min(1), webhookUrl: z.string().url().max(500), webhookVerifyToken: z.string().min(1).max(80) }` — strict-length per DDL §4.1.
+   - `WhatsappConfigResponseSchema` — `{ hotelId, bsp, phoneNumberId, phoneNumber, accessToken /* masked string */, webhookUrl, webhookVerifyToken /* masked string */, verifiedAt, createdAt, updatedAt }` (all camelCase over-the-wire).
+   - Exported inferred DTOs (`WhatsappConfigPutDto`, `WhatsappConfigResponseDto`).
+
+4. **`whatsapp-config.repository.ts`** — class `WhatsappConfigRepository(private readonly db: PrismaClient)`. NO port interface (ADR-0001 direct Prisma). Methods:
+   - `findByHotelId(hotelId: string): Promise<WaConfig | null>` — returns raw Prisma row (ciphertext `accessTokenEnc` intact).
+   - `upsert(hotelId: string, encryptedInput: { bsp, phoneNumberId, phoneNumber, accessTokenEnc, webhookUrl, webhookVerifyToken }): Promise<WaConfig>` — Prisma `.upsert({ where: { hotelId }, update: {...encryptedInput}, create: {...encryptedInput, hotelId} })`. `updatedAt`/`createdAt` handled by `@updatedAt`/`@default(now())`.
+   - Import: `import type { PrismaClient, WaConfig } from '@prisma/client';`. NO domain mapping in repo (service maps).
+
+5. **`whatsapp-config.service.ts`** — direct imports:
+   ```
+   import { decrypt, encrypt } from '@shared/utils/crypto.js';
+   import { maskTokenForLog, maskWaPhone } from '@shared/utils/masking.js';
+   import { NotFoundError } from '@core/errors/app-errors.js';
+   import type { Logger } from '@core/logger/logger.js';
+   ```
+   Class `WhatsappConfigService(private readonly repo: WhatsappConfigRepository, private readonly logger: Logger)`. Methods:
+   - `getForHotel(hotelId)` — `repo.findByHotelId` → null → throw `NotFoundError('WaConfig', hotelId)`; else `decrypt(row.accessTokenEnc)` → `maskTokenForLog(plaintext)` → project domain response with `accessToken: masked`, `webhookVerifyToken: maskTokenForLog(row.webhookVerifyToken)`. No plaintext leaves.
+   - `upsertForHotel(hotelId, dto: WhatsappConfigUpsertInput)` — **first line** is PII-floor log (see Item #4 fix above). Then `encrypt(dto.accessToken)` → `repo.upsert(hotelId, { …, accessTokenEnc, webhookVerifyToken: dto.webhookVerifyToken /* plaintext at rest per DDL — Meta uses it for hub-challenge, not enciphered per schema */ })` → row → same masked projection as GET.
+   - **Note on `webhookVerifyToken`**: schema DDL §4.1 stores it plaintext (`VARCHAR(80)`, no `_enc` suffix). Encrypting would drift from schema. Repository writes plaintext to DB; service masks in log + response only. Documented in a 1-liner comment in service.
+
+6. **`whatsapp-config.schema.test.ts`** — zod parse: happy path for `WhatsappConfigPutSchema`, failure for each required-field-missing + each length/regex violation (E.164, URL, VARCHAR bounds). Golden test for `WhatsappConfigResponseSchema` mask projection shape.
+
+7. **`whatsapp-config.repository.test.ts`** — mock Prisma via minimal test-double (`{ waConfig: { findUnique: jest.fn(), upsert: jest.fn() } as unknown as PrismaClient`). Assert:
+   - `findByHotelId(id)` calls `db.waConfig.findUnique({ where: { hotelId: id } })` and returns its result.
+   - `upsert(id, input)` calls `db.waConfig.upsert` with `where: { hotelId }`, `create: { …input, hotelId }`, `update: input`.
+   - 3 tests (match T17-a2 shape).
+   - **Stopgap declaration** in test file docstring (per GAP #4 B): "Prisma-client mock accepted as stopgap — integration test parked as **T10-INTEG** pending Q-C-01 singleton land."
+
+8. **`whatsapp-config.service.test.ts`** — real crypto (ephemeral 64-hex key set via `process.env.ENCRYPTION_KEY` + `ENCRYPTION_KEY_VERSION` in `beforeAll` — matches `crypto.test.ts` shape). Test double for repository (Jest class mock). Spy `Logger` (`{ info: jest.fn(), … }`). Cases:
+   - `getForHotel` happy path — decrypt succeeds, `accessToken` field in response = `maskTokenForLog(plaintext)` shape (`***<last3>`).
+   - `getForHotel` — `NotFoundError` when repo returns null.
+   - `upsertForHotel` — encrypts before repo call; verify `repo.upsert.mock.calls[0][1].accessTokenEnc` starts with `1:` (envelope version prefix per crypto.ts:52) and is round-trip decryptable to the original plaintext.
+   - **PII-floor test** (Item #4 gate): `expect(JSON.stringify(logSpy.info.mock.calls[0][0])).not.toContain(inputAccessToken); .not.toContain(inputWebhookVerifyToken); .not.toContain(rawPhoneNumber);` — asserts NO plaintext leak in the log payload.
+   - **Round-trip mask stability** (Item #2 gate): two independent encrypt→decrypt→mask cycles of same plaintext yield identical masked value.
+
+9. **`src/modules/whatsapp/index.ts`** — append:
+   ```
+   export { WhatsappConfigRepository } from './whatsapp-config.repository.js';
+   export { WhatsappConfigService } from './whatsapp-config.service.js';
+   export {
+     WhatsappConfigPutSchema,
+     WhatsappConfigResponseSchema,
+   } from './whatsapp-config.schema.js';
+   export type {
+     WhatsappConfigPutDto,
+     WhatsappConfigResponseDto,
+   } from './whatsapp-config.schema.js';
+   export type {
+     WhatsappConfigDomain,
+     WhatsappConfigUpsertInput,
+   } from './whatsapp-config.types.js';
+   ```
+   Preserve existing T06 BSP `export type { … } from './ports/whatsapp-bsp.port.js';` block byte-for-byte at top.
+
+10. **`make check`** locally (typecheck + lint + format-check + unit tests) — must be green. Drift scans per EXECUTOR-PROTOCOL §4.4 — all 0. Then SUBMIT.
+
+**Deferred (out of attempt 2 scope, tracked as follow-ups)**
+
+- **T10-followup** (routes + `api.ts` wiring + `hotelId` derivation) — awaits Q-C-01 (prisma singleton) + Q-C-02 (`api.ts` bootstrap) + Q-C-03 (JWT/gm_admin session plugin). Filed as a new task after PM B ACK.
+- **T10-INTEG** — real-DB integration test for repository (testcontainers Postgres per CLAUDE §8). Awaits Q-C-01 landing.
+- **Q-B-01 candidate** — WA `app_secret` field appears in spec §4.11 (HMAC verify for webhook) but is absent from `wa_configs` DDL §4.1. This blocks T12 (inbound webhook signature verification), NOT T10. Will raise formally in SUBMIT §Notes per PM B direction ("do NOT try to solve in T10 scope").
+
+**GAPs / questions** (none new for attempt 2)
+
+- None. All 6 attempt-1 GAPs answered by PM B verdict block above.
+
+Awaiting PM B ACK on attempt 2 PLAN before touching `src/`. Will run `make prisma-generate` immediately after ACK, then code per §Approach ordering.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
