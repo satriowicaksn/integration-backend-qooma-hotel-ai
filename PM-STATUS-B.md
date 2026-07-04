@@ -131,6 +131,84 @@ Documented in a `// WIRING SPEC` comment atop `whatsapp-config.routes.ts` so who
 
 Awaiting PM B ACK on GAPs #1–#6 (esp. #1 scope + #2 codegen + #3 zod shim) before writing any code.
 
+##### PM B REJECT-PLAN — T10 PLAN attempt 1 (H16) by PM B (Nanak)
+
+Not ACK. Two code/design defects (Item #2, #3) plus a scope-narrowing to match the Satrio T17-a2 precedent (Item #1). Attempt 2 = narrow **primitive** only — types + schema + repository + service + unit tests. NO `whatsapp-config.routes.ts`, NO `api.ts` touch, NO integration test in this attempt. Precedent: PARENT §2 L120 (`T17 primitive APPROVED (attempt 2) — narrow scope respected`). Same shape here.
+
+⛔ **Items to fix**:
+
+**Item #1 — Scope creep: routes.ts in a primitive** `src/modules/whatsapp/whatsapp-config.routes.ts` (PLAN §Files-to-create L76)
+- **Violation**: Same class of bundling as `T17-a1` REJECT (PARENT §2 L119 "bundled 3 shared-infra edits + …"). Routes.ts requires either (a) `api.ts` wiring [Q-C-02 blocked], (b) `hotelId` derivation from session [Q-C-03 blocked], or (c) zod↔Fastify shim [GAP T10-#3 unresolved]. All three block a mergeable routes.ts in this window. T17-a2 approved shape (commit `98f098b`) shipped **without** `telegram.routes.ts` — same discipline here.
+- **Fix**: Drop `whatsapp-config.routes.ts` from attempt 2. File it as **T10-followup** in your GAPs section for post-Q-C-01/02/03 landing. All other Files-to-create bullets stay. `src/modules/whatsapp/index.ts` barrel: append only the primitive exports (types, schema, repo class, service class) — no routes plugin export yet.
+
+**Item #2 — Masking helper: roll-own drift from `@shared/utils/masking.ts`** (PLAN §Approach L100, §Approach L106)
+- **Violation**: PLAN's `WhatsappConfigResponseSchema` masks `access_token` to `"***<last4>"`, but the existing helper `maskTokenForLog()` at `src/shared/utils/masking.ts:34` returns `"***<last3>"`. CLAUDE.md §6 (WAJIB) + `docs/SECURITY.md §5` mandate helper usage. Executor also proposed "literal `***`" alternative in the same bullet — ambiguous. T17-a2 approved shape (PARENT §2 L120 "masking = decrypt→maskTokenForLog on GET view (stable, round-trip test-verified)") is the mandated pattern.
+- **Fix**: In `whatsapp-config.service.ts` GET path — `decrypt(row.accessTokenEnc)` → `maskTokenForLog(plaintext)`. Import from `@shared/utils/masking.js` + `@shared/utils/crypto.js` **directly** (see Item #3). Do NOT introduce a new mask format; do NOT mask the ciphertext. Add a unit test asserting mask is stable across two encrypt-decrypt round trips of the same plaintext (Satrio's `telegram.service.test.ts:*` has this — mirror it).
+
+**Item #3 — Crypto injection: over-engineered vs ADR-0001** (PLAN §Approach L104 "cryptoDeps injected as narrow `{ encrypt, decrypt }` function pair")
+- **Violation**: `encrypt`/`decrypt` from `shared/utils/crypto.ts` are pure helpers, NOT external IO. CLAUDE.md §4 "TIDAK perlu port (DILARANG bikin interface): Internal util → `import` langsung dari `@shared/utils/utils/...`" — you agreed in the same bullet ("NOT a port — pure helpers") but then still ctor-injected them. Satrio T17-a2 (approved) imports them directly. Injecting = "wrap-on-wrap" antipattern (CLAUDE.md §10).
+- **Fix**: `whatsapp-config.service.ts` — `import { decrypt, encrypt } from '@shared/utils/crypto.js';` at top. Service ctor becomes `(repo: WhatsappConfigRepository, logger: Logger)` — see Item #4. Unit tests do NOT mock crypto — either use a real ephemeral key set via `test-setup.ts` (per Q-A-03 workaround) or exercise round-trip with a stable key. Reference: `src/modules/telegram/telegram.service.ts:5-6` on commit `98f098b`.
+
+**Item #4 — Missing PII-floor log line + `Logger` dep** (PLAN §Approach absent)
+- **Violation**: CLAUDE.md §6 #6 "TIDAK BOLEH log secrets" + `docs/SECURITY.md §5`. Satrio T17-a2 service has:
+  ```ts
+  this.logger.info({ msg: 'telegram_config.upsert', module: 'telegram', hotelId, botToken: maskTokenForLog(input.botToken), … });
+  ```
+  BEFORE `encrypt()` — and asserts via unit test that `JSON.stringify(loggedPayload)` excludes plaintext (PARENT §2 L120 "PII floor test asserts …"). PLAN §Approach lists no log line and no `Logger` ctor param. Under CLAUDE §6 security WAJIB, missing this pattern = REJECT.
+- **Fix**: `whatsapp-config.service.ts` ctor accepts `logger: Logger` from `@core/logger/logger.js`. `upsertForHotel(hotelId, dto)` first line: `this.logger.info({ msg: 'whatsapp_config.upsert', module: 'whatsapp', hotelId, accessToken: maskTokenForLog(dto.accessToken), phoneNumber: maskWaPhone(dto.phoneNumber), phoneNumberId: dto.phoneNumberId, bsp: dto.bsp });`. Unit test asserts `JSON.stringify(logSpy.calls[0])` does NOT contain the plaintext `accessToken`. Same pattern for GET is optional (no plaintext enters GET path).
+
+**Item #5 — Factual attribution error (nit, but fix in attempt 2)** (PLAN §Files-explicitly-NOT-touched L93)
+- **Violation**: "T17 Satrio's approved primitive" refers to `src/modules/whatsapp/ports/whatsapp-bsp.port.ts` + `adapters/1engage.adapter.ts` — **wrong owner**. That module = **T06 Nathan (slot A)**, git `3c1274a`, merged PR #6, PARENT §1 T06 row. T17 = Satrio Telegram, on unmerged branch `98f098b` at `src/modules/telegram/*`.
+- **Fix**: Attempt 2 PLAN — say "T06 Nathan's BSP port/adapter (merged `3c1274a`)". Preserves byte-for-byte still applies — same discipline, correct attribution.
+
+---
+
+**GAP decisions** (concrete A/B/C answers to PLAN GAPs #1–#6):
+
+- **GAP T10-#1 (scope)** — **B** (skeleton primitive + tests, no wiring). Reasoning above (Item #1). Full-impl-minus-wiring is what Satrio proposed in T17-a1 and was REJECTed for; T17-a2 narrowed further to "primitive only, routes deferred". Same rule for T10-a2.
+
+- **GAP T10-#2 (Prisma codegen)** — **A** (run `make prisma-generate` = `pnpm prisma:generate`). Authorized. Verified `Makefile:87-88` wires it as a first-class dev step (called by `install` / `setup` / `install-fresh` / `dev`). It's schema→client codegen, does NOT hit DB, does NOT modify `schema.prisma`, does NOT scaffold new files in `src/` — writes only to `node_modules/.prisma/client/`. Satrio T17-a2 imports `PrismaClient, TelegramConfig` from `@prisma/client` on `98f098b` and make check green — proves codegen was run there too. **Not** a CLAUDE §11 scaffolder; safe. Explicitly noted in your SUBMIT.
+
+- **GAP T10-#3 (zod↔Fastify shim)** — **moot for attempt 2** (per Item #1 no routes.ts). When you file T10-followup after Q-C-02, the tentative direction is **D** (manual `Schema.safeParse(req.body)` in handler) — no package add (avoids PO gate per CLAUDE §11), keeps route thin. If Q-C-02 chooses to add `fastify-type-provider-zod`, that's a PO decision at that time. Do not decide it now.
+
+- **GAP T10-#4 (integration test scope)** — **B** (defer to T10-INTEG follow-up after Q-C-01 lands). Same precedent as T17-a2 (PARENT §2 L120 "repo unit test mocks Prisma — accepted as stopgap because Q-C-01 blocks integration test; required follow-up when Q-C-01 lands"). PM B **tolerates this deviation** in attempt 2 SUBMIT — declare it explicitly, track as T10-INTEG follow-up in your SUBMIT §Notes. Do **not** write `it.skip` (drift rule §10 forbids). Do **not** use `describe.skip` either — just don't ship the integration file at all in this attempt.
+
+- **GAP T10-#5 (file naming)** — **A** (subject-prefixed at module root): `whatsapp-config.types.ts`, `whatsapp-config.schema.ts`, `whatsapp-config.repository.ts`, `whatsapp-config.service.ts`. Reasoning: the WA module is already multi-concern (Nathan's BSP `ports/` + `adapters/` from T06). Satrio's `telegram.<layer>.ts` shorthand works because his module is single-concern for now; ours already has BSP siblings and will add webhook (T11/T12/T15), dispatch (T13), retry (T14), template-relay (T16). Sub-folders (B) fragment the barrel; single growing file (C) hits CLAUDE §rule-of-thumb 300 LOC by T14. Flat with `whatsapp-<concern>` prefix reads cleanly for T11-T16 follow-ups.
+
+- **GAP T10-#6 (hotelId derivation)** — **moot for attempt 2** (routes.ts dropped per Item #1). When T10-followup files routes after Q-C-03, direction is **A** (routes throw `AuthError('hotel_id not resolved')` if `request.hotelId` undefined). Not decided now; belongs in T10-followup PLAN.
+
+---
+
+**Attempt 2 direction** (mirror T17-a2 shape):
+
+Files to create (7):
+```
+src/modules/whatsapp/whatsapp-config.types.ts
+src/modules/whatsapp/whatsapp-config.schema.ts
+src/modules/whatsapp/whatsapp-config.repository.ts
+src/modules/whatsapp/whatsapp-config.service.ts
+src/modules/whatsapp/__tests__/whatsapp-config.schema.test.ts
+src/modules/whatsapp/__tests__/whatsapp-config.repository.test.ts
+src/modules/whatsapp/__tests__/whatsapp-config.service.test.ts
+```
+
+Files to modify (1):
+```
+src/modules/whatsapp/index.ts   — append primitive exports (types, schema, repo class, service class). Preserve T06 BSP re-exports byte-for-byte.
+```
+
+Files explicitly NOT touched: `prisma/schema.prisma`, `prisma/migrations/*`, `src/entrypoints/api.ts`, `src/core/prisma/prisma-client.ts`, `src/plugins/*`, `package.json`, `src/modules/whatsapp/ports/*`, `src/modules/whatsapp/adapters/*`, `src/modules/whatsapp/__tests__/1engage.adapter.test.ts` (T06 Nathan), `src/modules/telegram/*` (slot C), `src/modules/_template/*`.
+
+Coding order (suggested): types → schema → repository (`import type { PrismaClient, WaConfig } from '@prisma/client'` after `make prisma-generate`) → service (imports `encrypt`, `decrypt`, `maskTokenForLog`, `maskWaPhone` directly; ctor takes `(repo, logger)`) → schema.test → repository.test (mocks Prisma-client double, tolerated per GAP T10-#4) → service.test (round-trip mask + PII-floor assertion) → barrel append → local `make check`.
+
+Also acceptable in attempt 2 SUBMIT:
+- Q-B-01 raise on Q-A-04 (WA `app_secret` missing from `wa_configs`) — flag as T12 blocker in your §3 mirror, do NOT try to solve in T10 scope.
+- Note in SUBMIT §Notes: T10-followup (router + api.ts wiring + integration test) parked awaiting Q-C-01/02/03 (parallel to T17-followup).
+
+After you address Items #1–#5 + follow GAP decisions above: rewrite the PLAN as attempt 2 (append new `#### PLAN T10 — exec-B (Nanak) at H16 HH:MM (attempt 2)` sub-block below this REJECT — do NOT edit attempt 1), then start coding. PM B will ACK the attempt 2 PLAN before code lands (per EXECUTOR-PROTOCOL §2 gate).
+
+Re-run `make check` after implementation, self-verify drift scans (per `PM-AGENT.md §3 Step 2`), then SUBMIT.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
