@@ -1146,6 +1146,45 @@ Requesting PM A VERDICT.
 
 **Executor A: T08 done — F7 complete (catalog + canonical envelope). B/C now have consistent error responses.** Foundation is **8/9**. Last one: **T09** (internal RPC server — spec §10 catalog; auth = shared-secret/mTLS, NOT session cookie; propose the `src/` location in your PLAN's session-start gate since there's no ratified path yet — I'll ACK it before you code, per the T09 guardrail). Post PLAN when ready.
 
+### ASSIGNMENT T09 — claimed by exec-A (Nathan) at H12 (2026-07-03)
+- Branch: `feat/internal-rpc-auth` (proposal, `feat/<short>`)
+- Routed from: PM-STATUS-A.md §1 T09 + VERDICT T08 hand-off. Spec: `04 §2.4` (4 internal RPC catalog), `MVP §4.11` (auth = shared-secret **or** mTLS, NOT cookie; service-to-service; document scheme di README), guardrail (propose lokasi; **BUKAN** `src/rpc/`).
+
+#### PLAN T09 — exec-A (Nathan) at H12 (2026-07-03)
+
+**Scope recap**
+- T09 = **auth primitive untuk internal RPC** (dipanggil HC/AI). Foundation: guard shared-secret timing-safe → 401 kalau invalid, jalan plugin-level SEBELUM handler. RPC handler konkret (`send_wa_message`/`send_telegram_message`/`submit|resubmit_wa_template_to_meta`, §2.4) = domain B/C — BUKAN T09. Pola sama T04 (verifier + injected secret), tapi **sinkron** (secret statik injected, tak ada async lookup → tak ada friksi eslint async-hook).
+
+**Session-start gate** (EXECUTOR-PROTOCOL §2)
+- Identity confirmed: Executor, Slot A (Nathan) ✓ · CLAUDE.md loaded ✓
+- Task spec read: `04 §2.4` (RPC surface, internal-only), `MVP §4.11` (shared-secret/mTLS bukan cookie, service-to-service, doc di README).
+- Parent docs spot-read: `hmac-validator.plugin.ts` (pola verifier+guard+timingSafeEqual), `app-errors.ts` (`AuthError` 401 — existing, pre-T08), `env.ts` (belum ada `INTERNAL_RPC_SECRET`).
+- Dependencies: T01 ✓, T05 ✓ (tenant — RPC-nya B/C). T08 tidak diperlukan (`AuthError` sudah ada sebelum T08).
+- **Secret source**: guard terima **injected secret** (bukan `loadConfig` di guard) → decoupled + testable. Env var `INTERNAL_RPC_SECRET` **TIDAK** ditambah di T09 — karena field env **required** baru akan pecahkan test yg panggil `loadConfig` (mis. `crypto.test` BASE_ENV). Wiring (assembly) yg tambah env var + pass ke guard (deferred, sama pola redis/HttpClient/resolveSecret). (GAP #3.)
+- `make check` clean baseline ✓. Scaffolder risk: none.
+
+**Files to create (lokasi PROPOSED — GAP #1, minta ACK)**
+```
+src/plugins/internal-rpc-auth.plugin.ts          (verifier + guard factory)
+src/plugins/__tests__/internal-rpc-auth.plugin.test.ts
+```
+
+**Files to modify**
+- (none) — `env.ts`/`api.ts`/`_template` untouched. Env var + wiring deferred.
+
+**Approach (function-based)**
+- **Pure**: `verifyInternalSecret(provided: string|undefined, expected: string): boolean` — `timingSafeEqual` (bukan `===`), length-guard dulu (mismatch→false, no throw), `provided===undefined` / `expected===''` → false (tolak empty-secret bypass). Timing-safe compare inline (hindari sentuh merged T04; lihat GAP #4).
+- **Guard factory**: `internalRpcAuthGuard({ secret }): (req) => void` — baca header `X-Internal-Secret`, verify; gagal → `throw new AuthError('Invalid internal RPC credentials')` (401 native via `AuthError.statusCode`, tanpa dep handler). **Sinkron** (secret injected) → dipasang sbg `preHandler`, throw sebelum handler → RPC handler tak jalan.
+- **Test** (`fastify.inject`): pure-fn (match, mismatch, missing, length-diff no-throw, empty-expected→false); guard inject (valid `X-Internal-Secret`→200+handler-ran; wrong→401+skip; missing→401+skip). No async → no eslint disable.
+
+**GAPs / questions — butuh ACK PM A**
+- **GAP T09-#1 — LOKASI (guardrail wajib propose).** PROPOSED: `src/plugins/internal-rpc-auth.plugin.ts` (konsisten dgn `hmac-validator`/`tenant-resolver`/`error-handler` plugins). **BUKAN** `src/rpc/` (dilarang guardrail). **Intent: plugins/.**
+- **GAP T09-#2 — mekanisme + header.** Shared-secret (default MVP; mTLS = layer TLS/LB infra, bukan app-code → noted, tak diimplement di app). Header **`X-Internal-Secret`** (dedicated; hindari bentrok `Authorization` JWT user). Ini **kontrak lintas-service** (HC/AI harus kirim header sama) → perlu didokumentasikan di README (MVP §4.11) = tugas planning/PM (saya tak edit docs) → flag. **Intent: shared-secret + `X-Internal-Secret`.**
+- **GAP T09-#3 — secret source.** Injected ke guard (T09); env `INTERNAL_RPC_SECRET` + wiring deferred ke assembly (menghindari pecahnya `loadConfig` test bila field required ditambah sekarang). **Intent: inject-only di T09**, env var saat wiring. (Kalau PM mau env var sekarang → saya buat OPTIONAL + update `crypto.test` BASE_ENV, tapi lebih berisiko.)
+- **GAP T09-#4 (minor) — timing-safe compare.** Inline lokal di plugin (hindari sentuh merged T04 `hmac-validator`) vs extract `shared/utils/timing-safe-equal.ts` (DRY, refactor T04 pakai itu). **Intent: inline lokal** (minim blast radius; extract bisa jadi chore terpisah).
+
+Awaiting PM A ACK (GAP #1–#4, esp. lokasi #1).
+
 <!--
 TEMPLATE — copy untuk task baru:
 
