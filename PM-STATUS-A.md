@@ -15,8 +15,8 @@
 ## 0. Current focus (slot A)
 
 - **Day**: H12+ (task tracker activated 2026-06-30)
-- **Active task**: T01-T04 MERGED · **T05 PLAN ACK'd, coding** (tenant slug-resolver + hand-rolled TTL-LRU, Opsi A ×4; injected lookup port — spec §4.3 L71 blessed, unblocked from Q-A-01). Open Qs: Q-A-01/02/04 (PO/PM B), Q-A-03/05 (shared-config → Parent PM).
-- **Branch**: `feat/tenant-slug-resolver` (T05, in progress)
+- **Active task**: T01-T04 MERGED · **T05 ✅ APPROVED** (tenant resolver + factory TTL-LRU, 100% resolver cov, never-trust-body proven, awaiting PO merge). Next: T06 (BSP adapter). Open Qs: Q-A-01/02/04 (PO/PM B), Q-A-03/05 (shared-config → Parent PM).
+- **Branch**: `feat/tenant-slug-resolver` (T05, awaiting PO merge + CI)
 - **Next gate (global)**: G1 — lihat `PM-STATUS-PARENT.md §5`
 - **My queue (preview)**: T01–T09 (foundation) — lihat §8 di bawah (mirror dari PARENT §1 filter Slot=A)
 - **Critical path**: T02 (Prisma migration) blokir implementasi Nanak (T10+) dan Satrio (T17+). Prioritaskan T01 → T02 → T03 sequence.
@@ -33,7 +33,7 @@
 | T02 | Prisma schema initial migration (8 Integration tables + indexes)                 | merged   | PM A (H12) ✓   | Clean-DB validated by PM (8 tbl, 6 chk, 2 partial idx, 0 auth). Opsi A. Merged PR #2 `53a4925`. Unblocks B+C. |
 | T03 | Encryption-at-rest helper (AES-256-GCM / KMS)                                    | merged   | PM A (H12) ✓   | Opsi A current-version. 100% cov, tamper+fail-fast verified. Merged PR #3 `ca9685b`. Consumed by T10+T17. |
 | T04 | Webhook signature-verification middleware (Meta `X-Hub-Signature-256` + Telegram)| merged   | PM A (H12) ✓   | plugin-level preHandler, timingSafeEqual, raw-byte HMAC, 401 native, no-insert invariant proven. 100% line cov. Merged PR #4 `ad46125`. |
-| T05 | Tenant resolution from `:hotel_slug` (LRU 5-min, hotels.code lookup)             | wip      | —              | PLAN ACK'd (Opsi A×4). injected lookup port, hand-rolled TTL-LRU, 404 native, never-trust-body. Consumed by T12+T19. |
+| T05 | Tenant resolution from `:hotel_slug` (LRU 5-min, hotels.code lookup)             | approved | PM A (H12) ✓   | factory TTL-LRU (no-class per PO), injected lookup port, 404 native, never-trust-body proven, 100% resolver cov. Awaiting PO merge. Consumed by T12+T19. |
 | T06 | BSP adapter interface + `1engage` impl                                           | backlog  | —              | After T01                                                          |
 | T07 | Queue + scheduler infra (BullMQ + retry + DLQ)                                   | backlog  | —              | After T02                                                          |
 | T08 | Common error handlers (Integration-specific codes per spec §9)                   | backlog  | —              | After T01                                                          |
@@ -733,6 +733,27 @@ Notes / questions (untuk PM A)
 - **Q-A-05 (eslint async-hook)** masih unratified → local disable dipakai lagi (1 baris, test only).
 
 Requesting PM A VERDICT.
+
+##### VERDICT T05 — APPROVED (H12, attempt 1) by PM A
+
+✅ **APPROVE.** All 8 binding conditions verified independently; multi-tenancy guard reviewed line-by-line.
+
+**Independent verification (PM reran on `feat/tenant-slug-resolver` `ad8b188`):**
+- **#1 never-trust-body (WAJIB tenant guard)** — `resolveTenantFromSlug` reads `req.params[hotel_slug]` ONLY; body never touched. Proof test POSTs `{hotel_id:'attacker-controlled-id'}` to `/webhook/whatsapp/acme` → resolved `hotelId` = the URL-slug's id, body ignored. ✓
+- **#2 404 native** — unknown slug (`lookup → null`) + empty/missing param → `NotFoundError('hotel', slug)` → `inject` 404 via `statusCode=404`, no T08 dep. ✓
+- **#3 LRU + 5-min TTL** — `ttlMs` default `300_000`; correct Map-insertion-order LRU (delete+re-set on `get` = recency; evict-front on overflow); lazy TTL that correctly does **not** refresh expiry on read; deterministic tests via injected `now()` (hit/miss/expiry boundary/over-cap/recency-refresh). ✓
+- **#4 preHandler-level** — throws before handler; `didHandlerRun()===false` on unknown slug. ✓
+- **#5 injected port** — `HotelSlugLookup` injected, no prisma/RPC coupling; cache-hit does not call `lookup` twice (mock call-count 1 vs 2 post-expiry). ✓
+- **#6 zero-dep/files/no-any/no-class/coverage** — deps + lockfile UNCHANGED; 4 files at proposed locations (**not** `src/common/`); `api.ts`/`env.ts`/prisma untouched; **0 `any`, 0 `class`**; explicit return types. PM rerun coverage: tenant-resolver **100/100/100/100**, cache **100 line / 100 func / 85.7 branch** (1 uncovered = defensive `oldest===undefined` guard). `make check` green on PM rerun. ✓
+- **#7 `now()` injection** — `Date.now` default (app-code, not workflow) ✓. **#8 eslint async-hook** — same local 1-line disable (Q-A-05 pending), `.eslintrc.cjs` untouched ✓.
+
+**On the PO-directed class→factory refactor (deviation from my ACK'd PLAN — ENDORSED):** the PLAN specified a `class TtlLruCache`; PO (Nathan) directed function-based, so it shipped as `createTtlLruCache(opts)` + closure over `Map` (private state in closure, `new` → factory call, `size` getter → `size()` method). A PO directive supersedes my ACK'd design — correct call, and it's the right moment (foundation util, 0 external call-sites, before B/C copy the pattern). Behavior identical, transparently flagged. This preference now applies to future stateful utils (T06/T07 etc.).
+
+**Design quality:** clean hexagonal (pure factory cache + injected lookup + factory hook), TTL-not-refreshed-on-read is the subtle-correct LRU+TTL semantics, `exactOptionalPropertyTypes`-safe `now` spread. Matches MVP §4.3 exactly.
+
+→ §1 tracker: T05 `approved`, Verified by PM A. → Code on `feat/tenant-slug-resolver` awaiting **PO merge + CI**.
+
+**Executor A: T05 done — tenant-resolution primitive ready for B (T12) & C (T19).** The `HotelSlugLookup` impl (Auth RPC vs shared-DB) is deferred to consumer wiring per Q-A-01. Next in queue: **T06** (BSP adapter interface + `1engage` impl — module-scoped at `src/modules/<wa-module>/adapters/`, NOT top-level `src/adapters/`; port + adapter per ADR-0001). Post PLAN when ready.
 
 <!--
 TEMPLATE — copy untuk task baru:
