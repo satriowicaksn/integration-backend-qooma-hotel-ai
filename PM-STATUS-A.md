@@ -888,6 +888,48 @@ Requesting PM A VERDICT.
 
 **Executor A: T06 done — BSP dispatch primitive ready for B4 (`send_wa_message`, T13).** `src/modules/whatsapp/` now seeded (ports+adapters+barrel); **B fills service/CRUD in this same module** (Q-A-06 — pending Parent PM confirm B aligns). Next in queue: **T07** (queue + scheduler infra — extend existing `src/core/queue/bull-factory.ts`, Bull + retry/backoff + DLQ). Post PLAN when ready.
 
+### ASSIGNMENT T07 — claimed by exec-A (Nathan) at H12 (2026-07-03)
+- Branch: `feat/queue-infra` (proposal, `feat/<short>`)
+- Routed from: PM-STATUS-A.md §1 T07 + VERDICT T06 hand-off. Spec: `04 §7` (retry 3× backoff 1s/5s/30s, DLQ/`dead`, quota/template-not-approved NOT retried), `MVP §4.9` (3 attempts backoff 1s/5s/30s, exhaust→failed), `CLAUDE.md §9` (Bull pattern + queue naming `<module>:<job-type>`), guardrail (extend `src/core/queue/bull-factory.ts`).
+
+#### PLAN T07 — exec-A (Nathan) at H12 (2026-07-03)
+
+**Scope recap**
+- T07 = infra queue+scheduler foundation: extend `bull-factory.ts` (stub `queueFactory={}`) jadi factory Bull dengan default job-options, **custom backoff 1s/5s/30s**, **DLQ** (Bull tak punya native → dead-letter queue + failed-forwarder), naming helper, worker-register + repeatable-schedule helper tipis. Dikonsumsi B (outbound dispatch retry T-B6) & C (OTA poller/health cron T-C5/C8).
+
+**Session-start gate** (EXECUTOR-PROTOCOL §2)
+- Identity confirmed: Executor, Slot A (Nathan) ✓ · CLAUDE.md loaded ✓
+- Task spec read: `04 §7` (retry+DLQ+non-retryable), `MVP §4.9` (backoff), `CLAUDE §9` (Bull `new Queue<T>('foo',{redis})` + `.process(name, concurrency, fn)`, naming `<module>:<job-type>`).
+- Parent docs spot-read: `bull-factory.ts` (stub), `env.ts` (`REDIS_URL`, `REDIS_QUEUE_DB`, `REDIS_TLS_ENABLED`, `WORKER_CONCURRENCY_DEFAULT`), `redis-client.ts` (stub), `app-errors.ts`.
+- Dependencies: T02 ✓ (migration; `outbound_dispatch_queue` ada). `bull@4.16.3` + `ioredis@5.3.2` **declared di package.json** → importable (bukan phantom).
+- **Bull vs BullMQ**: task title sebut "BullMQ" TAPI CLAUDE §2 tech-stack + `package.json` = **`bull` 4.x** (bukan `bullmq`). Per CLAUDE §14 (ikuti yang ratified) → pakai **Bull 4.x**. (GAP #1.)
+- **Testing**: Bull `new Queue()` butuh Redis (buka koneksi ioredis) → tak boleh di unit test (open handles). → pisah **pure config/logic** (backoff/naming/job-options/DLQ-forwarder) yang di-unit-test, dari `createQueue` (thin `new Bull`) yang integration-only. (GAP #4.)
+- `make check` clean baseline ✓. Scaffolder risk: none.
+
+**Files to modify**
+- `src/core/queue/bull-factory.ts` — ganti stub dengan factory + helpers (function-based, no class).
+
+**Files to create**
+```
+src/core/queue/__tests__/bull-factory.test.ts   (unit — pure/logic parts, mock queue/job, no Redis)
+```
+
+**Approach (function-based)**
+- **Retry/backoff**: `RETRY_BACKOFF_DELAYS_MS = [1000,5000,30000]`, `DEFAULT_JOB_ATTEMPTS = 3`, `integrationBackoffStrategy(attemptsMade): number` (idx `attemptsMade-1`, clamp ke last). `buildDefaultJobOptions(overrides?)`: `{ attempts, backoff:{type:'integration'}, removeOnComplete:true, removeOnFail:false }` (keep failed utk DLQ inspect).
+- **Naming**: `queueName(module, jobType)` = `${module}:${jobType}`; `deadLetterQueueName(module)` = `${module}:dead`.
+- **Queue options (pure)**: `buildQueueOptions(redis, jobOverrides?)` → `{ redis, defaultJobOptions, settings:{ backoffStrategies:{ integration: integrationBackoffStrategy } } }`. `createQueue<T>({ name, redis, jobOptions? })` → thin `new Bull<T>(name, buildQueueOptions(...))`. **Redis connection di-inject** (string/RedisOptions) — konstruksi dari config di wiring (entrypoint), bukan di factory (testability + Q-A-03 NODE_ENV avoidance).
+- **DLQ**: `attachDeadLetterForwarder(queue, deadLetterQueue)` — `queue.on('failed', (job, err) => { if (job.attemptsMade >= job.opts.attempts) deadLetterQueue.add({ originalQueue: queue.name, jobId, name, data, failedReason }) })`. Non-retryable (quota/template) = caller pakai `attempts:1` atau discard — foundation sediakan mekanisme, keputusan per-job di B.
+- **Worker/scheduler helper (tipis)**: `registerProcessor(queue, jobName, concurrency, processor)` wrapper `.process`; `scheduleRepeatable(queue, jobName, data, cron)` wrapper `.add(data,{repeat:{cron}})`. Concurrency dari `config.WORKER_CONCURRENCY_DEFAULT` (env, bukan konstanta baru).
+- **Test** (no Redis): `integrationBackoffStrategy` (1→1000,2→5000,3→30000,4→30000 clamp); `queueName`/`deadLetterQueueName`; `buildDefaultJobOptions` (attempts/backoff/removeOn*); `buildQueueOptions` (backoffStrategies wired, redis passthrough, defaultJobOptions); **DLQ-forwarder** via fake queue (EventEmitter/handler capture) + `deadLetterQueue={add:jest.fn()}` → emit failed at exhaustion (attemptsMade=3,attempts=3) → add dipanggil; not-exhausted (attemptsMade=1) → tidak. `createQueue`/`registerProcessor`/`scheduleRepeatable` = thin, NOT unit-tested (integration/wiring; noted).
+
+**GAPs / questions — butuh ACK PM A**
+- **GAP T07-#1 — Bull vs BullMQ.** Title "BullMQ" vs CLAUDE §2 + `package.json` = `bull` 4.x. **Intent: Bull 4.x** (ratified/installed). Kalau PO mau BullMQ → new dep + ganti API (route PO). 
+- **GAP T07-#2 — retry count semantics.** Spec §7 "3 retries (1s,5s,30s)" vs "after 3 attempts→failed" / MVP §4.9 "3 attempts (1s,5s,30s)" — konflik jumlah (3 attempts = 2 delay; 3 retries = 4 attempts = 3 delay). **Intent (A)**: `attempts=3` default (konfigurable) + backoff sequence `[1s,5s,30s]` by `attemptsMade` → efektif 1s,5s dipakai; 30s reserved kalau `attempts≥4`. Strategy faithful, attempts tunable per-job. (Kalau PM mau full 1s/5s/30s terpakai → default `attempts=4`.)
+- **GAP T07-#3 — DLQ mechanism.** Bull tak punya native DLQ. **Intent (A)**: dead-letter queue (`<module>:dead`) + `attachDeadLetterForwarder` on exhaustion; `removeOnFail:false` agar failed job inspectable. B/C wire DLQ per queue.
+- **GAP T07-#4 — testing tanpa live Redis.** **Intent (A)**: unit-test pure/logic (backoff/naming/options/DLQ-forwarder via mock); `createQueue`+worker/scheduler thin = integration-only (deferred, butuh `make start`). Coverage floor dihitung atas kode non-thin.
+
+Awaiting PM A ACK (GAP #1–#4).
+
 <!--
 TEMPLATE — copy untuk task baru:
 
