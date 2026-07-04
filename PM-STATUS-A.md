@@ -755,6 +755,47 @@ Requesting PM A VERDICT.
 
 **Executor A: T05 done — tenant-resolution primitive ready for B (T12) & C (T19).** The `HotelSlugLookup` impl (Auth RPC vs shared-DB) is deferred to consumer wiring per Q-A-01. Next in queue: **T06** (BSP adapter interface + `1engage` impl — module-scoped at `src/modules/<wa-module>/adapters/`, NOT top-level `src/adapters/`; port + adapter per ADR-0001). Post PLAN when ready.
 
+### ASSIGNMENT T06 — claimed by exec-A (Nathan) at H12 (2026-07-03)
+- Branch: `feat/wa-bsp-adapter` (proposal, `feat/<short>`)
+- Routed from: PM-STATUS-A.md §1 T06 + VERDICT T05 hand-off. Spec: `04-integration-channels.md §3.1` (WA outbound via BSP) + §6 (BSP=1engage, per-hotel access_token+phone_number_id), `open-questions.md Q-OPS-04` (thin BSP-agnostic interface — Recommended), `ADR-0001` (external HTTP → WAJIB port+adapter; swap 1engage↔IOH), guardrail (module-scoped, BUKAN `src/adapters/` top-level).
+
+#### PLAN T06 — exec-A (Nathan) at H12 (2026-07-03)
+
+**Scope recap**
+- T06 = **BSP port (ABI, vendor-agnostic) + `1engage` adapter** untuk dispatch outbound WA. Foundation utk B4 (`send_wa_message`, T-dispatch). Port = kontrak stabil yang B consume via barrel; adapter = impl konkret (fungsi factory, bukan class — preferensi PO). Q-OPS-04: thin interface walau 1engage satu-satunya v1.
+
+**Session-start gate** (EXECUTOR-PROTOCOL §2)
+- Identity confirmed: Executor, Slot A (Nathan) ✓ · CLAUDE.md loaded ✓
+- Task spec read: `04 §3.1` ("Dispatches to WA Cloud API"; text/template; per-hotel BSP+access_token+phone_number), `§6` (BSP 1engage), `Q-OPS-04` (thin interface), `ADR-0001` (port utk external HTTP), `_template/ports|adapters` (pola), `MODULE_TEMPLATE.md` (barrel = public API, TIDAK export adapter).
+- Parent docs spot-read: `_template/adapters/example-vendor.adapter.ts` (pola adapter), `core/http/http-client.ts` (**STUB** class `HttpClient.post` throw), `app-errors.ts` (`ExternalServiceError(service,msg,upstream?)` = 502).
+- Dependencies: T01 ✓. **Note**: `HttpClient` core = stub → adapter depend pada **narrow `HttpPoster` interface** (structural, dipenuhi HttpClient nanti) yang di-inject → unit-test dgn mock. Access token diterima **sudah plaintext** (B decrypt via `crypto` T03 sebelum panggil adapter) — adapter tak decrypt.
+- ESLint boundary: barrel export **port saja** (bukan adapter, per MODULE_TEMPLATE). Adapter di-import hanya oleh test (test file `no-restricted-imports` OFF) + entrypoint-wiring nanti. T06 tak wire ke `api.ts` (stub).
+- `make check` clean baseline ✓. Scaffolder risk: none (buat folder modul manual, bukan `cp -r`/generator).
+
+**Files to create (lokasi PROPOSED — minta ACK, esp. nama modul GAP #1)**
+```
+src/modules/whatsapp/ports/whatsapp-bsp.port.ts          (port interface + domain types)
+src/modules/whatsapp/adapters/1engage.adapter.ts         (create1engageAdapter factory)
+src/modules/whatsapp/index.ts                            (barrel: export port + types, NOT adapter)
+src/modules/whatsapp/__tests__/1engage.adapter.test.ts   (unit, mock HttpPoster)
+```
+
+**Files to modify**
+- (none) — modul baru; tak sentuh `_template/` (frozen), `api.ts` (stub), `env.ts`, existing `src`.
+
+**Approach (arsitektur — hexagonal, function-based)**
+- **Port `WhatsappBspPort`** (ABI): `sendText(input): Promise<BspSendResult>` + `sendTemplate(input): Promise<BspSendResult>`. Domain types: `BspCredentials { phoneNumberId; accessToken }`, `SendTextInput { credentials; to; body }`, `SendTemplateInput { credentials; to; templateName; languageCode; variables? }`, `BspSendResult { messageId }`. Vendor-agnostic (no 1engage/axios leak).
+- **`create1engageAdapter({ http, config }): WhatsappBspPort`** (factory + closure): build WA Cloud API request — `POST ${config.baseUrl}/${config.apiVersion}/${phoneNumberId}/messages`, header `Authorization: Bearer <accessToken>`; body text = `{messaging_product:'whatsapp',to,type:'text',text:{body}}`, template = `{...type:'template',template:{name,language:{code},components:[{type:'body',parameters:[{type:'text',text:v}...]}]}}`. Response `{messages:[{id}]}` → `{messageId}`. Non-2xx / no message id / http throw → **`ExternalServiceError('1engage', …, {status, body})`** (502, Sentry-friendly). `HttpPoster` = narrow `{ post<T>(url, body, opts?): Promise<{data:T;status:number}> }`.
+- **Test** (mock HttpPoster): sendText → assert URL/Bearer-header/Cloud-API-text-payload + `messageId` dari response; sendTemplate → assert components/parameters mapping + messageId; template tanpa variables → components kosong/omit; error non-2xx → `ExternalServiceError`; error http-throw → `ExternalServiceError`. No real network.
+
+**GAPs / questions — butuh ACK PM A**
+- **GAP T06-#1 — nama modul (cross-slot, B bangun CRUD di modul yang SAMA).** PROPOSED: `whatsapp` (jelas; `src/modules/whatsapp/`). Alternatif `wa` (match prefix tabel `wa_configs`). Ini keputusan lintas-slot (B harus align nama) → mohon PM confirm / route ke Parent-PM+B. **Intent: `whatsapp`.**
+- **GAP T06-#2 — kontrak 1engage konkret tak ada di spec.** 1engage = BSP WhatsApp Cloud API → saya impl **konvensi Cloud API (Meta Graph shape)**: `POST {base}/{ver}/{phoneNumberId}/messages`, `Bearer` auth. `baseUrl`+`apiVersion` **injected via config** → di-set ke endpoint 1engage saat wiring. A (default): Cloud-API shape sekarang, adjustable saat kontrak vendor confirmed (port tetap stabil apa pun payload). B: tunggu kontrak 1engage nyata (blokir T06). **Intent: A** — port stabil; payload adapter refinable tanpa ubah ABI.
+- **GAP T06-#3 — cakupan operasi port.** A (default): **messaging only** — `sendText` + `sendTemplate` (kebutuhan B4 dispatch). EXCLUDE: template-management relay submit/resubmit-to-Meta (B8, API berbeda) + health getMe (C8) → port/tugas terpisah nanti. B: masukkan semua sekarang (over-scope, kontrak B8/C8 belum jelas). **Intent: A** — ABI fokus dispatch; extend belakangan.
+- **Nota**: adapter = factory function (no class) per preferensi PO + endorsement VERDICT T05. Port = `interface` (bukan class — OK).
+
+Awaiting PM A ACK (GAP #1–#3, esp. nama modul lintas-slot).
+
 <!--
 TEMPLATE — copy untuk task baru:
 
