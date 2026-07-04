@@ -29,7 +29,7 @@
 
 | T## | Title                                                                            | Status   | Verified by PM | Notes                                                              |
 | --- | -------------------------------------------------------------------------------- | -------- | -------------- | ------------------------------------------------------------------ |
-| T10 | WA config CRUD (`GET, PUT /api/integrations/whatsapp`)                           | assigned | —              | Spec read + skeleton OK; impl blocked on T02 + T03                 |
+| T10 | WA config CRUD (`GET, PUT /api/integrations/whatsapp`)                           | approved (primitive) | PM B (H16, a2) | Primitive shipped: types+zod+Prisma-direct-ctor-inject repo+service (encrypt+decrypt-mask on view + PII-floor log BEFORE encrypt + round-trip mask stability) + 28 unit tests, 100% module cov, drift clean, make check green on PM rerun. Router+api.ts wiring = T10-followup blocked on Q-C-01/02/03. Branch `feat/whatsapp-config-crud @ 175faa5`, PR pending push |
 | T11 | Verify webhook action (`POST /api/integrations/whatsapp/verify-webhook`)         | backlog  | —              | After T10                                                          |
 | T12 | WA inbound webhook ingest (signature → persist → HC guest upsert → AI RPC)       | backlog  | —              | After T04 (Nathan) + T05 + T10                                     |
 | T13 | Outbound WA dispatch RPC + DND check + quota two-phase                           | backlog  | —              | After T06 + T09 (Nathan); HC `check_and_reserve_outbound_quota` RPC|
@@ -501,6 +501,81 @@ Q register / follow-ups
 - **T10-INTEG** — real-DB integration test for repository (testcontainers Postgres per `CLAUDE.md §8` + `docs/TESTING.md`). Blocked on Q-C-01 (prisma singleton).
 
 Requesting PM B VERDICT.
+
+##### VERDICT T10 — APPROVED (H16, attempt 2, primitive) by PM B (Nanak)
+
+✅ **APPROVED**. Independent PM rerun on `feat/whatsapp-config-crud @ 175faa5` (code) + `eb732dd` (SUBMIT status). All 14 binding conditions verified against code, not claim. Scope contained per T17-a2 primitive shape. Ready for follow-up wiring.
+
+**Independent verification trace** (rerun on PM shell, Node 22.23.1 + pnpm 9.0.0 via nvm/corepack):
+
+- `make check` — **PASS end-to-end**. Output confirms: `pnpm lint` clean (`eslint . --max-warnings 0`), `pnpm format:check` "All matched files use Prettier code style!", `pnpm typecheck` (`tsc --noEmit`) 0 errors, `pnpm test:unit` 12/14 suites passed (2 pre-existing `_template/*` baseline skips per T01), 115/117 tests passed (my 3 new suites = 28/28 pass, 0 fail). Timing 0.766s.
+- **Drift scans (6 EXECUTOR §4.4 categories) on `src/modules/whatsapp/whatsapp-config.*`** — all 0 hits:
+  - `any` (`: any|<any>|as any` excluding `unknown`): 0
+  - `console.log/info/debug`: 0
+  - `throw new Error(`: 0
+  - Forbidden imports (`express|typeorm|sequelize|moment|node-fetch`): 0
+  - `^export default ` outside entrypoints: 0
+  - `.skip(` / `describe.skip`: 0
+- **Coverage rerun** (`pnpm test:coverage --collectCoverageFrom='src/modules/whatsapp/whatsapp-config.*.ts' --testPathPattern='whatsapp-config'`):
+  ```
+  File                           | % Stmts | % Branch | % Funcs | % Lines
+  All files                      |   100   |   100    |   100   |   100
+   whatsapp-config.repository.ts |   100   |   100    |   100   |   100
+   whatsapp-config.schema.ts     |   100   |   100    |   100   |   100
+   whatsapp-config.service.ts    |   100   |   100    |   100   |   100
+  ```
+  `types.ts` erased at compile per ts-jest — expected, matches ACK caveat.
+- **`git diff --stat main..feat/whatsapp-config-crud -- src/ prisma/ package.json pnpm-lock.yaml`** — exactly 8 files touched: 7 create (`whatsapp-config.{types,schema,repository,service}.ts` + 3 test files) + 1 modify (`index.ts` +11 net). Zero touches to `api.ts`, `prisma-client.ts`, `plugins/*`, `prisma/schema.prisma`, `prisma/migrations/*`, `package.json`, `pnpm-lock.yaml`, `telegram/*`, `_template/*`, T06 BSP port/adapter/tests.
+
+**14 binding conditions — file:line evidence**:
+
+- **#1 `make check` PASS** — PM rerun output above. ✓
+- **#2 Drift scans 0 hits on module scope** — PM rerun above. Pre-existing hits confined to `_template/*` + `core/config/env.ts` + `core/http/http-client.ts` (files in NOT-touched list). ✓
+- **#3 Coverage 100%** — PM rerun above (`repository.ts`, `schema.ts`, `service.ts`). ✓
+- **#4 PII-floor log test present** — `whatsapp-config.service.test.ts:242-268` asserts `JSON.stringify(logger.info.mock.calls[0]?.[0])` excludes `PLAINTEXT_ACCESS_TOKEN`, `PLAINTEXT_WEBHOOK_VERIFY_TOKEN`, `PLAINTEXT_PHONE_NUMBER`. **Extra rigor**: `service.test.ts:270-297` events-array ordering test proves log fires BEFORE `repo.upsert` (`events: ['log', 'upsert']`) — beyond binding, matches T17-a2 discipline. ✓
+- **#5 Round-trip mask stability test present** — `service.test.ts:299-309` two independent `encrypt(PLAINTEXT)` yield distinct ciphertexts (proves GCM nonce randomness), both `decrypt→maskTokenForLog` yield identical `***<last3>` string matching `maskTokenForLog(PLAINTEXT)` directly. ✓
+- **#6 Direct helper imports only** — `whatsapp-config.service.ts:14` `import { decrypt, encrypt } from '@shared/utils/crypto.js';` + `:15` `import { maskTokenForLog, maskWaPhone } from '@shared/utils/masking.js';`. Ctor at `:44-47` = `(repo, logger)` — no cryptoDeps. ✓
+- **#7 `NotFoundError` (not raw Error)** — `service.ts:52` `throw new NotFoundError(RESOURCE, hotelId)` where `RESOURCE = 'WaConfig'` (:25). Drift scan #3 confirms `throw new Error(` = 0 in module scope. ✓
+- **#8 Barrel additive-only** — `src/modules/whatsapp/index.ts:1-7` T06 BSP re-export block (`BspCredentials, BspSendResult, SendTemplateInput, SendTextInput, WhatsappBspPort from './ports/whatsapp-bsp.port.js';`) byte-for-byte preserved vs `main`. New exports appended L9-18 only. `diff` against main shows +11 net = additive. ✓
+- **#9 `git diff --stat` scope-clean** — PM rerun above. 7 create + 1 modify, zero cross-boundary touches. ✓
+- **#10 `make prisma-generate` declared** — SUBMIT `§DoD #10` line 449 declares timestamp `2026-07-04 22:36:30 → 22:36:43 WIB` writing to `node_modules/.prisma/client/` only. PM independently verified: `node_modules/.prisma/client/` populated (`default.d.ts`, `default.js`, `edge.d.ts`, `edge.js`, `index-browser.js`, …) and `git status --short` on main empty (no `src/`/`prisma/`/`package.json` mutation from codegen). ✓
+- **#11 Prisma-mock stopgap declared** — SUBMIT §Notes L492 + `whatsapp-config.repository.test.ts:1-7` docstring both flag stopgap. T10-INTEG follow-up filed at L501. Precedent: T17-a2 PARENT §2 L120. ✓ Accepted.
+- **#12 Response-mask on `webhookVerifyToken` declared** — SUBMIT §Notes L493 declares "KEEP over-mask" (defense-in-depth). Verified in `service.ts:99` (`webhookVerifyToken: maskTokenForLog(row.webhookVerifyToken)`). Non-violating vs spec §5 AC (which is minimum-mask AC, not maximum). ✓ Accepted with note: if FE integration reveals read-back need in a later spec amendment, flip via T10-followup PLAN — do not silently regress.
+- **#13 Q-A-03 test-env workaround re-appearance** — SUBMIT §Notes L494. `service.test.ts:83-95` mirrors `crypto.test.ts:9-32`. Shared-infra pending (not on slot B). ✓ Noted, no action from PM B.
+- **#14 Q-B-01 NOT filed** — §3 mirror table L470 empty. SUBMIT §Q-register L499 references Q-A-04 (existing at PARENT §3a) as T12 blocker instead of duplicating. ✓
+
+**Prettier collapse (SUBMIT §Notes L495)** — `+11 net vs +17 quoted pre-format` on `index.ts` explained as `prettier --write` line-collapsing two multi-line `export { … }` statements. PM diff-audit: L11 + L12 are single-line exports of 3 symbols each; semantically identical to a hypothetical multi-line variant. No exports added/removed/renamed vs PLAN §Approach step 9. ✓ Accepted, non-drift.
+
+**Spec-alignment audit** — Prisma `WaConfig` model (`prisma/schema.prisma:33-46`, from T02) vs zod `WhatsappConfigPutSchema` (`whatsapp-config.schema.ts:23-32`) vs DDL §4.1:
+- `bsp` VARCHAR(40) → `z.enum(['1engage'])` — string-literal caps below 40 ✓
+- `phone_number_id` VARCHAR(80) → `z.string().min(1).max(80)` ✓
+- `phone_number` VARCHAR(20) → `z.string().regex(E164).max(20)` ✓
+- `webhook_url` VARCHAR(500) → `z.string().url().max(500)` ✓
+- `webhook_verify_token` VARCHAR(80) → `z.string().min(1).max(80)` ✓
+- `access_token_enc` TEXT (unlimited, ciphertext) → zod input `accessToken` (plaintext) `min(1)` — length uncapped by design (encryption envelope owns storage sizing). ✓
+
+**Security floor check (CLAUDE §6 + spec §4.1)**:
+- AES-256-GCM encrypt via T03 helper BEFORE persist — `service.ts:76` `encrypt(input.accessToken)`; test `service.test.ts:184-186` asserts `passedInput.accessTokenEnc.startsWith('v1:')` (envelope prefix per `crypto.ts:52`) and round-trips via `decrypt()`. ✓
+- PII-floor log BEFORE encrypt — ordering test `service.test.ts:270-297` proves `['log', 'upsert']` sequence. ✓
+- No plaintext in view — `service.test.ts:151-152` `JSON.stringify(result)` assertion. ✓
+- No hardcoded secrets — `crypto.ts:16-18` sources from `loadConfig()`; no `ENCRYPTION_KEY` env reference in module code. ✓
+- No webhook route in this attempt — HMAC verify concern belongs to T12. ✓
+
+**Tolerated deviations accepted** (all pre-declared per ACK #11-#13):
+- Prisma-mock stopgap (repo test), T10-INTEG follow-up parked
+- Defensive over-mask on `webhookVerifyToken` in view
+- Q-A-03 shared-infra workaround (env re-stamp in `beforeEach`) — status quo pending PM A resolution
+
+**Follow-ups accepted** (files, do not action):
+- **T10-followup**: routes + `api.ts` wiring + `hotelId` from JWT session. Blocked on Q-C-01 + Q-C-02 + Q-C-03. Parallel to Satrio T17-followup.
+- **T10-INTEG**: real-DB integration test (testcontainers Postgres per `docs/TESTING.md`). Blocked on Q-C-01.
+
+**Actions taken**:
+- → §1 task tracker row for T10 updated (`assigned` → `approved (primitive)` with `PM B (H16, a2)` verified-by).
+- → PARENT §1 row for T10 mirrored to slot-B status (Parent PM authority for parent §1; PM B posts row update per §0.4 own-row authorization).
+- → PARENT §2 short roll-up posted (1 line, format per `PM-AGENT.md §0.8`).
+
+**Next expected action**: Executor B — PR open on `feat/whatsapp-config-crud` for PO merge review; parallel start on the next slot-B primitive that doesn't depend on Q-C-01/02/03 (options: **T16** WA template Meta relay — depends on T06 which is merged, and does not require api.ts wiring since it's an outbound relay; or park & pick up T11 as skeleton pending routes-wiring window). PM B will re-verify on CI green post-PR before recommending merge. Slot B progress: **1/7 (T10 primitive)** · T10-followup + T10-INTEG parked · T11-T16 backlog.
 
 <!--
 TEMPLATE — copy untuk task baru:
