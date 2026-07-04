@@ -15,8 +15,8 @@
 ## 0. Current focus (slot A)
 
 - **Day**: H12+ (task tracker activated 2026-06-30)
-- **Active task**: T01-T07 MERGED · **T08 PLAN ACK'd w/ scope-correction, coding** (7 error classes per spec §9 + **canonical-envelope error-handler per F7**). Open Qs: Q-A-01/02/04/07 (PO/PM B), Q-A-03/05 (shared-config), Q-A-06 (WA module → B align).
-- **Branch**: `feat/error-catalog` (T08, in progress)
+- **Active task**: T01-T07 MERGED · **T08 ✅ APPROVED** (7 §9 error classes + canonical-envelope handler, F7 complete, awaiting PO merge). **8/9 foundation done.** Next: T09 (RPC server — last one). Open Qs: Q-A-01/02/04/07 (PO/PM B), Q-A-03/05/08 (shared-config/boilerplate → Parent PM), Q-A-06 (WA module → B align).
+- **Branch**: `feat/error-handling` (T08, awaiting PO merge + CI)
 - **Next gate (global)**: G1 — lihat `PM-STATUS-PARENT.md §5`
 - **My queue (preview)**: T01–T09 (foundation) — lihat §8 di bawah (mirror dari PARENT §1 filter Slot=A)
 - **Critical path**: T02 (Prisma migration) blokir implementasi Nanak (T10+) dan Satrio (T17+). Prioritaskan T01 → T02 → T03 sequence.
@@ -36,7 +36,7 @@
 | T05 | Tenant resolution from `:hotel_slug` (LRU 5-min, hotels.code lookup)             | merged   | PM A (H12) ✓   | factory TTL-LRU (no-class per PO), injected lookup port, 404 native, never-trust-body proven, 100% resolver cov. Merged PR #5 `59e8218`. Consumed by T12+T19. |
 | T06 | BSP adapter interface + `1engage` impl                                           | merged   | PM A (H12) ✓   | module `whatsapp`, vendor-agnostic port + factory 1engage adapter, ExternalServiceError, injected HttpPoster, 100% adapter cov. Merged PR #6 `3c1274a`. Consumed by T13. Q-A-06 (B align). |
 | T07 | Queue + scheduler infra (BullMQ + retry + DLQ)                                   | merged   | PM A (H12) ✓   | Bull 4.x, backoff [1s/5s/30s] attempts=3 configurable, DLQ-forwarder (exhaustion-gated), Redis-injected. logic 100% cov. Merged PR #7 `6654d46`. Consumed by T14/T21/T24. Q-A-07. |
-| T08 | Common error handlers (Integration-specific codes per spec §9)                   | wip      | —              | PLAN ACK'd + scope-correction: 7 classes (§9 codes) + canonical-envelope error-handler plugin (F7). GAP#1 Opsi A faithful. |
+| T08 | Common error handlers (Integration-specific codes per spec §9)                   | approved | PM A (H12) ✓   | 7 §9 classes + canonical `{error:{…}}` handler (README §2.3 wrapper), non-AppError→500 INTERNAL no-leak, correlationId log. 100% new-code cov. Merged-pending. Q-A-08 (generic-code drift). |
 | T09 | Internal RPC server (HTTP/mTLS; spec §10 catalog)                                | backlog  | —              | After T01 + T05                                                    |
 
 ---
@@ -1130,6 +1130,22 @@ Notes / questions (untuk PM A)
 
 Requesting PM A VERDICT.
 
+##### VERDICT T08 — APPROVED (H12, attempt 1) by PM A
+
+✅ **APPROVE.** Both deliverables (catalog + canonical-envelope handler) verified independently vs spec §9 + README §2.3.
+
+**Catalog audit (PM):** all 7 classes match spec §9 **exactly** (verified the diff): 422 `WEBHOOK_VERIFICATION_FAILED`/`WA_CONFIG_INVALID`/`TELEGRAM_CONFIG_INVALID`/`DND_BLOCK`, 429 `RATE_LIMIT`, 502 `THIRD_PARTY_UNREACHABLE`, 503 `CHANNEL_DEGRADED`. `git diff` = 42 insertions / **0 deletions** → generic classes + T06 usage intact (binding #2). `DndBlockError` doc'd internal-RPC-only. All `extends AppError`, inherit `toJson()`; new classes 100% covered.
+
+**Handler audit (PM):** `registerErrorHandler` = `setErrorHandler` → `AppError` = `reply.code(err.statusCode).send({ error: err.toJson() })`; non-AppError = 500 `INTERNAL` generic body. Verified **no leak** (test throws `'super secret internal detail'` → asserts `res.body` excludes it; internal message/stack logged server-side only). correlationId from `x-correlation-id ?? req.id`, `req.log` structured, body not logged. Handler 100% line/func cov, 0 `any`.
+
+**On the envelope-wrapper finding (condition #8 — exemplary):** you correctly found `README.md §2.3` pins the canonical envelope as the **wrapper** `{ error: { code, message, details } }` (not bare `toJson()`) + `INTERNAL` for 500 — I confirmed §2.3 says exactly this. You **matched the doc and flagged**, per my #8 instruction, instead of shipping my ACK #5's literal assumption. That's precisely the judgment I want. My ACK #5 assumed the shape; the doc overrode it — correct call.
+
+**Your other finding → escalated as Q-A-08 (cross-service, not a T08 defect):** the **pre-existing generic `AppError` codes drift from README §2.3 canonical** — `AuthError`=`AUTH_ERROR` (FE expects `UNAUTHENTICATED`), `RateLimitError`=`RATE_LIMIT_EXCEEDED` (canonical `RATE_LIMIT`), `ExternalServiceError`=`EXTERNAL_SERVICE_ERROR`. This is shared-boilerplate (all services) so you correctly left it untouched (binding #2). Raised to Parent PM (§3c). Note the interplay: reconciling `RateLimitError`→`RATE_LIMIT` would then share the code with T08's `OutboundQuotaError` (429 `RATE_LIMIT`) — the reconcile task must decide whether to merge or keep both.
+
+→ §1 tracker: T08 `approved`, Verified by PM A. → Code on `feat/error-handling` awaiting **PO merge + CI**.
+
+**Executor A: T08 done — F7 complete (catalog + canonical envelope). B/C now have consistent error responses.** Foundation is **8/9**. Last one: **T09** (internal RPC server — spec §10 catalog; auth = shared-secret/mTLS, NOT session cookie; propose the `src/` location in your PLAN's session-start gate since there's no ratified path yet — I'll ACK it before you code, per the T09 guardrail). Post PLAN when ready.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
@@ -1243,6 +1259,7 @@ Re-run `make check` after fix, confirm pass, resubmit (attempt N+1).
 | Q-A-04 (contract) | **WA signature secret (affects slot B, T12).** Meta signs `X-Hub-Signature-256` with the **App Secret**; `webhook_verify_token` is only for the GET verify-challenge (`hub.verify_token`). Spec §4.2 conflates them, and `wa_configs` has no `app_secret` column. T04 is secret-agnostic (injected resolver) → not blocked; but B's webhook ingest will verify against the wrong secret unless resolved, likely needing a schema follow-up (`app_secret_enc` column). PO/PM B to rule. | spec §4.2 vs Meta WA Cloud API; schema `wa_configs`; T04 PLAN nota | escalated → PARENT §3a | — |
 | Q-A-05 (tooling) | `@typescript-eslint/no-misused-promises` flags async Fastify hooks passed to route-option **properties** (`checksVoidReturn.properties`) — false-positive (Fastify awaits async hooks; typecheck passes). **Affects B/C** on every async `preHandler`/hook. T04 used a local 1-line `eslint-disable` (test only; `.eslintrc.cjs` untouched). Recommended project-level fix: `['error', { checksVoidReturn: { properties: false } }]` (keeps `no-floating-promises`). Shared-config → Parent PM. | T04 SUBMIT Notes; `.eslintrc.cjs` | raised → PARENT §3b (shared-config) | — |
 | Q-A-06 (arch, cross-slot) | **WA module name — A + B share one bounded context.** T06 (BSP adapter, slot A) + T10 (WA config CRUD, slot B) live in the SAME module. **PM A decision: `whatsapp`** (matches ratified provider enum `'whatsapp'` + API routes `/whatsapp`; `wa` is only the DB/RPC abbrev). T06 proceeds on `src/modules/whatsapp/`. Parent PM: confirm **PM B aligns T10 to `whatsapp`**. | schema provider enum; spec routes; T06 PLAN GAP-#1 | PM A decided `whatsapp` → PARENT §3c (B alignment) | — |
+| Q-A-08 (arch, cross-service) | **Generic `AppError` codes drift from README §2.3 canonical — shared boilerplate, all services.** `AuthError`=`AUTH_ERROR` (FE expects `UNAUTHENTICATED`), `RateLimitError`=`RATE_LIMIT_EXCEEDED` (canonical `RATE_LIMIT`), `ExternalServiceError`=`EXTERNAL_SERVICE_ERROR`. FE won't recognize these codes. T08 left generic classes untouched (binding #2). Needs a boilerplate-reconcile task (Parent PM/PO). Note: reconciling `RateLimitError`→`RATE_LIMIT` collides with T08 `OutboundQuotaError` code — decide merge-or-keep. | app-errors.ts vs README §2.3; T08 SUBMIT | escalated → PARENT §3c | — |
 | Q-A-07 (contract) | **Outbound retry count — spec self-contradicts (affects B's T14).** spec §7 L344 "3 retries (1s,5s,30s)" vs §7 L345 "after 3 attempts→failed" vs MVP §4.9 "3-attempt". Is it 3 total attempts (30s delay unused) or 3 retries = 4 attempts (30s used)? **T07 ships default `attempts=3` (restrictive, configurable) + `[1s,5s,30s]` strategy.** PO: ratify + fix spec §7 wording before B builds T14. | spec §7 L344-345 vs MVP §4.9; T07 PLAN GAP-#2 | escalated → PARENT §3a | — |
 
 ---
