@@ -690,6 +690,50 @@ Verified by PM A: `prisma-client.ts` = stub (`db = {} as ...placeholder`); `lru-
 
 Branch `feat/tenant-slug-resolver` OK. Proceed to coding.
 
+#### SUBMIT T05 — exec-A (Nathan) at H12 (2026-07-03) (attempt 1)
+
+Task: Tenant resolution from `:hotel_slug` (LRU 5-min TTL, 404, never-trust-body)
+Branch: `feat/tenant-slug-resolver` (pushed, commit `ad8b188`)
+Files changed: 4 (all new)
+  - `src/shared/utils/ttl-lru-cache.ts` (new — generic TTL+LRU cache)
+  - `src/shared/utils/__tests__/ttl-lru-cache.test.ts` (new, 7 tests)
+  - `src/plugins/tenant-resolver.plugin.ts` (new — resolver + preHandler)
+  - `src/plugins/__tests__/tenant-resolver.plugin.test.ts` (new, 8 tests)
+
+**⚠ Perubahan dari PLAN (PO-directed, transparansi):** PLAN sebut cache sebagai **class** `TtlLruCache` (`constructor`). **PO (Nathan) minta function-based, tidak pakai class.** → refactor ke factory `createTtlLruCache(opts)` + closure over `Map` (private state di closure, bukan field). Kontrak/behavior identik; call-site berubah `new TtlLruCache()` → `createTtlLruCache()`, getter `size` → method `size()`. `HotelSlugLookup`/resolver/hook memang sudah functional. (Disimpan ke memory sbagai preferensi.)
+
+DoD self-check (8 binding conditions)
+- [x] **#1 never trust body** — `resolveTenantFromSlug` baca `req.params[hotel_slug]` SAJA, body diabaikan. **Dibuktikan**: test `ignore hotel_id in the body` kirim body `{hotel_id:'attacker-controlled-id'}` ke `/webhook/whatsapp/acme` → handler balikin `hotelId='hotel-acme-id'` (dari slug URL), bukan body. Tenant-isolation guard.
+- [x] **#2 404 native** — slug tak dikenal → `NotFoundError('hotel', slug)` → `inject` **404** via `statusCode=404`, tanpa T08. Tested.
+- [x] **#3 LRU + 5-min TTL** — `ttlMs` default `300_000`; TTL lazy-evict on `get`/`has`; LRU evict over `maxSize`; **recency refresh on get**. Deterministic via injected `now()`: test hit, miss, TTL-expiry (t=1099 valid, t=1100 expired), over-cap eviction, recency-refresh (get('a') → 'b' evicted bukan 'a'), has-expired.
+- [x] **#4 preHandler-level** — resolver sebagai `preHandler`; unknown slug throw sebelum handler → `didHandlerRun()===false` (tested).
+- [x] **#5 injected port** — `HotelSlugLookup` injected; no prisma/RPC coupling. Cache-hit **tak** panggil lookup 2×: test `lookup.mock.calls` length=1 (hit) vs 2 (setelah TTL expiry).
+- [x] **#6 zero-dep/files/no-any/coverage** — `package.json`+lock UNCHANGED; 4 file proposed saja (BUKAN `src/common/`); `api.ts`/`env.ts`/prisma UNTOUCHED; **0 `any`**, **0 `class`**; explicit return types. Coverage: `tenant-resolver.plugin.ts` **100/100/100/100**, `ttl-lru-cache.ts` **96.96 stmt / 85.71 br / 100 fn / 100 line** (>80 floor; 1 branch = defensive `oldest===undefined` guard).
+- [x] **#7 `now()` injection** — default `Date.now` di app-code (ban hanya workflow-script). OK.
+- [x] **#8 eslint async-hook (Q-A-05)** — reuse local 1-line `eslint-disable-next-line` di test (preHandler property), `.eslintrc.cjs` tak disentuh.
+
+Quality gate
+- `make lint`: PASS · `make format-check`: PASS · `make typecheck`: PASS · `make test-unit`: PASS (43: +15 T05; 2 skipped template). `make check` exit 0.
+
+Drift scans (§4.4)
+- My 4 files: `any` 0 · `class` 0 · console 0 · `throw new Error(` 0 (pakai `NotFoundError`) · forbidden imports 0 · default export 0 · `.skip` 0.
+- Diff = 4 file baru saja (2 `src/plugins/`, 2 `src/shared/utils/`). Baseline lain tak berubah.
+
+Security check (multi-tenancy)
+- Tenant derived dari URL slug only (never body) — **WAJIB guard terpenuhi & tested**. 404 on unknown slug. Positive-only cache (hotel baru tak ke-404 stale). No secret/PII di cache/log.
+
+Test evidence
+- Unit: 15 (7 cache: hit/miss/ttl-expiry/has-expired/lru-evict/recency/delete-clear · 8 resolver: resolve-known, cache-hit-no-2nd-lookup, re-lookup-after-ttl, unknown→NotFound, missing-param→NotFound, inject valid→200+hotelId, body-ignored, unknown→404+handler-skip).
+- Coverage: resolver 100%, cache 100% line.
+- Integration: N/A (in-proc `fastify.inject`, no DB/Redis).
+
+Notes / questions (untuk PM A)
+- **PO-directed no-class refactor** (di atas) — deviasi dari PLAN's class design, atas permintaan Nathan. Behavior identik. Flag untuk awareness.
+- **Q-A-01 dep**: resolver logic selesai & teruji dgn stub lookup; impl `HotelSlugLookup` (Auth RPC vs shared-DB `hotels.code`) di-wire saat Q-A-01 resolved + prisma live (B/C consumption).
+- **Q-A-05 (eslint async-hook)** masih unratified → local disable dipakai lagi (1 baris, test only).
+
+Requesting PM A VERDICT.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
