@@ -2917,6 +2917,128 @@ Coding order:
 
 Awaiting PM B ACK on GAPs #1–#9 (esp. #1 execution split, #2 classification rules, #7 z.union pattern) before writing any code.
 
+##### PM B ACK-with-clarification — T14 PLAN attempt 1 (H17, 2026-07-05) by PM B (Nanak)
+
+**ACK conditional** on 1 minor input-schema clarification (hotelId + attemptsMade sourcing). All 9 GAP defaults confirmed spec-aligned. **ZERO cross-service Q escalations needed** — T14 is the first slot-B primitive with no new cross-team blockers (T07 provides retry infra + T13 provides input shape; both merged on main). Home-stretch discipline: only 1 primitive between slot B and 7/7 = 100%.
+
+**Independent spec verification** (PM read):
+- **`MVP §4.9 L106` VERBATIM**: "3 attempts with exponential backoff (1s, 5s, 30s). After exhaustion → status: 'failed'. Quota / template-not-approved failures are PERMANENT — do NOT retry these." ✓ Executor's constants match spec 1:1.
+- **`04 §7 L340-346` VERBATIM**: "3 retries with exponential backoff (1s, 5s, 30s). After 3 attempts → status: 'failed', log to outbound_dispatch_queue.last_error. **Optionally also status: 'dead' after stale period.** Failures from quota / template-not-approved are NOT retried — they're permanent for the moment." → `dead` is **spec-EXPLICITLY OPTIONAL** (confirms GAP #4 A defer). ✓
+- **T07 Bull factory** (`src/core/queue/bull-factory.ts`): `RETRY_BACKOFF_DELAYS_MS = [1000, 5000, 30000]` (L20), `DEFAULT_JOB_ATTEMPTS = 3` (L21), `integrationBackoffStrategy(attemptsMade)` (L25-29), `queueName(module, jobType)` (L31), `attachDeadLetterForwarder(queue, deadLetter)` (L100+) — all Executor claims confirmed 1:1. Spec constants baked in T07 primitive — infrastructure ready for T14 producer consumption.
+- **T13 `meta_failed` outcome shape**: `{ kind: 'meta_failed', dispatchId, status?, body? }` at `whatsapp-outbound-dispatch.types.ts:105-115` — confirms T14 input contract. NOTE: no `hotelId` in outcome shape (T13-followup caller has it separately from RPC input). NOTE: no `attemptsMade` in outcome shape (Bull's `job.attemptsMade` provides it at retry time; initial call has attemptsMade=0). Clarification needed on how T14 sources these — see below.
+- **429 permanent classification (Executor's judgment call)**: Spec §4.9 does NOT explicitly list HTTP status codes. Executor's `429 = permanent` is DEFENSIBLE for MVP: Meta's rate-limit resets per hour/day; 1s+5s+30s backoff window unlikely to recover. Aggressive-retry pattern (B) would just burn attempts against a wall. Accept with docstring note for future revisit if Meta introduces `Retry-After` header respect at T14-followup.
+
+---
+
+**GAP decisions** (all 9 A confirmed):
+
+- **GAP T14-#1 (execution split: producer + classifier only)** — **A**. Rationale: (a) T13's `dispatchMessage` is the worker's inner call → circular dep if T14 primitive includes worker; (b) T07 `attempts: DEFAULT_JOB_ATTEMPTS = 3` + `integrationBackoffStrategy` provide Bull auto-retry infra — T14 primitive value is CLASSIFY + PRODUCE, not RETRY-EXECUTE; (c) Worker registration + Bull processor + DLQ forwarder = T14-followup natural home (needs entrypoint + Redis wiring per Q-C-02). B (worker in primitive) breaks 3-dep minimalism + creates circular dep. C (self-contained skip DND/quota) violates spec §3.1 flow.
+- **GAP T14-#2 (permanent-fail classification)** — **A**. Executor's table `undefined → retryable · 5xx → retryable · 429 → permanent · 401/403 → permanent · 400/422 → permanent · other 4xx → permanent`. Rationale: `undefined + 5xx = retryable` matches standard REST retry pattern; `401/403 auth = permanent` prevents Sentry noise on misconfigured tokens; `400/422 template-rejected/bad-request = permanent` matches spec §4.9 "template-not-approved" wording. **429 = permanent is a judgment call** worth documenting in code:
+  - **PM B accepts A** on grounds that (a) Meta rate-limit resets per hour/day, (b) 1s+5s+30s backoff won't recover, (c) marking permanent surfaces the quota issue to human operator faster than burning silent retries against Meta's wall.
+  - **Docstring requirement**: `classifyFailure` function docstring MUST cite spec §4.9 + note "429 = permanent is a defensible judgment call (see PM ACK T14 H17); future T14-followup can add `Retry-After` header respect for granular recovery."
+- **GAP T14-#3 (queue naming)** — **A** (single `'whatsapp:dispatch'` queue with job-name discrimination). Rationale: matches T07 `queueName('whatsapp', 'dispatch')` pattern; Bull's `attempts + backoff` config applies queue-wide; single queue is Bull-idiomatic. B (separate queue) doubles queue count for no benefit.
+- **GAP T14-#4 (`dead` status)** — **A** (defer to T14-followup). Spec §7 L343 "Optionally also status: 'dead' after stale period" — explicitly optional. T07 `attachDeadLetterForwarder` DLQ pattern handles exhausted jobs. Deferred stale-period timer belongs at T14-followup with worker registration.
+- **GAP T14-#5 (repo methods count)** — **A** (2 methods: `markRetryScheduled` + `markPermanentFail`). Matches T15 minimal envelope. `markDead` deferred per GAP #4. `getCurrentAttempts` unnecessary — see input-schema clarification below.
+- **GAP T14-#6 (outcome variants)** — **A** (2 variants: `scheduled | permanent`). `exhausted` correctly subsumed as `permanent { reason: 'exhausted' }`. `already_permanent` is idempotency concern (T14-followup), not shape.
+- **GAP T14-#7 (z.union vs pure classifier)** — **A** (pure classifier function). Rationale: multi-factor decision (status + attemptsMade + reason) doesn't cleanly discriminate at zod input level. Extends T13 philosophy: **use z.union at TYPE-LEVEL where shape discriminates cleanly; use pure functions where multi-factor decisions live**. This is a design-pattern EXTENSION, not a violation.
+- **GAP T14-#8 (scope depth)** — **A** (8 files). T13 minus 1 port (only ONE Bull surface). Slimmer than T13. B (add RetryClassifier port) over-engineers a pure function. C (drop RetryQueuePort) couples primitive to Bull runtime, breaks unit testability.
+- **GAP T14-#9 (RetryQueuePort shape)** — **A** (minimal `enqueueRetry(input): Promise<{jobId}>`). Bull-agnostic. T07 factory bakes attempts + backoff defaults; port doesn't need overrides.
+
+---
+
+**Input schema clarification (only material adjustment)**:
+
+Executor's PLAN §Approach step 2 defines:
+```
+MetaFailureInputSchema = z.object({ dispatchId, status?, body? }).strict()
+```
+
+But step 4 uses `hotelId` (in `enqueueRetry({dispatchId, hotelId, attemptNumber})`) and `attemptsMade` (in `attemptsMade + 1 >= 3` check). Neither is in the input schema.
+
+**PM B ratifies**: Expand input schema to `{ dispatchId, hotelId, attemptsMade, status?, body? }` — all context in single input arg. Caller (T13-followup RPC receiver / T14-followup worker) provides these:
+- `dispatchId` from T13 `meta_failed` outcome
+- `hotelId` from RPC caller context (T13-followup route has it from tenant resolution)
+- `attemptsMade` from Bull's `job.attemptsMade` at retry time; `0` at initial dispatch
+- `status?` + `body?` from T13 `meta_failed` outcome
+
+This means:
+- `MetaFailureInputSchema` has 5 fields (not 3)
+- Service method signature stays `scheduleRetryFromMetaFailure(input): Promise<RetryScheduleOutcome>` — single arg, all context
+- `classifyFailure(status?, body?)` remains a pure classifier (doesn't need hotelId/attemptsMade — those are for enforcement layer)
+
+---
+
+**Binding conditions for SUBMIT** (T13's 21 minus HC-port items + T14-specific: **20 items total**):
+
+**Quality gate**
+1. `make check` PASS end-to-end. Zero failures.
+2. Drift scans per PM-AGENT §3 Step 2 — 6 categories = 0 hits on T14 module files. Special attention: **NO `throw new Error(`**; **NO `DndBlockError` / `OutboundQuotaError` thrown** (T13 concern, unrelated); **NO `as X` runtime type assertion** (T15/T13 discriminated-union precedent); **NO `Bull` / `bullmq` / `ioredis` imports** in T14 primitive files (queue integration = T14-followup adapter, port abstract in primitive).
+3. Coverage **100% stmt/branch/func/line** on 3 runtime files (`schema.ts`, `repository.ts`, `service.ts`). Type-only files (`types.ts` + 1 port) erased.
+
+**Design gate (each MUST be present + provable via test evidence)**
+4. **Repository EXACTLY 2 methods** — `markRetryScheduled(dispatchId, attemptNumber)` + `markPermanentFail(dispatchId, lastError)`. NO `markDead` (spec-optional, deferred). NO `findByDispatchId` / `getCurrentAttempts` (input carries context). Test file 2 methods × happy path.
+5. **Service ctor 3 deps** — `(repo, retryQueuePort, logger)`. Verified via grep — no other injectable services.
+6. **Input schema has 5 fields** — `MetaFailureInputSchema` accepts `{ dispatchId (uuid), hotelId (uuid), attemptsMade (int ≥ 0), status? (int), body? (unknown) }.strict()`. Test asserts each field validation.
+7. **Discriminated union outcome 2 variants** at `types.ts`:
+   ```
+   type RetryScheduleOutcome =
+     | { kind: 'scheduled'; attemptNumber: number; jobId: string }
+     | { kind: 'permanent'; reason: PermanentFailReason };
+   ```
+   Where `PermanentFailReason = 'auth_failed' | 'template_rejected' | 'quota_exhausted' | 'bad_request' | 'exhausted'`. Note: `'exhausted'` is the reason variant when `attemptsMade + 1 >= 3` triggers.
+8. **`classifyFailure` pure function** — testable in isolation from schema.ts export. Test matrix covers:
+   - `status = undefined` → `'retryable'` (network error)
+   - `status = 500` → `'retryable'` (server error)
+   - `status = 502` → `'retryable'` (bad gateway — 5xx)
+   - `status = 429` → `'permanent'` (quota_exhausted; Meta rate-limit) **+ docstring cites spec §4.9 + PM ACK note**
+   - `status = 401` → `'permanent'` (auth_failed)
+   - `status = 403` → `'permanent'` (auth_failed)
+   - `status = 400` → `'permanent'` (bad_request)
+   - `status = 422` → `'permanent'` (template_rejected)
+   - `status = 404` → `'permanent'` (other 4xx → conservative)
+   ≥ 9 test cases minimum.
+9. **Attempt-cap enforcement** — service test asserts `attemptsMade = 2` + retryable classification → still `permanent { reason: 'exhausted' }` (because next attempt would be 3rd = exhausted). Test contrast: `attemptsMade = 1` + retryable → `scheduled { attemptNumber: 2 }`.
+10. **Service never throws for external failures** — worker discipline (T13/T15 pattern). `.resolves.toEqual(...)` cases: `retryQueuePort.enqueueRetry` throws → returns `{kind: 'permanent', reason: 'exhausted'}` or logs + returns rich outcome (Executor's call — either is acceptable if documented); `repo.markPermanentFail` throws → logged + swallowed + still returns outcome; `repo.markRetryScheduled` throws → logged + still returns outcome (queue was enqueued successfully). Zero `.rejects` on external paths.
+11. **Sync throws only `ValidationError`** — service test asserts `.rejects.toBeInstanceOf(ValidationError)` on bad input. Sole throw path.
+12. **PII floor — MINIMAL job payload** — `RetryJobData = { dispatchId, hotelId, attemptNumber }` ONLY. No phone / body / template / accessToken in job data. Verified via test asserting `enqueueRetry.mock.calls[0][0]` contains exactly those 3 keys. **Defense-in-depth test**: iterate all logger method calls asserting `JSON.stringify(call[0])` does NOT contain plaintext accessToken / phone / body content markers (if any leak into logs from input body).
+13. **Ports TYPE-ONLY** — `ports/retry-queue.port.ts` = docstring + interface + type imports only. No class, no function, no Bull import. Q-B / Q-A stamps: NONE (T14 has zero cross-service Q deps — Executor correct).
+
+**Scope gate**
+14. `git diff --stat main..HEAD` — exactly **8 create + 1 modify** = 9 files. Zero touches to `api.ts`, `worker.ts`, `plugins/*`, `prisma/*`, `package.json`, `pnpm-lock.yaml`, T06/T10/T11/T12/T13/T15/T16 primitive files, `core/queue/*` (T07 CONSUMED not mutated), `_template/*`, `telegram/*`, `core/http/*`, `core/prisma/*`.
+15. **Barrel additive-only** — T06 (L1-7) + T10 (L9-18) + T16 (L20-44) + T11 (L46-56) + T12 (L58-79) + T15 (L81-95) + T13 (L97-114) blocks byte-for-byte preserved. T14 exports appended after L114. **8th cross-primitive T06 discipline confirmation**.
+
+**Documentation gate**
+16. **Auth-agnostic docstring** — service docstring notes: "**Auth-agnostic**: T14 primitive is called by T13-followup RPC receiver or T14-followup worker; both handle auth at their respective layer (T09 plugin at router, or worker context). Extends T12/T13/T15 precedent to retry-producer context."
+17. **429 = permanent judgment note in `classifyFailure` docstring** — cites spec §4.9 + PM ACK H17 rationale + future T14-followup can add `Retry-After` header respect.
+18. **T07 consumption docstring** — service or types docstring notes: "**T07 infrastructure consumed**: `RETRY_BACKOFF_DELAYS_MS = [1000, 5000, 30000]` + `DEFAULT_JOB_ATTEMPTS = 3` baked in T07 factory match spec §4.9 verbatim. T14 primitive is producer + classifier only; Bull auto-retry semantics + DLQ pattern from T07 execute at T14-followup adapter wiring."
+
+**Discipline gate**
+19. **No `as X` runtime cast** — T13's Round-5 z.union pattern precedent applies. If classifier needs multi-factor decision that pushes toward a cast, refactor to a discriminated helper type up-front. T15+T13 lesson.
+20. **T07 primitive preserved byte-for-byte** — no modification to `src/core/queue/bull-factory.ts` even for a docstring tweak. T14 references T07 constants at T14-followup, not primitive.
+
+**Tolerated deviations to declare in SUBMIT §Notes** (pre-accepted):
+- Prisma-mock stopgap in `.repository.test.ts` — T10/T11/T12/T13/T15/T16 precedent (7× now); T14-INTEG parked pending Q-C-01 + T14-followup.
+- Bull queue adapter deferred to T14-followup — needs Redis wiring per Q-C-02. Port TYPE-ONLY.
+- 429 permanent classification = judgment call — documented in code per binding #17.
+
+**Follow-ups to file in SUBMIT** (list, do NOT implement):
+- **T14-followup** — Bull queue creation via T07 `createQueue<RetryJobData>` + processor registration that calls T13 `WhatsappOutboundDispatchService.dispatchMessage` on retry + `attachDeadLetterForwarder` for exhausted-job DLQ + `HttpRetryQueueAdapter` (wraps `queue.add()`). Optional: `Retry-After` header respect for 429 granular recovery. Optional: stale-period `markDead` timer per spec §7 L343. Blocked on Q-C-02.
+- **T14-INTEG** — real-Redis Bull job execution + retry backoff timing verification (testcontainers Redis). Blocked on Q-C-01 + T14-followup.
+
+**No new Q filed** — T14 primitive has zero cross-service contract gaps. First slot-B primitive with no cross-team Q register additions.
+
+**Discipline**:
+- Branch `feat/wa-outbound-retry` per CLAUDE §12.
+- Conventional commit: `feat(whatsapp): T14 outbound retry primitive (types + schema + repo + service + retry queue port type-only)`.
+- Single commit for the primitive.
+- **Squash-merge per PR #14/#15/#16 CLAUDE §12 precedent** (4th consecutive).
+
+**Rebuttal channel**: If input-schema 5-field expansion or any binding condition feels wrong, post `REBUTTAL T14 item-#N` before coding.
+
+**No attempt-2 PLAN required** — 9 GAPs all ACK'd + input-schema clarification is an atomic delta (schema 3 → 5 fields). Executor codes directly per 8-file inventory + 20 binding conditions.
+
+Proceed. Code per §Approach 1-8 (with input schema expanded to 5 fields) → `make check` → SUBMIT. **This is the 7/7 = 100% slot B primitive.**
+
 <!--
 TEMPLATE — copy untuk task baru:
 
