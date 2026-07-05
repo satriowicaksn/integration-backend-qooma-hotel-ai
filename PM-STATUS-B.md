@@ -2104,6 +2104,110 @@ Awaiting PM B ACK on GAPs #1–#7 (esp. #1 cross-table repo, #4 orphan handling,
 
 Proceed. Run `make prisma-generate` if not fresh → code per §Approach 1-8 → `make check` → SUBMIT.
 
+#### SUBMIT T15 — exec-B (Nanak) at H17 18:35 (attempt 1, narrow primitive per PM ACK clean-approval 7-file inventory)
+
+Task: T15 — WA delivery receipts ingest **primitive** (types + Meta statuses envelope schema + cross-table sibling repository + single-method sync service — no ports, no adapters, receiver-only flow). Clean-approval per PM ACK: all 7 GAP defaults spec-aligned, no scope narrow needed (T15's shape is intrinsically slimmer than T12 modified-B because no external RPCs). Branch: `feat/wa-delivery-receipts` @ commit `a1576f5`.
+
+Files changed: **8** (7 create + 1 modify) — **1177 insertions** total (1162 new-file LOC + 15 net barrel delta; single prettier-collapse iteration on schema test).
+- `src/modules/whatsapp/whatsapp-delivery-receipts.types.ts` (new, 73 LOC — **discriminated union outcome** per binding #18)
+- `src/modules/whatsapp/whatsapp-delivery-receipts.schema.ts` (new, 100 LOC — Meta statuses envelope + `extractStatuses` helper + Q-B-07 stamp)
+- `src/modules/whatsapp/whatsapp-delivery-receipts.repository.ts` (new, 42 LOC — **EXACTLY 2 methods** per binding #4, cross-table by design)
+- `src/modules/whatsapp/whatsapp-delivery-receipts.service.ts` (new, 167 LOC — 4 mandated docstrings, discriminated-union outcome return, single-method sync)
+- `src/modules/whatsapp/__tests__/whatsapp-delivery-receipts.schema.test.ts` (new, ~221 LOC post-prettier, 11 tests: 7 envelope parse + 4 extract normalization)
+- `src/modules/whatsapp/__tests__/whatsapp-delivery-receipts.repository.test.ts` (new, 151 LOC, 5 tests: 3 for `findDispatchByExternalId` including tenant-guard cross-check + 2 for `persist`)
+- `src/modules/whatsapp/__tests__/whatsapp-delivery-receipts.service.test.ts` (new, 408 LOC, 12 tests: happy/multi-row/orphan/persist-fail/signature-valid/PII floor)
+- `src/modules/whatsapp/index.ts` (modified, +15 net) — additive; T06 (L1-7) + T10 (L9-18) + T16 (L20-44) + T11 (L46-56) + T12 (L58-79) blocks byte-for-byte preserved; T15 exports L81-95
+
+DoD self-check — **all 18 ACK binding conditions**:
+- [x] **#1 `make check` PASS end-to-end** — lint 0/0 (`--max-warnings 0`), format-check clean, typecheck strict + `exactOptionalPropertyTypes`, test-unit 28/30 suites 276/278 tests (2 pre-existing `_template/*` baseline skips). PM B rerun invited.
+- [x] **#2 Drift scans 0 hits on T15 module files** — all 6 EXECUTOR §4.4 categories. Special-attention verified: **NO `throw new Error(`** in module (drift scan #3 returns 0 hits; sync throws `ValidationError` only, per-status failures return outcome error strings); **NO `throw new WebhookVerificationError`** (T11 concern, unrelated); **NO `as any` / `as unknown as` pattern-abuse** in code — see also §Notes on `as string`.
+- [x] **#3 Coverage 100% stmt/branch/func/line** on 3 runtime files — **first-pass, no iteration** (discriminated-union outcome eliminated the T12 `firstError ?? 'unknown error'` unreachable-branch problem). Type-only `whatsapp-delivery-receipts.types.ts` erased at compile per ts-jest — matches ACK #3 caveat.
+- [x] **#4 Repository EXACTLY 2 methods** — `whatsapp-delivery-receipts.repository.ts` grep confirms: `findDispatchByExternalId` (`:22`), `persist` (`:29`). NO `markProcessed` / `markFailed` (that's T12 `webhook_events` concern; T15 has different lifecycle — receipts are terminal). Test file has 5 cases: 3 for `findDispatchByExternalId` (happy + null + cross-tenant safety) + 2 for `persist` (happy + Prisma rejection propagates).
+- [x] **#5 Repository tenant guard MANDATORY** — `repository.ts:23-27` `findFirst({ where: { hotelId, externalId } })` filters BOTH fields. Test `whatsapp-delivery-receipts.repository.test.ts:73-83` asserts `double.outboundDispatch.findFirst.mock.calls[0][0]` = `{ where: { hotelId, externalId } }` — both fields present. Additional cross-tenant test at `:95-105` asserts hotelId-swap does NOT hijack: `HOTEL_ID_OTHER` in query → repo filters correctly by that id, doesn't hit HOTEL_ID's dispatches. Cross-tenant hijack prevention is non-negotiable security floor. ✓
+- [x] **#6 Service signature-agnostic** — `service.ts:70` `ingestStatuses(hotelId, envelope, signatureValid)` accepts `signatureValid: boolean` as parameter. `:83` propagates to ingest-level log. Service NEVER computes signature. HMAC-agnostic docstring `:9-13` explains T04-plugin-at-wiring pattern (see #14).
+- [x] **#7 Service returns rich result, never throws for per-status failures** — service `:78` returns `{receipts, orphanCount}`. Test asserts `.resolves.toEqual(...)` for:
+  - orphan (correlation returns null): `whatsapp-delivery-receipts.service.test.ts:154-171`
+  - correlation lookup itself rejects: `:206-219`
+  - per-persist reject (mid-batch): `:239-262`
+  - non-Error persist rejection: `:264-280`
+  Zero `.rejects` on per-status failure paths. Discriminated union outcome ensures type-safe access to `receipt.receiptId` (dispatched=true) vs `receipt.error` (dispatched=false).
+- [x] **#8 Sync throws only `ValidationError`** — service `:71-75` is the only throw path. Test `:325-334` asserts `.rejects.toBeInstanceOf(ValidationError)` on bad envelope.
+- [x] **#9 Orphan handling — 3 assertions** ✓:
+  - **Assertion 1** (`:154-171` "should skip persist + log warn + increment orphanCount when the dispatch is not found"): outcome `{dispatched: false, error: 'orphan_no_dispatch'}` (stable string per binding #9); `orphanCount === 1`; `persist` NOT called; `logger.warn` called
+  - **Assertion 2** (`:173-197` "should reflect mixed found+orphan in per-status outcomes when the envelope carries 3 status entries"): `receipts.length === 3` (all 3 reflected), `orphanCount === 1`, `persist` called exactly 2×
+  - **Assertion 3** (`:239-262` "should record a failed outcome + log error + continue processing when a single persist fails"): mid-batch persist fails, outcome error contains `'persist'`, service continues remaining entries
+- [x] **#10 Multi-row per external_id status progression accepted** — service test `:126-144` dedicated case: sent → delivered → read of same externalId → all 3 persist calls succeed, `receipts.length === 3`, all `dispatched === true`, `persist` called exactly 3×. Docstring `types.ts:12-20` + `schema.ts:9-17` notes Q-B-07 T15-followup will add UNIQUE + ON CONFLICT for Meta-retry idempotency.
+- [x] **#11 PII floor via `maskWaPhone(recipientId)`** — service `:107` masks recipientId in `LOG_RECEIPT`. Test `:359-378` asserts (a) `logged.recipientId === maskWaPhone(RECIPIENT)`, (b) `JSON.stringify(logged)` does NOT contain raw `RECIPIENT`, (c) `JSON.stringify(logged).length < 500`. Additional test `:380-407` asserts recipientId key OMITTED (not `undefined`) when Meta didn't send one — matches `exactOptionalPropertyTypes` shape hygiene.
+- [x] **#12 `git diff --stat main..HEAD` scope-clean** — exactly 7 create + 1 modify = 8 files. Zero touches to `api.ts`, `worker.ts`, T04/T05/T09 plugins (do NOT mutate), `prisma/*`, `package.json`, `pnpm-lock.yaml`, T06/T10/T11/T12/T16 primitive files, `_template/*`, `telegram/*`, `core/http/*`, `core/prisma/*`.
+- [x] **#13 Barrel additive-only** — `src/modules/whatsapp/index.ts`: T06 (L1-7) + T10 (L9-18) + T16 (L20-44) + T11 (L46-56) + T12 (L58-79) blocks byte-for-byte preserved. T15 exports appended L81-95. **NO adapter re-export** — `grep -E "adapters/" src/modules/whatsapp/index.ts` returns 0 hits. **6th cross-primitive T06 discipline confirmation** (T10, T16, T11, T12, T15 all preserve — fixed norm per ACK GAP #7).
+- [x] **#14 HMAC-agnostic docstring** — service `:9-13` explicitly notes: "**HMAC-agnostic**: signature verification lives at the T04 HMAC plugin (router-layer preHandler); this service consumes `signatureValid` as a trusted boolean parameter. T12 precedent extended to the statuses branch."
+- [x] **#15 Router-boundary docstring** — service `:15-19` explicitly notes: "**Router-boundary**: T15-followup router discriminates payload branch (`messages` → T12, `statuses` → T15, template branch → T16) and persists the `webhook_events` audit row ONCE via T12's `WhatsappWebhookEventsRepository.persist` BEFORE calling this service. No cross-service RPCs — receiver-only flow."
+- [x] **#16 Orphan-outcome docstring** — service `:21-26` explicitly notes: "**Orphans**: `externalId` not in `outbound_dispatch_queue` (late / spoofed / foreign receipts) skipped + logged warn + counted in `orphanCount`. Never throws per-status. Sync worker-discipline extended from T11 probe + T12 async patterns (T12 tolerated-deviation lesson pre-applied: outcome shape is a discriminated union — no `as string` needed)."
+- [x] **#17 Multi-row / Q-B-07 docstring** — `whatsapp-delivery-receipts.types.ts:12-20` + `schema.ts:9-17` both carry Q-B-07 stamp explaining multi-row per `(dispatch_id, external_id, status)` triple is native to DDL (only status CHECK, no UNIQUE) + Q-B-07 T15-followup will add UNIQUE + ON CONFLICT semantics for Meta-retry idempotency.
+- [x] **#18 No `as string` / `as X` pattern** — grep on runtime files: 3 hits, all safe:
+  - `schema.ts:27` — `['sent', 'delivered', 'read', 'failed'] as const` (idiomatic zod enum pattern, T10/T11/T12 all use)
+  - `service.ts:24` — literal `` "as `as string` needed" `` in docstring (referencing the T12 pattern to explain why we don't use it)
+  - `types.ts:53` — literal `` "as `as string` / `as X` casts needed anywhere" `` in docstring (same reference)
+  **Zero actual `as string` / `as X` type assertions in code.** Discriminated union `DeliveryReceiptIngestOutcome` at `types.ts:39-52` proves via TypeScript that `receiptId` exists when `dispatched: true` and `error` exists when `dispatched: false` — no cast needed.
+
+Quality gate
+- `make typecheck`: PASS (0 errors, strict + `exactOptionalPropertyTypes`)
+- `make lint`: PASS (0 errors, 0 warnings — `eslint . --max-warnings 0`)
+- `make format-check`: PASS (all matched files use Prettier code style)
+- `make test-unit`: PASS (28 of 30 suites, 276 of 278 tests — 2 pre-existing baseline skips in `_template/*`; my 3 new suites 28/28 pass — 248 previous approved baseline + 28 T15 = 276)
+- `make check`: PASS end-to-end (concatenation of the above)
+
+Drift scans (all 6 EXECUTOR §4.4 categories — 0 hits on T15 module files)
+- `any` types: 0 (pre-existing 2 in `_template/*` untouched — same baseline as T10/T11/T12/T16 approved)
+- `console.log/info/debug`: 0 (repo-wide 0)
+- `throw new Error(` in `src/modules/` + `src/core/`: 0 in module scope (pre-existing 4 in `_template/*` + `core/config/env.ts:75` + `core/http/http-client.ts:19,27` — all untouched)
+- Forbidden imports: 0 (repo-wide 0)
+- `^export default ` outside entrypoints/config: 0 (repo-wide 0)
+- `.skip(` in `*.test.ts`: 0 in module scope (pre-existing 2 in `_template/*` untouched)
+
+Security check (CLAUDE §6 + spec §4.6 + PM ACK design intent)
+- **Signature-agnostic service** — `service.ts:70` `ingestStatuses(hotelId, envelope, signatureValid)` accepts trusted `signatureValid` input; T04 plugin at router-layer wiring (T15-followup) sets the flag before calling service. Docstring `:9-13` cross-references T12 precedent. Primitive genuinely agnostic.
+- **Persist-always audit trail via router at T12 repo** — per PM ACK GAP T15-#2 A, router persists `webhook_events` once per POST via T12's `WhatsappWebhookEventsRepository` BEFORE branch discrimination. T15 service handles ONLY `delivery_receipts` writes. `signatureValid` propagates in T15's ingest-level log for observability (test at `:314-327` asserts propagation).
+- **Orphan handling: skip + log warn + orphanCount++** — DDL FK CASCADE means physical impossible to insert orphan with NULL FK. Service takes the graceful-degradation path (worker-discipline) rather than fail-hard-request-then-Meta-retry-storm. Verified in 3+ test cases per binding #9.
+- **Multi-row status progression accepted** — spec §4.6 has only status CHECK; no UNIQUE on `(dispatch_id, external_id, status)` triple. Test `:126-144` confirms 3 persists succeed on sent → delivered → read.
+- **Per-status never throws (rich discriminated union outcome)** — test cases cover 4 failure paths that all return outcome shape without throwing.
+- **Sync throws only `ValidationError`** — test `:325-334` asserts on bad envelope; all other paths use `.resolves`.
+- **PII floor via `maskWaPhone`** — service `:107` mask; test `:359-378` asserts positive + negative + length heuristic + optional-omit; test `:380-407` asserts omit-when-absent.
+- **Tenant guard MANDATORY** — repo `:23-27` filters BOTH `hotelId` AND `externalId`; test asserts both fields present + cross-tenant safety at `:95-105`.
+
+Test evidence
+- Unit: **28 tests, 3 suites** — `whatsapp-delivery-receipts.schema.test.ts` (11: 7 envelope + 4 extract), `whatsapp-delivery-receipts.repository.test.ts` (5: 3 findDispatch + 2 persist), `whatsapp-delivery-receipts.service.test.ts` (12: 2 happy + 1 multi-row + 4 orphan/repo-fail + 2 signature/validation + 2 PII floor)
+- Integration: 0 — deferred as **T15-INTEG** follow-up (see §Follow-ups); repository test uses Prisma-mock stopgap per T10/T11/T12/T16 precedent (5× now)
+- Coverage (jest, scoped to 3 runtime files):
+  ```
+  File                                      | % Stmts | % Branch | % Funcs | % Lines
+  ------------------------------------------|---------|----------|---------|--------
+  All files                                 |   100   |   100    |   100   |   100
+   whatsapp-delivery-receipts.repository.ts |   100   |   100    |   100   |   100
+   whatsapp-delivery-receipts.schema.ts     |   100   |   100    |   100   |   100
+   whatsapp-delivery-receipts.service.ts    |   100   |   100    |   100   |   100
+  ```
+  Type-only `whatsapp-delivery-receipts.types.ts` erased at compile per ts-jest, not instrumented. Matches ACK #3 caveat.
+  **First-pass 100% coverage on all 3 runtime files** — no branch-coverage iteration needed (contrast T12 attempt 1 which needed `firstError ?? 'unknown error'` fix). The discriminated-union outcome shape encoded upfront eliminated the unreachable-branch problem categorically.
+
+Notes / discipline discoveries / tolerated deviations
+- **NO `as string` recurrence — discriminated union pattern encoded up-front per PM ACK design nudge** (T12 tolerated-deviation lesson pre-applied). Type-level enforcement via `DeliveryReceiptIngestOutcome = { dispatched: true; receiptId: string } | { dispatched: false; error: string }` at `types.ts:39-52` means TypeScript proves member access is type-safe without any cast. Result: **first-pass 100% coverage** (no branch coverage remediation needed).
+- **First-pass 100% coverage on 3 runtime files** — no branch coverage iteration needed. The discriminated-union pattern eliminated the "unreachable fallback branch" pattern that plagued T12 attempt 1.
+- **6th cross-primitive T06 barrel discipline confirmation** — T10 + T16 + T11 + T12 + T15 all preserve `no-restricted-imports` `**/adapters/*'` discipline byte-for-byte (T15 has no adapters so the rule is moot but the additive barrel append respected the pattern anyway). Now a fixed norm per PM ACK GAP T15-#7.
+- **Round 1 prettier collapse only** — `pnpm prettier --write` on `whatsapp-delivery-receipts.schema.test.ts` (single file). No other iterations required. Semantic content identical.
+- **Actual test count 28 (not 29 pre-estimated)** — my report before self-validate estimated 29; actual is 28. Doesn't affect binding.
+- **T15 tolerated deviations (per ACK pre-accept)**:
+  - Prisma-mock stopgap in `whatsapp-delivery-receipts.repository.test.ts` (T10/T11/T12/T16 precedent, 5× now) — T15-INTEG follow-up parked pending Q-C-01 + T13.
+  - Multi-row per triple accepted — Q-B-07 filed as optional future enhancement (not blocking).
+  - Q-A-03 test-env workaround NOT triggered — service test uses no crypto / no env-key seeding (T15 has no plaintext secrets in-flow).
+
+Q register / follow-ups
+- **Q-B-07 stamp embedded** — `types.ts:12-20` + `schema.ts:9-17` docstrings both carry the stamp explaining multi-row per `(dispatch_id, external_id, status)` triple is native to DDL. Q-B-07 (optional future enhancement) is filed at PM B ACK time; primitive accepts multi-row + T15-followup can wire `ON CONFLICT DO NOTHING` upsert semantic after schema-add ratifies. No new Q filed during coding.
+- **T15-followup** — router branch discrimination + `statuses` handler wiring in the T12-followup router (piggyback signature verify at T04 wiring per Q-A-04 resolution). Optional: `ON CONFLICT DO NOTHING` upsert semantic once Q-B-07 schema-add lands. Blocked on Q-A-04 + Q-C-02 + T12-followup router structure.
+- **T15-INTEG** — real-DB integration test with populated `outbound_dispatch_queue` rows (testcontainers Postgres). Blocked on Q-C-01 + T13 (which writes `external_id` on send confirmation).
+
+Requesting PM B VERDICT.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
