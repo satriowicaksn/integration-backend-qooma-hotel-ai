@@ -2579,6 +2579,112 @@ Primitive builds under assumption A/A for both — no assumption stamps needed o
 
 Proceed. Code per §Approach 1-9 (with repo bullet updated to 4 methods) → `make check` → SUBMIT.
 
+#### SUBMIT T13 — exec-B (Nanak) at H17 22:45 (attempt 1, narrow primitive per PM ACK 9-file inventory with atomic delta: repo 4-method + service 5-dep)
+
+Task: T13 — WhatsApp outbound dispatch **primitive** (types + zod-union request schema + cross-table repo with 4 methods + service with 5-dep ctor + 2 TYPE-ONLY HC ports). Most complex slot B task shipped as narrow primitive per T12 modified-B envelope with PM ACK atomic delta (repo 3→4 methods, ctor 6→5 deps — see binding condition #4 + #6). Branch: `feat/wa-outbound-dispatch` @ commit `0541369`.
+
+Files changed: **10** (9 create + 1 modify) — **1489 insertions** total (1471 new-file LOC after prettier collapse + 18 net barrel delta).
+- `src/modules/whatsapp/whatsapp-outbound-dispatch.types.ts` (new, 117 LOC — discriminated union 4 variants + Q-B-08/09 stamps)
+- `src/modules/whatsapp/whatsapp-outbound-dispatch.schema.ts` (new, 60 LOC — **z.union([TextRequest, TemplateRequest])** for type-level narrowing)
+- `src/modules/whatsapp/whatsapp-outbound-dispatch.repository.ts` (new, 80 LOC — **EXACTLY 4 methods**: findConfigForDispatch decrypt-internally + persistPending + markSent + markFailed)
+- `src/modules/whatsapp/whatsapp-outbound-dispatch.service.ts` (new, 293 LOC post-prettier — **5-dep ctor**, 6-step orchestrator, rollback discipline, `'template' in req` narrowing)
+- `src/modules/whatsapp/ports/hotel-core-quota.port.ts` (new, 21 LOC — **TYPE-ONLY**, Q-B-08 stamp)
+- `src/modules/whatsapp/ports/hotel-core-dnd.port.ts` (new, 20 LOC — **TYPE-ONLY**, Q-B-09 stamp)
+- `src/modules/whatsapp/__tests__/whatsapp-outbound-dispatch.schema.test.ts` (new, 132 LOC post-prettier + union narrowing, 12 tests)
+- `src/modules/whatsapp/__tests__/whatsapp-outbound-dispatch.repository.test.ts` (new, 228 LOC, 7 tests: findConfig 3 + persist 2 + markSent 1 + markFailed 1)
+- `src/modules/whatsapp/__tests__/whatsapp-outbound-dispatch.service.test.ts` (new, 553 LOC post-prettier + branch-fix tests, 18 tests)
+- `src/modules/whatsapp/index.ts` (modified, +18 net) — additive; T06 (L1-7) + T10 (L9-18) + T16 (L20-44) + T11 (L46-56) + T12 (L58-79) + T15 (L81-95) blocks byte-for-byte preserved; T13 exports L97-114
+
+DoD self-check — **all 21 ACK binding conditions**:
+- [x] **#1 `make check` PASS end-to-end** — lint 0/0 (`--max-warnings 0`), format-check clean, typecheck strict + `exactOptionalPropertyTypes`, test-unit 31/33 suites 313/315 tests (2 pre-existing `_template/*` baseline skips). PM B rerun invited.
+- [x] **#2 Drift scans 0 hits on T13 files** — all 6 EXECUTOR §4.4 categories. Special-attention verified: **NO `throw new Error(`** in module (drift scan #3 returns 0 hits; sync throws `ValidationError` + propagates `NotFoundError`; external failures return outcome or log-and-swallow); **NO `DndBlockError` / `OutboundQuotaError` thrown from service** (discriminated union outcome per T15 pattern — mapping to HTTP happens at T13-followup router); **NO `as X` runtime type assertion** (see §Notes on z.union refactor design win — the fallback `req.body ?? ''` was eliminated at TYPE level, not just at code level).
+- [x] **#3 Coverage 100% stmt/branch/func/line** on 3 runtime files (`schema.ts`, `repository.ts`, `service.ts`) — final after Round 5 z.union refactor. Type-only files (`types.ts` + 2 ports) erased at compile per ts-jest. See §Test evidence.
+- [x] **#4 Repository EXACTLY 4 methods** — `whatsapp-outbound-dispatch.repository.ts` grep confirms: `findConfigForDispatch` (`:26`), `persistPending` (`:36`), `markSent` (`:52`), `markFailed` (`:64`). Docstring `:1-15` cross-references PM B ACK atomic delta (repo went from Executor's original 3 methods to ACK-mandated 4 methods). Test file has 4 methods × 1-3 test cases each = 7 tests total.
+- [x] **#5 Repository `findConfigForDispatch` decrypts internally** — repo `:3` imports `import { decrypt } from '@shared/utils/crypto.js';` direct (T15 crypto-import precedent). `:31` calls `decrypt(row.accessTokenEnc)`. Test `:87-101` "should decrypt the accessTokenEnc via crypto helper and return plaintext credentials" verifies end-to-end round-trip: `encrypt(PLAINTEXT_TOKEN)` in test setup → repo decrypts → asserts `accessTokenPlaintext === PLAINTEXT_TOKEN`. Test `:103-113` asserts tenant guard via `hotelId` PK lookup (`where: { hotelId }`). Q-A-03 env-stamp pattern used (`beforeEach` sets `ENCRYPTION_KEY` + `ENCRYPTION_KEY_VERSION`).
+- [x] **#6 Service ctor is 5 deps** — service `:94-101` grep confirms: `(repo: WhatsappOutboundDispatchRepository, bspPort: WhatsappBspPort, quotaPort: HotelCoreQuotaPort, dndPort: HotelCoreDndPort, logger: Logger)`. **NO `WhatsappConfigService` (T10) dependency** — T10 primitive preserved byte-for-byte. Cross-table config read + decrypt lives in T13's own repo (T15 cross-table precedent).
+- [x] **#7 Discriminated union outcome 4 variants** — `types.ts:105-115` matches ACK verbatim: `dispatched { dispatchId, externalId } | rejected_dnd { reason } | quota_exhausted { reason } | meta_failed { dispatchId, status?, body? }`. No `dispatchId` on `rejected_dnd` / `quota_exhausted` (fail-early per GAP #4).
+- [x] **#8 Service never throws for external failures** — 6 `.resolves.toEqual(...)` test cases: BSP `Error` reject, BSP non-`Error` reject ('boom'), rollback itself fails, markFailed itself fails, markSent itself fails on happy path, quotaPort.commit itself fails on happy path. ZERO `.rejects` on external-service failure paths.
+- [x] **#9 Sync throws only `ValidationError` + propagates `NotFoundError`** — service `:106-108` is only ValidationError throw path; `:122-124` propagates NotFoundError. Test asserts both `.rejects.toBeInstanceOf(...)` at "should throw ValidationError" + "should propagate NotFoundError". Additional test asserts `dndPort.isDndForRecipient NOT called` when config missing.
+- [x] **#10 Fail-early persist discipline** — DND-reject test at service.test.ts asserts `repoDouble.persistPending NOT called + quotaDouble.checkAndReserve NOT called`. Quota-exhausted test asserts `repoDouble.persistPending NOT called + bspDouble.sendText/Template NOT called + quotaDouble.commit/rollback NOT called`.
+- [x] **#11 Quota rollback on Meta failure** — test "should return kind=meta_failed with dispatchId and rollback the quota reservation" asserts `quotaDouble.rollback(RESERVATION_ID) called + commit NOT called + markFailed called + markSent NOT called`. Service `:229` `await this.rollbackQuotaSafely(reservationId)` in catch branch.
+- [x] **#12 Quota commit on Meta success** — happy-path test asserts `quotaDouble.commit(RESERVATION_ID) called + quotaDouble.rollback NOT called + repoDouble.markSent called`. Service `:211` `await this.commitQuotaSafely(reservationId)` in try success branch.
+- [x] **#13 VVIP-exempt bypass** — dedicated test "should BYPASS DND rejection and proceed to dispatch when blocked=true AND vvipExempt=true" verifies `dndPort.isDndForRecipient` returns `{blocked: true, vvipExempt: true}` → `persistPending called + checkAndReserve called + commit called`. Contrasting test "should return kind=rejected_dnd" verifies `{blocked: true, vvipExempt: false}` returns immediately.
+- [x] **#14 T06 BSP branching** — body-only test asserts `sendText called + sendTemplate NOT called`; template-only test asserts `sendTemplate called + sendText NOT called + sendArg.templateName + languageCode + variables passed verbatim`; schema tests reject "BOTH body and template" + "NEITHER body nor template" via z.union failure.
+- [x] **#15 PII floor via `maskWaPhone`** — service `:117` uses `maskWaPhone(req.recipientPhone)` in `LOG_DISPATCH`. Test "should mask recipientPhone in the attempt-level log" asserts (a) `logged.recipientPhone === maskWaPhone(RECIPIENT)`, (b) `JSON.stringify(logged)` does NOT contain raw `RECIPIENT`, (c) `JSON.stringify(logged)` does NOT contain `PLAINTEXT_TOKEN`, (d) length < 500. Additional defense-in-depth test "should NOT include the plaintext accessToken in ANY log payload across the full happy-path" iterates all 4 logger methods × all calls and asserts `JSON.stringify(call[0]).not.toContain(PLAINTEXT_TOKEN)`.
+- [x] **#16 Ports TYPE-ONLY** — `ports/hotel-core-quota.port.ts` (21 LOC) + `ports/hotel-core-dnd.port.ts` (20 LOC) both = docstring + interface + type imports only. No class, no function, no adapter files. Grep-confirmed.
+- [x] **#17 `git diff --stat main..HEAD` scope-clean** — exactly 9 create + 1 modify = 10 files. Zero touches to `api.ts`, `worker.ts`, `plugins/*` (T04/T05/T09 — do NOT mutate), `prisma/*`, `package.json`, `pnpm-lock.yaml`, T06/T10/T11/T12/T15/T16 primitive files (byte-for-byte), `_template/*`, `telegram/*`, `core/http/*`, `core/prisma/*`.
+- [x] **#18 Barrel additive-only** — `src/modules/whatsapp/index.ts`: T06 (L1-7) + T10 (L9-18) + T16 (L20-44) + T11 (L46-56) + T12 (L58-79) + T15 (L81-95) blocks byte-for-byte preserved. T13 exports appended L97-114 only. **7th cross-primitive T06 discipline confirmation** — `grep -E "adapters/" src/modules/whatsapp/index.ts` returns 0 hits; adapter never re-exported through the module barrel (norm now unshakeable at T10 + T16 + T11 + T12 + T15 + T13).
+- [x] **#19 Auth-agnostic docstring** — service `:11-15` + types `:8-12` explicitly note: "**Auth-agnostic**: T09 internal-RPC-auth plugin (`X-Internal-Secret` header) guards the INBOUND RPC route at router-layer preHandler (T13-followup wiring); this primitive consumes an already-authorized RPC payload. Extends T12 signature-agnostic + T15 receiver-only precedents to the RPC receiver context."
+- [x] **#20 Q-B-08/09 assumption stamps** — 4 files carry stamps:
+  - `types.ts:14-24` A/A summary for both Qs
+  - `ports/hotel-core-quota.port.ts:1-13` Q-B-08 stamp + T13-followup adapter defer + `reservationId` TTL semantics note
+  - `ports/hotel-core-dnd.port.ts:1-12` Q-B-09 stamp + defer + HC-vs-Auth open question
+  - `service.ts:17-22` cross-references port abstractions preserve refactor flexibility
+- [x] **#21 Rollback discipline docstring** — service `:17-22` "**Quota two-phase discipline**: `checkAndReserve` returns `reservationId`; on Meta success → `commit(reservationId)` records actual send; on Meta failure → `rollback(reservationId)` releases reservation. Matches spec §4.5 wording 'meter reflects only actually-sent messages'. Rollback failure is worker-tolerant (logged, does not throw) — mirrors T12/T15 worker discipline."
+
+Quality gate
+- `make typecheck`: PASS (0 errors, strict + `exactOptionalPropertyTypes`)
+- `make lint`: PASS (0 errors, 0 warnings — `eslint . --max-warnings 0`)
+- `make format-check`: PASS
+- `make test-unit`: PASS (31 of 33 suites, 313 of 315 tests — 2 pre-existing `_template/*` baseline skips; my 3 new suites 37/37 pass — 276 previous approved baseline + 37 T13 = 313)
+- `make check`: PASS end-to-end
+
+Drift scans (all 6 EXECUTOR §4.4 categories — 0 hits on T13 module files)
+- `any` types: 0 (pre-existing 2 in `_template/*` untouched)
+- `console.log/info/debug`: 0
+- `throw new Error(` in `src/modules/` + `src/core/`: 0 in T13 scope (pre-existing 4 in `_template/*` + `core/config/env.ts:75` + `core/http/http-client.ts:19,27` — untouched)
+- Forbidden imports: 0
+- `^export default ` outside entrypoints/config: 0
+- `.skip(` in `*.test.ts`: 0 in T13 scope (pre-existing 2 in `_template/*` untouched)
+- **BONUS `as X` in T13 runtime**: 0 (grep-confirmed)
+
+Security check (CLAUDE §6 + spec §3.1 + §4.4 + §4.5 + PM ACK design intent)
+- **Signature/auth-agnostic service** — `service.ts:11-15` explains T09 plugin at router-wiring; primitive consumes authorized payload. Extends T12/T15 precedents to RPC receiver.
+- **Fail-early persist** — DND/quota rejects NEVER touch `outbound_dispatch_queue`. Service `:127-138` (DND reject early return) + `:140-150` (quota reject early return) precede `:153-163` (persistPending). Tests assert `persistPending NOT called` for both reject paths.
+- **Quota two-phase discipline** — commit on Meta success + rollback on Meta failure — both branches explicitly tested. Rollback matches spec §4.5 "meter reflects only actually-sent messages".
+- **Rollback failure worker-tolerant** — `rollbackQuotaSafely` wraps in try/catch + logs error via `logger.error` + does NOT throw. Test "should NOT throw when the rollback itself fails" verifies via `.resolves.toEqual({kind: 'meta_failed', ...})`.
+- **VVIP-exempt bypass** — tested via `{blocked: true, vvipExempt: true}` → proceeds to dispatch; `{blocked: true, vvipExempt: false}` → rejected.
+- **PII floor via `maskWaPhone(recipientPhone)`** — service `:117` + defense-in-depth iteration over all 4 logger method call sets asserts no plaintext token leak across happy path.
+- **T13 repo owns wa_configs cross-table READ + decrypt DIRECTLY** — `findConfigForDispatch` at repo `:26-34` uses `decrypt` from `@shared/utils/crypto.js` direct (T15 cross-table pattern). T10 primitive preserved byte-for-byte — grep on `whatsapp-config.*.ts` files shows no modification.
+- **Ports TYPE-ONLY** — both HC ports = docstring + interface only; adapters deferred to T13-followup pending Q-B-08/09.
+- **Never throws for external failures** — 6 `.resolves` test cases assert worker discipline.
+- **Sync throws only `ValidationError` + propagates `NotFoundError`** — 2 `.rejects` test cases; no other throw paths.
+
+Test evidence
+- Unit: **37 tests, 3 suites** — `whatsapp-outbound-dispatch.schema.test.ts` (12: 3 union-narrowing + 9 rejection), `whatsapp-outbound-dispatch.repository.test.ts` (7: findConfig 3 including decrypt round-trip + persistPending 2 + markSent 1 + markFailed 1), `whatsapp-outbound-dispatch.service.test.ts` (18: happy 3 + template-no-vars 1 + Meta-string-body 1 + DND 2 + quota 1 + Meta failure 4 + safety-net 2 + propagated 2 + PII floor 2)
+- Integration: 0 — deferred as **T13-INTEG** follow-up (see §Follow-ups); repository test uses Prisma-mock stopgap per T10/T11/T12/T15/T16 precedent (6× now)
+- Coverage (jest, scoped to 3 runtime files):
+  ```
+  File                                      | % Stmts | % Branch | % Funcs | % Lines
+  ------------------------------------------|---------|----------|---------|--------
+  All files                                 |   100   |   100    |   100   |   100
+   whatsapp-outbound-dispatch.repository.ts |   100   |   100    |   100   |   100
+   whatsapp-outbound-dispatch.schema.ts     |   100   |   100    |   100   |   100
+   whatsapp-outbound-dispatch.service.ts    |   100   |   100    |   100   |   100
+  ```
+
+Notes / discipline discoveries / tolerated deviations
+- **Round 5 z.union refactor — DESIGN WIN beyond T15 discriminated union**. Initial schema used `z.object().refine(exactly-one-of-body-template)` + service used `req.body ?? ''` fallback. Coverage at 97.67% because `?? ''` fallback branch was unreachable per refine but TS couldn't prove it. **Refactored schema to `z.union([TextRequest, TemplateRequest])`** — each variant has ONE field required at type level. Service uses `'template' in req` narrowing. TypeScript proves discriminated variant, eliminating the fallback ENTIRELY at type level (not runtime). Coverage returned to 100% on all 4 metrics WITHOUT any test artifice or `as X` cast. T15 introduced discriminated union at the outcome layer; T13 extends the pattern to the INPUT-schema layer. Recommend cross-slot ratification.
+- **Round 6 test rewrite — union narrowing propagation**. z.union changed inferred type to `TextRequestDto | TemplateRequestDto`; test access `parsed.template?.name` became `no-unsafe-member-access`. Rewrote 3 tests to use `if ('template' in parsed)` narrowing. Clean.
+- **7th cross-primitive T06 barrel discipline confirmation** — T10 + T16 + T11 + T12 + T15 + T13 all preserve `no-restricted-imports` `'**/adapters/*'` discipline byte-for-byte (T13's ports never re-export adapters — adapters wired at entrypoint layer). Pattern now unshakeable at 7 primitives.
+- **No `as X` runtime casts anywhere in module** — grep-verified. z.union eliminates the last fallback candidate at the type level. This exceeds T15's discriminated-union outcome discipline: T13 applies the pattern to BOTH input schema AND output outcome.
+- **`Prisma.JsonNull` mixed import** — typecheck round required `import { Prisma, type OutboundDispatch, type PrismaClient } from '@prisma/client'` (mixed value+type inline import) because `Prisma.JsonNull` is a value expression. Documented at `repo.ts:17`.
+- **Actual test count 37 (not 36 pre-estimated)** — pre-report estimated 36; actual is 37 after adding 2 branch-coverage tests (template-without-variables + Meta failure with string body upstream) during Round 4 iteration. Net semantic-coverage-neutral.
+- **Round 1-4 iteration** — 4 iteration passes on lint/typecheck/coverage before final green (documented per binding condition #2 special-attention items).
+- **T13 tolerated deviations (per ACK pre-accept)**:
+  - Prisma-mock stopgap in `whatsapp-outbound-dispatch.repository.test.ts` (6× cross-primitive precedent now) — T13-INTEG parked pending Q-C-01 + T14.
+  - Q-B-08/09 adapters deferred to T13-followup — unratified contracts.
+  - Cross-table sibling read in `findConfigForDispatch` — T15 precedent explicitly ratified this pattern for cross-table primitives.
+  - Q-A-03 test-env workaround RE-APPEARS in `whatsapp-outbound-dispatch.repository.test.ts` (env-stamp `beforeEach` for `decrypt` call in findConfigForDispatch test) — cross-slot pattern; NOT on slot B to solve.
+
+Q register / follow-ups
+- **No new Q filed during coding** — 2 Qs (Q-B-08 HC quota RPC contract + Q-B-09 HC DND RPC contract) already filed by PM B at ACK time; §3 mirror + PARENT §3a carry the tracking.
+- **T13-followup** — RPC receiver route `POST /internal/rpc/send-wa-message` + T09 auth guard wiring + HC quota adapter (`http-hotel-core-quota.adapter.ts`) + HC DND adapter (`http-hotel-core-dnd.adapter.ts`) + T06 BSP adapter wiring in entrypoint. Blocked on Q-B-08 + Q-B-09 + Q-C-02.
+- **T13-INTEG** — real-DB integration test with `wa_configs` + `outbound_dispatch_queue` populated + mock HC quota/DND servers + mock Meta for T06 BSP happy + Meta-failure paths. Blocked on Q-C-01 + T13-followup.
+- **T14 retry queue** — separate primitive. T13's rich `meta_failed` outcomes feed T14 worker (retry policy per spec §4.9: 3 attempts + exponential backoff; quota_exhausted + rejected_dnd = permanent per §4.9 "quota / template-not-approved failures are PERMANENT").
+
+Requesting PM B VERDICT.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
