@@ -1143,6 +1143,93 @@ Hexagonal Disiplin (CLAUDE §4 + ADR-0001): outbound HTTP to hotel's `webhook_ur
 
 Awaiting PM B ACK on GAPs #1–#7 (esp. #1 ping semantics + #2 repo placement + #4 scope depth) before writing any code.
 
+##### PM B ACK — T11 PLAN attempt 1 APPROVED, proceed to coding (H17, 2026-07-05) by PM B (Nanak)
+
+**ACK on all 7 GAP defaults** — Executor's defaults align 1:1 with spec text + T06/T10/T16 precedent. No scope narrow needed (unlike T16). One design nuance (adapter NOT throwing `ExternalServiceError` on non-2xx) is semantically correct for a PROBE and gets an explicit binding condition.
+
+**Independent spec verification** (PM read):
+- `04-integration-channels.md §2.2 L45` — endpoint row reads "**Server pings configured webhook URL to confirm reachable**", role `gm_admin`. Word "reachable" is the operative semantics ✓
+- `MVP §5 AC L119` — "**pings the configured URL. Returns `200 { verified: true, verified_at }` on success, `422 WEBHOOK_VERIFICATION_FAILED` on failure**" ✓
+- `04 §9 L373` — `422 WEBHOOK_VERIFICATION_FAILED` canonical code ✓
+- `04 §4.1 L184` — `verified_at TIMESTAMPTZ NULL` column present (T02 delivered) ✓
+- `core/errors/app-errors.ts:92-95` — `WebhookVerificationError extends AppError` w/ `statusCode = 422`, `code = 'WEBHOOK_VERIFICATION_FAILED'` — ready for reuse ✓
+- **Full spec search** — zero mention of `hub.mode`, `hub.verify_token`, `hub.challenge`, or any Meta subscription-challenge protocol anywhere in `docs/spec/`. GAP #1 B has **no spec support**; adopting it would invent scope. GAP #1 A ("simple reachability") is the spec-faithful reading.
+
+**Q-A-04 confirmation** — verified via `prisma/schema.prisma` + `04 §4.1` + Executor's read: `app_secret` gap concerns HMAC verification of INBOUND Meta POSTs (T12 territory, `X-Hub-Signature-256`). T11 is OUTBOUND probe (us → hotel URL), no signature, no auth header, no `app_secret` dependency. Confirmed N/A.
+
+---
+
+**GAP decisions** (A/B/C per GAP with rationale):
+
+- **GAP T11-#1 (ping semantics)** — **A** (simple reachability GET, any 2xx = verified). Spec §2.2 says "confirm reachable"; §5 AC returns just `{verified, verified_at}` — no challenge echo mechanic. Zero spec mention of `hub.*` params. Adopting B would invent Meta-protocol scope with no AC backing + require plaintext `webhook_verify_token` accessor (GAP #3), which cascades a T10-mutation temptation (rejected under GAP #2/#3). C rejected (POST test payload not spec-hinted).
+- **GAP T11-#2 (repo placement)** — **A** (NEW sibling file `whatsapp-webhook-verify.repository.ts`). Rationale: T10 `WhatsappConfigRepository` byte-for-byte protected per T10-a2 VERDICT precedent + T06 + T16 uniform discipline. SRP — `markVerified` is a distinct concern from config CRUD. B (extend T10) erodes the discipline; C (direct Prisma in service) violates MODULE_TEMPLATE.
+- **GAP T11-#3 (plaintext webhook_verify_token accessor)** — **MOOT under GAP #1 A**. No plaintext access needed for simple-reachability GET.
+- **GAP T11-#4 (scope depth)** — **A** (10 files, adapter included). Rationale: unlike T16's HC callback which had 3 undefined deps (baseUrl Q-C-02, path Q-B-02, secret Q-C-02) forcing adapter-deferral, T11's pinger has ZERO undefined deps — spec-known any-2xx=reachable semantics, per-call `webhookUrl` from T10 config service. No reason to defer adapter. B/C rejected (would waste round-trip for a fully-defined external surface).
+- **GAP T11-#5 (`HttpPoster` inline surface)** — **A** (per-adapter narrow inline redeclaration, `get<T>(url, opts?): Promise<{data, status}>` only). Rationale: T06 = `post`, T16 = `post/patch/delete`, T11 = `get`. Each adapter declares its own narrow surface inline. B (unify) mutates T06 protected territory + creates cross-primitive coupling; C (rename `HttpGetter`) is cosmetic-only, prefers consistent naming `HttpPoster` (misnomer accepted for T06/T16 consistency; docstring notes only GET is used).
+- **GAP T11-#6 (Q-A-04 relevance)** — **N/A confirmed**. T11 primitive outbound probe has no signature verify surface. Q-A-04 blocks T12 inbound only.
+- **GAP T11-#7 (service returns outcome vs throws)** — **A** (service returns rich `WebhookVerificationDomain`; route at T11-followup maps to HTTP 422 body per spec §5 AC + §9 code). Rationale: matches T16 pattern (return rich result, boundary errors thrown separately); testable primitives; future retries + health-badge integration can consume the structured outcome; FE gets `{outcome: 'unreachable', statusCode: 503}` for actionable diagnostics. B (throw at service) loses outcome typing + wastes rich info.
+
+---
+
+**Additional design decision (Executor's plan implicitly proposed)**:
+
+- **Adapter does NOT throw `ExternalServiceError` on non-2xx / network error** — pushed back on for T06/T16 consistency but **ALLOWED here on principled probe semantics**. T06/T16 adapters call boundary services that MUST succeed (Meta message dispatch, Meta template CRUD); non-2xx there = incident. T11 adapter is a PROBE — non-2xx and network errors are LEGITIMATE outcomes of asking "is this URL reachable?" Throwing `ExternalServiceError` on every 404-from-hotel-misconfig would flood Sentry with non-actionable alerts. Adapter returns clean `{reachable, statusCode?}` result object; service boundary maps to `WebhookVerificationError` when route needs to emit 422. **Docstring MUST explain the deviation** (binding #14).
+
+---
+
+**Binding conditions for SUBMIT** (PM B will independent-verify — mirrors T10/T16 ACK 14-item pattern):
+
+**Quality gate**
+1. `make check` PASS end-to-end on your push — PM B rerun independently. Zero lint / format / typecheck / test failures.
+2. Drift scans per `PM-AGENT.md §3 Step 2` on touched files — all 6 categories = 0 hits. Special attention: **NO `throw new Error(`** in module code; **NO `ExternalServiceError` thrown from `http-webhook-pinger.adapter.ts`** (probe-semantics ONLY — see design decision above); adapter returns result objects.
+3. Coverage: **100% stmt/branch/func/line** on 4 runtime files (`whatsapp-webhook-verify.schema.ts`, `.repository.ts`, `.service.ts`, `adapters/http-webhook-pinger.adapter.ts`). Report coverage delta in SUBMIT. Type-only files (`whatsapp-webhook-verify.types.ts` + `ports/webhook-pinger.port.ts`) erased at compile per ts-jest — expected.
+
+**Design gate (each MUST be present + provable via test evidence)**
+4. **Simple GET, no `hub.*` params** — adapter test asserts URL is called EXACTLY as configured (no query-param mutation, no `?hub.mode=subscribe` appended). If PM greps the adapter for `'hub.mode'` / `'hub.verify_token'` / `'hub.challenge'` and finds any hit → REJECT-scope (invented Meta protocol scope).
+5. **Adapter probe-semantics enforced** — 3 test cases MINIMUM:
+   - 2xx (e.g. 200) → `{reachable: true, statusCode: 200}`
+   - Non-2xx (e.g. 404 or 500) → `{reachable: false, statusCode: <n>}`
+   - Network error / promise reject → `{reachable: false, statusCode: undefined}`
+   
+   NONE of the 3 cases throws `ExternalServiceError` (or any error). Verify via `expect(...).resolves.toEqual(...)` not `.rejects`.
+6. **Adapter NO auth header** — verify-webhook doesn't send Bearer/Authorization (public endpoint per spec; hotel's URL owns its own auth). Test asserts no `Authorization` header sent, no bearer token in request options.
+7. **Service `verifyForHotel` returns rich outcome, not throws on unreachable** — test asserts `expect(service.verifyForHotel(id)).resolves.toEqual({verified: false, outcome: 'unreachable', ...})` when pinger returns `{reachable: false}`. Repo `markVerified` NOT called in the unreachable path — assert `repo.markVerified` mock has 0 calls.
+8. **Service PROPAGATES `NotFoundError` from `WhatsappConfigService.getForHotel`** — when no `wa_configs` row for hotel, T10 service throws `NotFoundError`; T11 service must let it bubble (do NOT wrap or swallow). Test asserts `expect(...).rejects.toBeInstanceOf(NotFoundError)`.
+9. **`verified_at` update called with a `Date` object** — test asserts `repo.markVerified.mock.calls[0]` = `[hotelId, expect.any(Date)]`. Do NOT pass a string / ISO timestamp / epoch number — Prisma `TIMESTAMPTZ` binding expects `Date`.
+10. **Barrel additive-only** — `index.ts` T06 block (L1-7), T10 block (L9-18), T16 block byte-for-byte preserved. T11 exports appended AFTER T16 block. NO adapter re-export (`no-restricted-imports` `'**/adapters/*'` T06 discipline confirmed cross-slot 3× now — do not test this rule again by trying).
+
+**Scope gate**
+11. `git diff --stat main..HEAD` — must show exactly **10 create + 1 modify** = 11 lines. No `.gitignore`/`package.json`/`pnpm-lock.yaml` touch. No touches to T06 BSP files, T10 config files, T16 template files, `_template/*`, `telegram/*`, `plugins/*`, `api.ts`, `prisma-client.ts`, `prisma/*`, `core/http/*`.
+12. **`HttpPoster` narrow interface re-declared inline** in `http-webhook-pinger.adapter.ts` with ONLY `get<T>(url, opts?): Promise<{data, status}>` method. Zero coupling to `core/http/http-client.ts`. Docstring notes T06/T16 precedent + probe-only surface.
+
+**Documentation gate**
+13. **Log-shape assertion in service test (positive PII floor)** — since T11 has no plaintext secrets in-flow (webhook URL is public, no token access), the PII-floor test flips to **positive assertion**: assert `logger.info.mock.calls[0]?.[0]` matches a shape containing `{msg, module, hotelId, outcome, statusCode?}` and does NOT spread the full config object (defense-in-depth — if T10 domain evolves to embed a token by mistake, this test catches accidental log leak). At minimum, assert `JSON.stringify(logged).length < 500` (heuristic: full config leak would exceed).
+14. **Adapter docstring explains probe-semantics deviation** — `http-webhook-pinger.adapter.ts` docstring block must have a paragraph like: "**Unlike T06/T16 adapters, this adapter does NOT throw `ExternalServiceError` on non-2xx.** T11 is a REACHABILITY PROBE — non-2xx and network errors are legitimate outcomes of asking 'is this URL reachable?' Throwing EE on hotel-misconfig would flood Sentry with non-actionable alerts. Result object `{reachable, statusCode?}` is returned in all outcomes; the boundary `WebhookVerificationError` (422) is emitted at the SERVICE / route layer, not adapter."
+
+**Tolerated deviations to declare in SUBMIT §Notes** (pre-accepted):
+- Prisma-mock stopgap in `.repository.test.ts` — T10-a2 / T16 stopgap precedent; T11-INTEG follow-up parked.
+- `HttpPoster` misnomer accepted for T06/T16 naming consistency (only `get` used) — flag in adapter docstring.
+- Adapter non-throwing behavior (design decision above) — declared explicitly in SUBMIT §Notes as accepted probe-semantics deviation from T06/T16.
+- Service depends on T10's `WhatsappConfigService` for config read (module-internal dependency; T10 domain publicly stable) — NOT a port abstraction. Accepted; if T10 domain evolves, T11 rebuilds.
+
+**No new Q filed** (all 7 GAPs decidable-by-PM-B). If Executor discovers a new spec/contract gap during coding, raise in SUBMIT `§Q register / follow-ups`.
+
+**Follow-ups to file in SUBMIT** (list, do NOT implement):
+- **T11-followup** — route `POST /api/integrations/whatsapp/verify-webhook` + Fastify handler + `gm_admin` session guard + `hotel_id` from session. Blocked on Q-C-02 (`api.ts` bootstrap + zod↔Fastify shim) + Q-C-03 (JWT plugin + gm_admin RBAC).
+- **T11-INTEG** — real-DB integration test for `verified_at` update (testcontainers Postgres per CLAUDE §8). Blocked on Q-C-01 (prisma singleton).
+
+**Discipline**:
+- Branch `feat/whatsapp-verify-webhook` per CLAUDE §12.
+- Conventional commit: `feat(whatsapp): T11 verify-webhook primitive (types + schema + repo + service + pinger port/adapter)`.
+- Single commit for the primitive shape (T10/T16 pattern).
+- Push branch; do NOT open PR until PM B rerun locally + says "open PR" in VERDICT.
+
+**Rebuttal channel**: If any of the 14 conditions or GAP decisions above looks wrong for T11, post `REBUTTAL T11 item-#N` before coding — PM B re-checks in-session.
+
+**No attempt-2 PLAN required** — all 7 GAPs answered by picking Executor's defaults (spec-aligned), no scope creep to narrow. Executor proceeds directly to coding per the 10-file inventory + binding conditions.
+
+Proceed. Run `make prisma-generate` if not already (Q-A-03 test-env workaround likely re-appears in service test — pattern known cross-slot) → code per §Approach 1-11 → `make check` → SUBMIT.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
