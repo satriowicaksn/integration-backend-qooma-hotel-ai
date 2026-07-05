@@ -1005,6 +1005,144 @@ Requesting PM B VERDICT.
 
 **Next expected action**: Executor B open PR on `feat/wa-template-relay` for PO merge review; PM B re-verify on CI green post-PR before recommending merge (same discipline as T10 pre-merge). **Slot B progress: 2/7 (T10 + T16 primitives)** · T11-T15 backlog (T11 skeleton could go next if Q-C-02 wiring becomes available in parallel with T13 outbound dispatch which depends on T06 already-merged + T09 already-merged). T16-followup + T16-INTEG parked pending Q resolutions.
 
+### ASSIGNMENT T11 — claimed by exec-B (Nanak) at H17 14:25
+- Branch: feat/wa-webhook-verify (will branch off `main` before first `src/` commit; PLAN commit lands on `main`)
+- Routed from: PM-STATUS-B.md §8 queue (self-claim per EXECUTOR-PROTOCOL §3B — T04 HMAC + T10 config both merged, Q-C-01/02/03 do not block the primitive)
+
+#### PLAN T11 — exec-B (Nanak) at H17 14:25
+
+**Scope recap** (spec: `MVP-INTEGRATION-FIRST.md §1.2 B2` + `§5` AC L119 + `docs/spec/04-integration-channels.md §2.2` L45 + `§9` L373)
+
+T11 = **verify-webhook action** — GM admin triggers our server to ping the hotel's configured WA webhook URL (`wa_configs.webhook_url`) to confirm reachability. AC (spec §5 L119):
+- Success → `200 { verified: true, verified_at }` + update `wa_configs.verified_at` timestamp
+- Failure → `422 WEBHOOK_VERIFICATION_FAILED` (spec §9 L373 error code, existing `WebhookVerificationError` at `src/core/errors/app-errors.ts:93`)
+
+**Direction (critical)**: This is **outbound** (us → hotel's URL). Distinct from T12 (inbound Meta → us WA callbacks with `X-Hub-Signature-256`). Q-A-04 (`app_secret`, missing from `wa_configs`) applies to T12's HMAC verify, **NOT to T11** — verify-webhook uses no signature, no app_secret. See GAP #6.
+
+**Session-start gate** (EXECUTOR-PROTOCOL §2)
+- Identity confirmed: Executor, Slot B (Nanak) ✓
+- CLAUDE.md loaded ✓
+- Task spec read: `MVP-INTEGRATION-FIRST.md §1.2 B2` + `§5 AC L119` ✓ · `04-integration-channels.md §2.2 L45` (endpoint row) + `§3` (webhook flow narrative — confirms `X-Hub-Signature-256` is INBOUND Meta→us at T12, not this task) + `§9 L373` (`WEBHOOK_VERIFICATION_FAILED` = 422) + `§4.1` DDL `verified_at TIMESTAMPTZ NULL` ✓
+- Parent docs spot-read: `docs/MODULE_TEMPLATE.md` (external-IO variant, port+adapter) · `src/plugins/hmac-validator.plugin.ts` (T04 — read confirms inbound-only signature verify; **not relevant to T11**) · `src/modules/whatsapp/whatsapp-config.service.ts` (T10 — exposes `webhookUrl: string` UNMASKED in domain L98; `webhookVerifyToken` IS MASKED in domain L99 — informs GAP #3) · `src/modules/whatsapp/whatsapp-config.repository.ts` (T10 — has `findByHotelId` + `upsert` only; NO `markVerified` — informs GAP #2) · `src/core/errors/app-errors.ts:93` (`WebhookVerificationError` extends `AppError` w/ status 422 + code `WEBHOOK_VERIFICATION_FAILED` — ready for reuse) · `prisma/schema.prisma:41` (`verifiedAt DateTime?` — nullable, `@updatedAt` NOT on it, so we control the write) · existing T06 + T16 `HttpPoster` re-declaration pattern (narrow inline interface per adapter) ✓
+- Dependencies check:
+  - T04 (HMAC verify plugin): MERGED on `main` — **not needed** for T11 (inbound-only) but session confirms plugin factory shape for future reference
+  - T10 (WA config CRUD primitive): MERGED (`36462d2` PR #10) ✓ — my service consumes `WhatsappConfigService.getForHotel(hotelId)` for `webhookUrl` (unmasked, safe)
+  - T16 (WA template Meta relay): MERGED (`95863c3` PR #12) ✓ — precedent for narrow port+adapter primitive shape
+  - Q-C-01/02/03: **NOT blockers** for T11 primitive — no `api.ts` wiring, no session-auth (session guard is router-layer at T11-followup), no prisma singleton mutation
+  - Q-A-04 (`app_secret`): **N/A for T11** — verify-webhook doesn't sign/verify HMAC (see GAP #6)
+- `make typecheck`: PASS on `main` (Node 22 nvm + pnpm 9 corepack) ✓
+- `make lint`: PASS on `main` ✓
+- Scaffolder risk: **none proposed**. No `pnpm add`, no `pnpm dlx`, no `pnpm prisma generate` (no schema change).
+
+**Files to create** (default proposal — see GAP #4 for narrower alternatives)
+
+```
+src/modules/whatsapp/whatsapp-webhook-verify.types.ts
+src/modules/whatsapp/whatsapp-webhook-verify.schema.ts
+src/modules/whatsapp/whatsapp-webhook-verify.repository.ts
+src/modules/whatsapp/whatsapp-webhook-verify.service.ts
+src/modules/whatsapp/ports/webhook-pinger.port.ts
+src/modules/whatsapp/adapters/http-webhook-pinger.adapter.ts
+src/modules/whatsapp/__tests__/whatsapp-webhook-verify.schema.test.ts
+src/modules/whatsapp/__tests__/whatsapp-webhook-verify.repository.test.ts
+src/modules/whatsapp/__tests__/whatsapp-webhook-verify.service.test.ts
+src/modules/whatsapp/__tests__/http-webhook-pinger.adapter.test.ts
+```
+
+10 files (6 source + 4 tests) — matches T16 modified-B envelope (adjusted for the extra repo file needed for `verified_at` update, per GAP #2).
+
+**Files to modify** (1)
+
+- `src/modules/whatsapp/index.ts` — append primitive exports (types, schemas, service class, repo class, port interface). Preserve T06 BSP block (L1-7) + T10 config block (L9-18) + T16 template block byte-for-byte. **NOT** re-exporting adapter (T06 discipline, `no-restricted-imports` enforced — adapter wired at entrypoint).
+
+**Files explicitly NOT touched**
+
+- `prisma/schema.prisma`, `prisma/migrations/*` — no schema change (`verified_at` already exists per §4.1 DDL)
+- `src/entrypoints/api.ts` — stub (Q-C-02); no wiring
+- `src/core/prisma/prisma-client.ts` — stub (Q-C-01); repo imports `PrismaClient` type via `@prisma/client` (post `make prisma-generate`) — same pattern as T10
+- `src/core/http/http-client.ts` — stub; adapter re-declares `HttpPoster` narrow interface inline (T06+T16 precedent)
+- `src/plugins/*` — T04 HMAC plugin, T09 internal-RPC auth — neither relevant to T11 primitive; consumed at T11-followup router layer only
+- `src/modules/whatsapp/ports/whatsapp-bsp.port.ts`, `adapters/1engage.adapter.ts`, `__tests__/1engage.adapter.test.ts` — T06 Nathan byte-for-byte
+- `src/modules/whatsapp/whatsapp-config.*` — T10 byte-for-byte (my service CONSUMES `WhatsappConfigService` via barrel export — read-only integration; my new repo is a SIBLING file for the `verified_at` write, per GAP #2 A)
+- `src/modules/whatsapp/whatsapp-template.*`, `ports/whatsapp-template-management.port.ts`, `ports/hotel-core-template-callback.port.ts`, `adapters/1engage-template.adapter.ts` — T16 byte-for-byte
+- `src/modules/telegram/*` — slot C
+- `src/modules/_template/*` — reference
+- `package.json`, `pnpm-lock.yaml` — no dep add
+
+**Approach**
+
+Hexagonal Disiplin (CLAUDE §4 + ADR-0001): outbound HTTP to hotel's `webhook_url` is EXTERNAL IO → port + adapter WAJIB. Coding order:
+
+1. **`whatsapp-webhook-verify.types.ts`** — domain types:
+   - `WebhookVerificationOutcome = 'verified' | 'unreachable' | 'invalid_response'`
+   - `WebhookVerificationDomain = { hotelId, verified: boolean, verifiedAt: Date | null, outcome: WebhookVerificationOutcome, statusCode?: number }` — result shape service returns
+   - `PingWebhookInput` / `PingWebhookResult` — port I/O types
+2. **`whatsapp-webhook-verify.schema.ts`** — zod for wire contract:
+   - `WhatsappVerifyWebhookResponseSchema` (matches AC L119 → `{ verified: boolean, verifiedAt: z.date().nullable() }`). Request body: empty (route triggers on session — see T11-followup).
+   - `.strict()` on both.
+3. **`whatsapp-webhook-verify.repository.ts`** — class `WhatsappWebhookVerifyRepository(private readonly db: PrismaClient)`:
+   - `markVerified(hotelId: string, verifiedAt: Date): Promise<WaConfig>` — Prisma `waConfig.update({ where: { hotelId }, data: { verifiedAt } })`.
+   - No `findByHotelId` (that's T10's repo) — SRP.
+   - See GAP #2 for placement rationale.
+4. **`ports/webhook-pinger.port.ts`** — NEW port:
+   ```
+   interface WebhookPingerPort {
+     ping(input: PingWebhookInput): Promise<PingWebhookResult>;  // { url } → { reachable, statusCode? }
+   }
+   ```
+5. **`adapters/http-webhook-pinger.adapter.ts`** — implements pinger port:
+   - Narrow `HttpPoster` re-declared inline with `get<T>(url, opts?): Promise<{data, status}>` method (only GET needed for reachability — see GAP #1 A default).
+   - Constructor `(deps: { http: HttpPoster; config: { timeoutMs?: number } })`.
+   - Any 2xx → `{ reachable: true, statusCode }`. Non-2xx → `{ reachable: false, statusCode }`. Network error → `{ reachable: false, statusCode: undefined }`.
+   - `ExternalServiceError` NOT thrown on non-2xx (a failed reachability probe is a normal "invalid" outcome, not an upstream fault); thrown ONLY on programmer error (never in adapter). Service maps `reachable: false` → `WebhookVerificationError` (422) at the boundary.
+6. **`whatsapp-webhook-verify.service.ts`** — orchestrator:
+   - Ctor `(configService: WhatsappConfigService, verifyRepo: WhatsappWebhookVerifyRepository, pinger: WebhookPingerPort, logger: Logger)`.
+   - Direct imports: `import { WebhookVerificationError } from '@core/errors/app-errors.js'` (existing 422 class); no crypto in T11 (no secret handling — webhook_url is not secret).
+   - Method: `verifyForHotel(hotelId): Promise<WebhookVerificationDomain>`:
+     - PII-floor log (mask webhook URL? No — URL is NOT a secret; it's a public endpoint by design. Log unmasked with hotelId).
+     - Fetch config via `configService.getForHotel(hotelId)` → `NotFoundError` if not configured (from T10) — propagate.
+     - Call `pinger.ping({ url: config.webhookUrl })`.
+     - If reachable: `now = new Date()` → `verifyRepo.markVerified(hotelId, now)` → return `{ hotelId, verified: true, verifiedAt: now, outcome: 'verified', statusCode }`.
+     - If not reachable: return `{ hotelId, verified: false, verifiedAt: null, outcome: 'unreachable', statusCode? }` — service returns the outcome; route layer at T11-followup maps to `WebhookVerificationError` (422) response. **My primitive does NOT throw for unreachable** — service returns a rich outcome; the future route decides the HTTP response.
+   - Alternative: service throws `WebhookVerificationError` on unreachable (simpler for route). **Default: return outcome** (richer for logging + future retries).
+7. **`whatsapp-webhook-verify.schema.test.ts`** — zod parse happy/fail for response shape.
+8. **`whatsapp-webhook-verify.repository.test.ts`** — Prisma-mock stopgap (T10-a2 precedent): assert `db.waConfig.update({ where, data })` call shape. Docstring declares stopgap → T11-INTEG follow-up.
+9. **`whatsapp-webhook-verify.service.test.ts`** — mock all 3 boundaries (config service, verify repo, pinger port), + logger spy:
+   - Happy path: pinger returns reachable → repo.markVerified called → return `verified: true`.
+   - Unreachable: pinger returns `{ reachable: false }` → repo.markVerified NOT called → return `verified: false, outcome: 'unreachable'`.
+   - `NotFoundError` from configService propagates (hotel has no `wa_configs` row).
+   - PII-floor log includes hotelId + outcome only; assert `JSON.stringify` does not contain… well, T11 primitive has no plaintext secrets to leak. PII floor test asserts log DOES contain the outcome + hotelId shape (positive assertion, since there's no secret to protect).
+   - Log-before-repo-write ordering test (`events: ['log', 'ping', 'markVerified']`).
+10. **`http-webhook-pinger.adapter.test.ts`** — narrow `HttpPoster` mock via jest.fn:
+    - 200 response → `{ reachable: true, statusCode: 200 }`.
+    - 500 response → `{ reachable: false, statusCode: 500 }`.
+    - Network reject → `{ reachable: false, statusCode: undefined }`.
+    - Verify URL exact + no auth header (webhook_url is public; no bearer token).
+11. **`src/modules/whatsapp/index.ts`** — append T11 exports (types, schemas, service class, repo class, pinger port interface). No adapter export (T06 discipline).
+12. `make check` → drift scans → coverage → SUBMIT.
+
+**Security floor** (CLAUDE §6):
+- No secrets in T11 — `webhook_url` is a public endpoint by design. No masking needed for URL in logs.
+- No hardcoded URLs (all via `WhatsappConfigService.getForHotel` at runtime).
+- No `throw new Error` — service uses existing `WebhookVerificationError` (422) OR returns outcome; adapter returns result object.
+
+**Deferred (out of T11 primitive, tracked as follow-ups)**
+
+- **T11-followup** — route `POST /api/integrations/whatsapp/verify-webhook` + Fastify handler + `gm_admin` session guard + `hotel_id` derivation from session. Blocked on Q-C-02 (`api.ts` bootstrap + zod↔Fastify shim) + Q-C-03 (JWT plugin + gm_admin RBAC).
+- **T11-INTEG** — real-DB integration test for the `verified_at` update (testcontainers Postgres). Blocked on Q-C-01 (prisma singleton).
+
+**GAPs / questions** (blocking PM B ACK before I write any code)
+
+- **GAP T11-#1 — Ping semantics: reachability GET vs Meta subscription challenge simulation**: Spec §2.2 L45 says "pings the configured URL to confirm reachable" — the word "reachable" strongly suggests **simple reachability**. But Meta's canonical webhook verification uses a specific GET challenge: `GET webhook_url?hub.mode=subscribe&hub.verify_token=<stored>&hub.challenge=<random>`, expecting the hotel to echo the challenge in the body IF hub.verify_token matches `wa_configs.webhook_verify_token`. **Options**: A) simple GET, any 2xx = verified [my default — matches "reachable" spec wording; simpler + no plaintext-token accessor needed] · B) Meta challenge simulation — GET with hub params, expect challenge echo in body [more thorough — proves the hotel endpoint correctly implements Meta's subscription protocol; requires plaintext `webhook_verify_token`, see GAP #3] · C) POST test payload — unusual, spec doesn't hint at it.
+- **GAP T11-#2 — `verified_at` update repository placement**: T10's `WhatsappConfigRepository` has `findByHotelId` + `upsert` only; T10 primitive is byte-for-byte protected per T10-a2 discipline. **Options**: A) **NEW file** `whatsapp-webhook-verify.repository.ts` with single `markVerified(hotelId, verifiedAt)` method — preserves T10 byte-for-byte, follows T10-a2 precedent [my default] · B) extend T10's `WhatsappConfigRepository` with `markVerified` — cleaner conceptually but MUTATES T10 (protected — sets a precedent for eroding byte-for-byte discipline) · C) service does Prisma call directly, skipping repository — violates MODULE_TEMPLATE convention.
+- **GAP T11-#3 — Plaintext `webhook_verify_token` accessor (only relevant if GAP #1 = B)**: T10 domain masks `webhookVerifyToken` in `WhatsappConfigService.getForHotel` output. If GAP #1 resolves to B (Meta challenge), T11 needs plaintext access. **Options**: A) T11 repo (per GAP #2 A) adds a `findWebhookVerifyTokenPlaintext(hotelId)` method that reads the raw row directly — safe (same-module, purpose-specific, still logged with mask if surfaced) · B) extend T10 service with an unmasked accessor `getRawForVerify(hotelId)` — MUTATES T10 (protected) · C) direct Prisma in service. **Moot if GAP #1 = A** (my default), no plaintext needed.
+- **GAP T11-#4 — Primitive scope depth**: **Options**: A) my proposed 10 files (6 source + 4 tests) — matches T16 modified-B envelope (which was 9 files; T11 has one extra file due to the verify-repo per GAP #2) [my default] · B) narrower 8 files: drop adapter + adapter test — service uses mocked port only. Adapter deferred to T11-followup. **Considered but not preferred** — pinger adapter is a spec-known surface (any-2xx=reachable) with no undefined dependencies (unlike T16's HC callback which had 3 undefined deps → deferred). No reason to defer · C) even narrower — same as T17-a1 shape (port+adapter only). Too narrow, misses AC.
+- **GAP T11-#5 — Adapter method surface**: T06 `HttpPoster` has only `post`. T16 adds `patch` + `delete`. T11 pinger needs `get`. Options: A) re-declare narrow `HttpPoster` inline with just `get<T>(url, opts?): Promise<{data, status}>` [my default — matches T06/T16 discipline] · B) unify all three modules' `HttpPoster` in a shared file — cross-primitive change, mutates T06 territory · C) name the interface differently (e.g., `HttpGetter`) to signal narrowness — cosmetic, doesn't change substance.
+- **GAP T11-#6 — Q-A-04 (WA `app_secret`) relevance to T11**: My read is **N/A**. Q-A-04 gap concerns HMAC signature verification of INBOUND Meta callbacks (POST /webhook/whatsapp/:hotel_slug at T12) via `X-Hub-Signature-256` signed with app_secret. T11 does the OPPOSITE direction (us → hotel URL, no signature, no auth header — the webhook_url is public by design). **Please confirm my read: T11 primitive does NOT depend on Q-A-04**. If PM disagrees, T11 blocks.
+- **GAP T11-#7 — Service returns outcome vs throws on unreachable**: **Options**: A) service returns rich `WebhookVerificationDomain` with `verified: false, outcome: 'unreachable'` on failure — router layer at T11-followup maps to `WebhookVerificationError` (422) response [my default — richer for logging, retry hooks, future health-badge integration] · B) service throws `WebhookVerificationError` directly — simpler for router but loses richer outcome typing.
+
+Awaiting PM B ACK on GAPs #1–#7 (esp. #1 ping semantics + #2 repo placement + #4 scope depth) before writing any code.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
