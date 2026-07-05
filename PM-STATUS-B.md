@@ -1878,6 +1878,133 @@ Requesting PM B VERDICT.
 
 **Next expected action**: Executor B open PR on `feat/wa-webhook-ingest` for PO merge review; PM B re-verify on CI green post-PR (per T10/T11/T16 pre-merge discipline). **Slot B progress: 4/7 (T10 + T11 + T16 merged; T12 approved primitive)** · T13 (outbound dispatch — deps T06 + T09 merged, needs HC quota RPC contract) + T14 (retry queue — deps T07 + T13) + T15 (delivery receipts — deps T04 + T12 branch discrimination) backlog. T12-followup + T12-INTEG parked awaiting Q chain (Q-A-04 + Q-B-04/05/06 + Q-C-01/02).
 
+### ASSIGNMENT T15 — claimed by exec-B (Nanak) at H17 17:52
+- Branch: feat/wa-delivery-receipts (will branch off `main` before first `src/` commit; PLAN commit lands on `main`)
+- Routed from: PM-STATUS-B.md §8 queue (self-claim per EXECUTOR-PROTOCOL §3B — T04 + T12 both merged; T13 not yet started but its FK target `outbound_dispatch_queue` exists in schema per T02 so T15 primitive can build against the FK contract)
+
+#### PLAN T15 — exec-B (Nanak) at H17 17:52
+
+**Scope recap** (spec: `MVP §1.2 B7` + `§5 AC L121` + `docs/spec/04-integration-channels.md §2.3 §3.1 L106 §4.5 §4.6 §9`)
+
+T15 = **WA delivery receipts ingest** — 2nd branch handler of the shared `POST /webhook/whatsapp/:hotel_slug` endpoint (T12 = messages branch, T16 = template_status branch, this = statuses branch). Meta Cloud API sends status transitions (`sent | delivered | read | failed`) as `entry[].changes[].value.statuses[]` payloads. For each status entry:
+1. Correlate `status.id` → `outbound_dispatch_queue.external_id` → get `dispatch_id`
+2. Persist a `delivery_receipts` row with `{ dispatch_id, external_id, status, hotel_id, received_at }`
+3. Handle orphans (status.id not matching any outbound row — spoofed / late / from another system) per GAP #4
+
+**Critical DDL constraint** (§4.6 L263-272 + `prisma/schema.prisma:108-119`): `delivery_receipts.dispatch_id` is **`UUID NOT NULL REFERENCES outbound_dispatch_queue(id) ON DELETE CASCADE`** + `external_id VARCHAR(80) NOT NULL` + `status CHECK IN ('sent','delivered','read','failed')`. Correlation is MANDATORY before persist — orphan handling can't just insert with NULL FK.
+
+Following T12/T11/T16 modified-B discipline: **primitive only**. NO routes.ts, NO worker.ts, NO adapters (this is a receiver-only flow — no external HTTP callers). NO Prisma table added (both `outbound_dispatch_queue` + `delivery_receipts` are in T02). NO api.ts / plugins / T04 mutation. Sibling repository file for delivery_receipts writes + outbound_dispatch_queue reads (T10/T11/T12 sibling precedent).
+
+**Session-start gate** (EXECUTOR-PROTOCOL §2)
+- Identity confirmed: Executor, Slot B (Nanak) ✓
+- CLAUDE.md loaded ✓
+- Task spec read: `MVP §1.2 B7 L38` ("Delivery receipts ingest — part of B3 (WA Cloud sends receipts in same webhook stream)") + `§5 AC L121` ("WA outbound dispatched — receipt returned; `outbound_dispatch_queue` row shows `status: 'sent'`, `external_id` populated") ✓ · `04-integration-channels.md §2.3 L73` (webhook endpoint shared stream) + `§3.1 L106` ("Persists delivery receipt when WA Cloud webhook returns") + `§4.5 L245-257` (outbound_dispatch_queue DDL — `external_id VARCHAR(80) NULL` populated on send confirmation) + `§4.6 L263-272` (delivery_receipts DDL — critical NOT NULL FK constraint) + `§9` (error codes) ✓
+- Parent docs spot-read: `docs/MODULE_TEMPLATE.md` (standard CRUD-ish module variant, no ports since no external IO) · `src/plugins/hmac-validator.plugin.ts` T04 (secret-agnostic; router-layer concern) · `src/plugins/tenant-resolver.plugin.ts` T05 (router-layer) · `src/modules/whatsapp/whatsapp-webhook-ingest.schema.ts` T12 (envelope shape reference — `statuses` array optional in ChangeValueSchema; T15 handles that branch) · `src/modules/whatsapp/whatsapp-webhook-events.repository.ts` T12 (sibling repo pattern — 3 methods, no findByPayloadMessageId; same rigor for T15) · `src/modules/whatsapp/whatsapp-inbound-ingest.service.ts` T12 (2-leg pattern — but T15 has no async leg needed) · `prisma/schema.prisma:86-119` `OutboundDispatch` + `DeliveryReceipt` models — verified structural shape ✓
+- Dependencies check:
+  - T02 (Prisma init + `outbound_dispatch_queue` + `delivery_receipts`): MERGED ✓
+  - T04 (HMAC verify plugin): MERGED — router-layer concern (primitive signature-agnostic per T12 precedent)
+  - T05 (tenant resolver): MERGED — router-layer
+  - T09 (internal RPC auth): MERGED — not consumed (no outbound RPCs in T15)
+  - T10 (WA config primitive): MERGED — not consumed (no config lookup needed)
+  - T12 (WA inbound webhook ingest): MERGED — provides envelope schema reference + branch discrimination pattern. Router at T15-followup discriminates: `messages` → T12 service, `statuses` → T15 service, template branch → T16 service
+  - T13 (outbound dispatch): **NOT YET STARTED** — but its FK target `outbound_dispatch_queue.external_id` exists in schema per T02, so T15 primitive can build against the FK contract. T13's write of `external_id` on send confirmation is the correlation-source; T15's read completes the loop
+  - Q-C-01/02/03: **NOT blockers** for T15 primitive (no api.ts wiring, no session, no adapter wiring)
+  - Q-A-04: **N/A at primitive** — signature-agnostic per T12 precedent (T04 plugin at wiring)
+  - Q-B-04/05: N/A (no HC/AI RPC in T15 — receiver-only)
+  - Q-B-06 (webhook_events dedup schema-add): N/A for T15 (delivery_receipts semantics differ — see GAP #5)
+- `make typecheck`: PASS on `main` ✓ ; `make lint`: PASS on `main` ✓
+- Scaffolder risk: **none proposed** (no `pnpm add`, no schema change).
+
+**Files to create** (default proposal — see GAP #6 for scope-depth alternatives)
+
+```
+src/modules/whatsapp/whatsapp-delivery-receipts.types.ts
+src/modules/whatsapp/whatsapp-delivery-receipts.schema.ts
+src/modules/whatsapp/whatsapp-delivery-receipts.repository.ts
+src/modules/whatsapp/whatsapp-delivery-receipts.service.ts
+src/modules/whatsapp/__tests__/whatsapp-delivery-receipts.schema.test.ts
+src/modules/whatsapp/__tests__/whatsapp-delivery-receipts.repository.test.ts
+src/modules/whatsapp/__tests__/whatsapp-delivery-receipts.service.test.ts
+```
+
+**7 files** (4 source + 3 tests). Slimmer than T12 modified-B (9 files) because **NO ports needed** — T15 is a receiver-only flow with no external HTTP callers (no HC / no AI / no Meta call). Sibling repo owns both the outbound-dispatch read (correlation lookup) and the delivery-receipts write.
+
+**Files to modify** (1)
+
+- `src/modules/whatsapp/index.ts` — append T15 exports (types, schemas, repository class, service class). Preserve T06 (L1-7) + T10 (L9-18) + T16 (L20-44) + T11 (L46-56) + T12 (L58-79) blocks byte-for-byte.
+
+**Files explicitly NOT touched**
+
+- `prisma/schema.prisma`, `prisma/migrations/*` — both tables exist per §4.5/§4.6 DDL (T02)
+- `src/entrypoints/api.ts`, `src/entrypoints/worker.ts` — stubs (Q-C-02)
+- `src/core/prisma/prisma-client.ts` — stub (Q-C-01); repo imports `PrismaClient` type via `@prisma/client` (T10/T11/T12 precedent)
+- `src/plugins/*` (T04/T05/T09) — router-layer concerns
+- T06/T10/T11/T16/T12 primitives — byte-for-byte
+- `src/modules/telegram/*` — slot C
+- `src/modules/_template/*` — reference
+- `src/core/http/http-client.ts` — stub; NOT NEEDED (no outbound HTTP)
+- `package.json`, `pnpm-lock.yaml` — no dep add
+
+**Approach**
+
+No hexagonal ports required — T15 has no external IO (receiver-only). Coding order:
+
+1. **`whatsapp-delivery-receipts.types.ts`** — domain types:
+   - `DeliveryReceiptStatus = 'sent' | 'delivered' | 'read' | 'failed'` (matches DDL CHECK constraint)
+   - `WhatsappStatusEntry = { externalId, status, timestamp, recipientId? }` — normalized Meta shape (extracted from `entry[].changes[].value.statuses[]`)
+   - `DeliveryReceiptPersistenceInput = { hotelId, dispatchId, externalId, status }` — write shape
+   - `DeliveryReceiptIngestOutcome = { externalId, status, dispatched: boolean, error?: string }` — per-status result
+   - `WhatsappDeliveryReceiptsIngestResult = { receipts: DeliveryReceiptIngestOutcome[], orphanCount: number }` — service return shape
+2. **`whatsapp-delivery-receipts.schema.ts`** — zod for Meta statuses envelope + normalizer:
+   - `WhatsappDeliveryStatusesEnvelopeSchema` — subset of T12's envelope (only `.value.statuses` branch); passthrough for spec drift on inner fields per T12 pattern
+   - `extractStatuses(envelope): WhatsappStatusEntry[]` — pure helper. Skips non-status branches (returns `[]` for messages-only envelopes → T12 concern)
+   - Response envelope for wire contract (T15-followup router)
+3. **`whatsapp-delivery-receipts.repository.ts`** — sibling to T10/T11/T12. Class `WhatsappDeliveryReceiptsRepository(private readonly db: PrismaClient)`. **2 methods** (cross-table concern for correlation flow):
+   - `findDispatchByExternalId(hotelId: string, externalId: string): Promise<OutboundDispatch | null>` — READ on `outbound_dispatch_queue` for correlation. Filter by BOTH `hotelId` AND `externalId` (tenant guard). See GAP #1 on cross-table concern.
+   - `persist(input: DeliveryReceiptPersistenceInput): Promise<DeliveryReceipt>` — WRITE to `delivery_receipts` with FK-validated dispatchId. Prisma will throw on FK violation (caller responsibility to verify correlation first).
+4. **`whatsapp-delivery-receipts.service.ts`** — single-method sync orchestrator (no async worker leg needed — see GAP #3):
+   - `ingestStatuses(hotelId: string, envelope: unknown, signatureValid: boolean): Promise<WhatsappDeliveryReceiptsIngestResult>` — zod parse → extract statuses → per status: `findDispatchByExternalId` → if found: `persist`, if not: log warn + record orphan → return per-status outcomes + orphanCount
+   - Signature-agnostic (per T12 precedent — T04 plugin at router wiring)
+   - Throws ONLY `ValidationError` on schema fail
+   - Never throws for individual receipt persist failures (per-status outcome shape; worker-like discipline within the sync call)
+   - PII floor: `recipientId` masked via `maskWaPhone` in log
+5. **`__tests__/whatsapp-delivery-receipts.schema.test.ts`** — envelope parse: statuses-only, mixed messages+statuses (extract statuses branch only), empty statuses (messages-only), edge cases; extractStatuses normalization tests.
+6. **`__tests__/whatsapp-delivery-receipts.repository.test.ts`** — Prisma-mock stopgap. Assert call shapes for `findDispatchByExternalId` (with hotelId+externalId filter) + `persist`.
+7. **`__tests__/whatsapp-delivery-receipts.service.test.ts`** — mock repo + logger spy. Cases:
+   - Happy: 1 status found → persisted → outcome dispatched=true
+   - Orphan: externalId not in outbound_dispatch_queue → skip + log + orphanCount++
+   - Multi-status: mixed found+orphan → per-status outcomes reflect each
+   - Status transition sequence (sent → delivered → read of same externalId) — all persist (multi-row per external_id is expected per §4.6 DDL; delivery_receipts.external_id is NOT UNIQUE)
+   - Schema fail → ValidationError
+   - Repo persist fail on a single status → recorded as error in outcome, service continues with others (never throws)
+   - PII floor: recipientId masked in log
+   - `signatureValid` propagation (though delivery_receipts DDL has no signature_valid column; primitive logs it but doesn't persist)
+8. **`src/modules/whatsapp/index.ts`** — append T15 exports.
+9. `make check` → drift scans → coverage → SUBMIT.
+
+**Security floor** (CLAUDE §6):
+- `recipientId` (WA phone) masked via `maskWaPhone()` in logs (T10/T12 precedent)
+- No plaintext secrets in T15 (receiver-only)
+- No `throw new Error(` — schema fail → `ValidationError`; per-receipt persist fail → outcome error string
+- Tenant guard: correlation lookup filters by BOTH `hotelId` AND `externalId` (prevents cross-tenant orphan hijack)
+
+**Deferred (out of T15 primitive, tracked as follow-ups)**
+
+- **T15-followup** — router wiring for the `statuses` branch discrimination (piggyback on T12-followup router with the same signature verify at T04 wiring). Blocked on Q-A-04 (HMAC secret choice) + Q-C-02 (`api.ts` bootstrap + env config) + T12-followup router structure.
+- **T15-INTEG** — real-DB integration test with FK-populated `outbound_dispatch_queue` rows (testcontainers Postgres). Blocked on Q-C-01 + T13 (which populates outbound_dispatch_queue.external_id).
+
+**GAPs / questions** (blocking PM B ACK before I write any code)
+
+- **GAP T15-#1 — Repository cross-table concern (findDispatchByExternalId on outbound_dispatch_queue)**: `outbound_dispatch_queue` will be owned by T13 (WA outbound dispatch — not yet started in slot B queue). T15 needs to READ this table for the correlation lookup. **Options**: A) T15 repo owns the read of `outbound_dispatch_queue.external_id` — pragmatic; delivery-receipts concern legitimately spans both tables; T13 will not mutate this method's read shape when T13 lands (T13 writes external_id, T15 reads it) [my default] · B) Wait until T13 ships an `WhatsappOutboundDispatchRepository` with `findByExternalId` — blocks T15 primitive on T13 which isn't started + T13 assignment not yet on my queue · C) T15 service does direct Prisma read (skip repo layer for cross-table concern) — violates MODULE_TEMPLATE. **Prefer A** unless PM disagrees.
+- **GAP T15-#2 — `webhook_events` persistence responsibility**: Every webhook POST should produce a `webhook_events` audit row (per §4.7 persist-fast pattern). T12 service handles the messages branch and persists. **Question**: does T15 also persist to webhook_events, or does the router (at T15-followup) persist ONCE per POST before branch discrimination? **Options**: A) Router persists webhook_events once via T12's `WhatsappWebhookEventsRepository.persist`; T15 service ONLY handles delivery_receipts writes — matches T12 division of labor; router at T15-followup calls both T12's persist (audit) AND T15's ingestStatuses [my default] · B) T15 service also persists webhook_events (redundant with router path) · C) T15 doesn't touch webhook_events (delivery_receipts is standalone audit).
+- **GAP T15-#3 — Async worker leg needed for T15?**: T12 has 2 legs (sync persist + async HC/AI RPC). T15 has no external RPCs (receiver-only). **Options**: A) NO async leg — sync `ingestStatuses` does the full flow (extract + correlate + persist per status); returns synchronously; router calls once per POST [my default] · B) YES — deferred HC callback to update ticket status when message read/failed (spec §3.1 doesn't mandate this for MVP) · C) File as T15-followup extension.
+- **GAP T15-#4 — Correlation orphan handling (externalId not in outbound_dispatch_queue)**: Cannot persist to `delivery_receipts` with NULL FK (DDL constraint). **Options**: A) Skip the orphan status entry + log warn + record `orphanCount` in service return; continue processing remaining statuses [my default; worker-discipline for late/spoofed/foreign receipts] · B) Fail the entire request on any orphan (Meta will retry — but same orphan will re-fail forever) · C) Store in a limbo `pending_receipts` table (out of MVP scope).
+- **GAP T15-#5 — Idempotency for delivery_receipts (Q-B-06 extension?)**: Unlike T12's `webhook_events` (1 row per POST), `delivery_receipts` NATURALLY allows multiple rows per `external_id` — status progression `sent → delivered → read` produces 3 rows for the same message. So Q-B-06 (webhook_events.external_id dedup) doesn't apply. But Meta CAN retry the SAME status (network timeout) → producing duplicate `(dispatch_id, external_id, status)` triples. **Options**: A) Accept multi-row per triple in primitive; dedup handled at T15-followup with UNIQUE index migration (Q-B-07 potential) [my default; matches spec's "delivery_receipts_status_check" as only constraint] · B) Compute synthetic dedup key at runtime · C) Block on Q-B-06/Q-B-07.
+- **GAP T15-#6 — Primitive scope depth**: T12 modified-B envelope is 9 files with 2 type-only ports. T15 has no ports (receiver-only) → simpler shape. **Options**: A) 7 files (4 source + 3 tests) — matches T12 minus the 2 ports [my default] · B) 9 files including ports (invented HC callback for read-message-triggers-ticket-status — over-engineered) · C) 5 files (drop repo tests) — Prisma-mock stopgap questionable but PM has accepted 4× cross-primitive.
+- **GAP T15-#7 — Barrel discipline confirmation** (informational, not a blocker): T15 has NO adapter files (receiver-only), so `no-restricted-imports` `**/adapters/*` rule is moot. Barrel additive with types + schemas + repo class + service class. 6th cross-primitive confirmation of the T06 barrel pattern (T10, T16, T11, T12 all preserve; T15 continues).
+
+Awaiting PM B ACK on GAPs #1–#7 (esp. #1 cross-table repo, #4 orphan handling, #6 scope) before writing any code.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
