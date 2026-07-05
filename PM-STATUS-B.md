@@ -2786,6 +2786,137 @@ Initial schema used `z.object().refine(exactly-one-of-body-template)` → servic
 
 **Next expected action**: Executor B open PR on `feat/wa-outbound-dispatch` for PO merge review; **PR SHOULD squash-merge per PR #14/#15 CLAUDE §12 precedent** (3rd consecutive squash). PM B re-verify on CI green post-PR. **Slot B progress: 6/7 = 86%** (T10 + T11 + T16 + T12 + T15 merged; T13 approved). **Only T14 (retry queue) remaining** — deps T07 + T13 both approved/merged, no cross-service contracts blocking. Slot B home stretch.
 
+### ASSIGNMENT T14 — claimed by exec-B (Nanak) at H18 22:29
+- Branch: feat/wa-outbound-retry (will branch off `main` before first `src/` commit; PLAN commit lands on `main`)
+- Routed from: PM-STATUS-B.md §8 queue (self-claim per EXECUTOR-PROTOCOL §3B — **LAST slot B task** to bring 7/7 = 100%; T07 Bull factory + T13 outbound dispatch both merged; ZERO cross-service Q blockers)
+
+#### PLAN T14 — exec-B (Nanak) at H18 22:29
+
+**Scope recap** (spec: `MVP §1.2 B6 L37` + `§4.9 L106` + `§5 AC L131` + `docs/spec/04-integration-channels.md §4.5 §7 L340-346 §9`)
+
+T14 = **WA outbound retry queue** — 3 attempts with exponential backoff (**1s, 5s, 30s** per §4.9 L106 VERBATIM) for T13 `meta_failed` outcomes; permanent-fail for quota / template-not-approved / auth failures. **T07 Bull factory already provides** `RETRY_BACKOFF_DELAYS_MS = [1000, 5000, 30000]` + `DEFAULT_JOB_ATTEMPTS = 3` + `INTEGRATION_BACKOFF_STRATEGY` + DLQ pattern + `createQueue<T>()` factory — spec constants baked into T07 primitive. T14 is the CLASSIFIER + PRODUCER on top of T07 infrastructure.
+
+Flow (spec §3.1 continuation from T13):
+1. T13 returns `{ kind: 'meta_failed', dispatchId, status?, body? }` to caller
+2. Caller (T13-followup RPC receiver / worker at T14-followup) invokes T14's `scheduleRetryFromMetaFailure(dispatchId, outcome)`
+3. T14 **classifies** the failure: retryable (5xx / network / undefined status) vs permanent (4xx / auth / template rejected / quota exhausted at Meta layer)
+4. Retryable → enqueue Bull job via `RetryQueuePort.enqueueRetry(...)` (T07 factory wraps this with spec-defined backoff); T14 repo `markRetryScheduled(dispatchId, attemptNumber)` bumps `outbound_dispatch_queue.attempts` counter for audit
+5. Permanent → T14 repo `markPermanentFail(dispatchId, lastError)` sets status='failed'; no enqueue
+
+Discriminated union outcome (T15 + T13 precedent extended):
+```ts
+type RetryScheduleOutcome =
+  | { kind: 'scheduled'; attemptNumber: number; jobId: string }
+  | { kind: 'permanent'; reason: PermanentFailReason }
+```
+Where `PermanentFailReason = 'auth_failed' | 'template_rejected' | 'quota_exhausted' | 'bad_request'` (variants per GAP #2 classification rules).
+
+Following T13/T15 modified-B discipline: **primitive only**. NO Bull worker registration (T14-followup — needs entrypoint + Redis wiring), NO routes, NO adapters. `RetryQueuePort` TYPE-ONLY (Bull adapter deferred to T14-followup with T07 helpers wired). Sibling repository file for retry-scheduling mutations (preserves T13's `WhatsappOutboundDispatchRepository` byte-for-byte per PM ACK repo-preservation norm).
+
+**Session-start gate** (EXECUTOR-PROTOCOL §2)
+- Identity confirmed: Executor, Slot B (Nanak) ✓
+- CLAUDE.md loaded ✓
+- Task spec read: `MVP §1.2 B6 L37` (B6 retry queue capability), `§4.9 L106` (retry policy VERBATIM constants), `§5 AC L131` (retry behavior AC) ✓ · `04-integration-channels.md §4.5 L245-257` (outbound_dispatch_queue DDL — `attempts INTEGER DEFAULT 0` + `last_error JSON?`), `§7 L340-346` (retry strategy detail: 3 retries 1s/5s/30s, exhaustion → status='failed' + log to last_error, optional `dead` after stale period per GAP #4), `§9` (error codes: 429 RATE_LIMIT + 502 THIRD_PARTY_UNREACHABLE) ✓
+- Parent docs spot-read: `src/core/queue/bull-factory.ts` T07 (verified: `RETRY_BACKOFF_DELAYS_MS = [1000,5000,30000]` + `DEFAULT_JOB_ATTEMPTS = 3` + `integrationBackoffStrategy` + `queueName('whatsapp', 'dispatch')` + `createQueue<T>()` + `attachDeadLetterForwarder()` — spec constants + DLQ pattern already primitives) · `src/modules/whatsapp/whatsapp-outbound-dispatch.types.ts` T13 (verified: `meta_failed` outcome shape with `dispatchId + status? + body?` — T14 input) · `src/modules/whatsapp/whatsapp-outbound-dispatch.schema.ts` T13 (verified: `z.union` INPUT-layer pattern — T14 will mirror for permanent-vs-retryable classification) · `src/modules/whatsapp/whatsapp-outbound-dispatch.repository.ts` T13 (verified: byte-for-byte protected; T14 uses sibling pattern for retry-scheduling mutations — mirrors T13's discipline of preserving prior primitives) ✓
+- Dependencies check:
+  - T02 (Prisma init + `outbound_dispatch_queue` `attempts` + `last_error` columns): MERGED ✓
+  - T07 (Bull factory + spec constants + DLQ pattern): MERGED — CONSUMED via `RetryQueuePort` adapter at T14-followup
+  - T13 (outbound dispatch primitive with `meta_failed` outcome): MERGED (`688a102` PR #16 SQUASH) — T14 consumes the outcome shape as input contract
+  - T09 (internal RPC auth): MERGED — router-layer T14-followup concern
+  - Q-A-04 / Q-B-04/05/06/07/08/09 / Q-C-01/02/03: **ZERO Q blockers for T14 primitive** — retry queue is receiver-side of T13's outcome; no cross-service RPCs, no adapters, no session
+- `make typecheck`: PASS on `main` ✓ ; `make lint`: PASS on `main` ✓
+- Scaffolder risk: **none proposed**. No `pnpm add`, no schema change (columns exist).
+
+**Files to create** (default proposal — see GAP #8 for scope-depth alternatives; matches T13 minus one port = 8 files)
+
+```
+src/modules/whatsapp/whatsapp-outbound-retry.types.ts
+src/modules/whatsapp/whatsapp-outbound-retry.schema.ts
+src/modules/whatsapp/whatsapp-outbound-retry.repository.ts
+src/modules/whatsapp/whatsapp-outbound-retry.service.ts
+src/modules/whatsapp/ports/retry-queue.port.ts
+src/modules/whatsapp/__tests__/whatsapp-outbound-retry.schema.test.ts
+src/modules/whatsapp/__tests__/whatsapp-outbound-retry.repository.test.ts
+src/modules/whatsapp/__tests__/whatsapp-outbound-retry.service.test.ts
+```
+
+**8 files** (4 source + 1 TYPE-ONLY port + 3 tests). Slimmer than T13's 9 files because only ONE port needed (Bull queue producer — HC quota/DND were 2 distinct RPCs; T14 has one Bull surface).
+
+**Files to modify** (1)
+
+- `src/modules/whatsapp/index.ts` — append T14 exports. Preserve T06 (L1-7) + T10 (L9-18) + T16 (L20-44) + T11 (L46-56) + T12 (L58-79) + T15 (L81-95) + T13 (L97-114) blocks byte-for-byte.
+
+**Files explicitly NOT touched**
+
+- `prisma/schema.prisma`, `prisma/migrations/*` — `attempts` + `last_error` columns exist per §4.5 (T02)
+- `src/entrypoints/api.ts`, `src/entrypoints/worker.ts` — stubs (Q-C-02); Bull worker registration = T14-followup
+- `src/core/prisma/prisma-client.ts`, `src/core/http/http-client.ts`, `src/core/queue/bull-factory.ts` T07 (**CONSUMED not mutated** — T14 uses T07 constants + factory at T14-followup adapter wiring; primitive may import `RETRY_BACKOFF_DELAYS_MS` + `DEFAULT_JOB_ATTEMPTS` as read-only reference if needed)
+- `src/plugins/*` (T04/T05/T09) — router-layer concerns
+- T06/T10/T11/T12/T13/T15/T16 primitive files — byte-for-byte
+- `src/modules/telegram/*`, `src/modules/_template/*`, `package.json`/`pnpm-lock.yaml`
+
+**Approach**
+
+Coding order:
+
+1. **`whatsapp-outbound-retry.types.ts`** — domain types:
+   - `PermanentFailReason = 'auth_failed' | 'template_rejected' | 'quota_exhausted' | 'bad_request'` (per §4.9 wording + GAP #2 classification)
+   - `RetryClassification = 'retryable' | 'permanent'`
+   - `RetryJobData = { dispatchId, hotelId, attemptNumber }` (Bull job payload — minimal per T07 factory docstring "job data carries minimal context (ids + correlation id) — processors hydrate from DB")
+   - `RetryScheduleOutcome` — discriminated union (`scheduled { attemptNumber, jobId }` | `permanent { reason }`)
+   - Q-B assumption stamps: NONE (T14 has zero cross-service Q dependencies)
+2. **`whatsapp-outbound-retry.schema.ts`** — **z.union INPUT-layer pattern** (T13 precedent extended):
+   - Schema validates the T13 `meta_failed` outcome shape as input; classification is a runtime helper (see GAP #7 for pure-function vs z.union discussion)
+   - `MetaFailureInputSchema = z.object({ dispatchId: z.string().uuid(), status: z.number().int().optional(), body: z.unknown().optional() }).strict()`
+   - Pure function `classifyFailure(input): RetryClassification` — spec-driven status-code table per GAP #2
+3. **`whatsapp-outbound-retry.repository.ts`** — sibling. **EXACTLY 2 methods** (T15 slimmer envelope precedent):
+   - `markRetryScheduled(dispatchId, attemptNumber)` — updates `outbound_dispatch_queue.attempts` (audit trail; Bull manages its own attemptsMade counter separately)
+   - `markPermanentFail(dispatchId, lastError)` — updates `status='failed'` + `last_error JSON`
+4. **`whatsapp-outbound-retry.service.ts`** — orchestrator. Ctor `(repo, retryQueuePort, logger)` — 3 deps. Direct import `classifyFailure` from schema layer. Method `scheduleRetryFromMetaFailure(input): Promise<RetryScheduleOutcome>`:
+   - Parse via schema → throws `ValidationError` on fail
+   - Classify via pure function
+   - If `permanent` OR `attemptsMade + 1 >= 3` (spec §4.9): `repo.markPermanentFail(...)` + return `{kind: 'permanent', reason}`
+   - Otherwise: `retryQueuePort.enqueueRetry({dispatchId, hotelId, attemptNumber})` + `repo.markRetryScheduled(dispatchId, attemptNumber)` + return `{kind: 'scheduled', attemptNumber, jobId}`
+   - Never throws for external failures (worker discipline — T13/T15/T12 precedent)
+   - PII floor: no phone/token in retry job data (minimal payload per T07 factory docstring); log dispatchId + hotelId + attemptNumber only
+5. **`ports/retry-queue.port.ts`** — TYPE-ONLY (Bull adapter deferred):
+   ```
+   interface RetryQueuePort {
+     enqueueRetry(input: RetryJobData): Promise<{ jobId: string }>;
+   }
+   ```
+6. **Tests** — 3 files, mock all boundaries:
+   - Schema: classifyFailure happy paths (5xx retryable, 4xx permanent, undefined status retryable, 429 permanent per Meta rate-limit spec)
+   - Repository: 2-method call-shape (T13 Prisma-mock stopgap precedent)
+   - Service: classification + attempt-cap enforcement (attemptsMade < 2 + retryable = schedule; attemptsMade + 1 >= 3 = permanent regardless) + queue enqueue success/failure never throws + repo failure never throws (worker discipline) + PII floor (no phone in log) + `ValidationError` on schema-parse
+7. **`src/modules/whatsapp/index.ts`** — append T14 exports.
+8. `make check` → drift scans → coverage → SUBMIT.
+
+**Security floor** (CLAUDE §6):
+- Retry job data payload contains dispatchId + hotelId + attemptNumber ONLY — no phone/token/body (T07 factory docstring mandates minimal payload; processor hydrates from DB)
+- No plaintext secrets (retry primitive has no external HTTP)
+- No `throw new Error(` — service throws only `ValidationError`; never throws for queue/repo failures
+- Tenant guard: `markRetryScheduled` + `markPermanentFail` filter by `dispatchId` (PK); dispatch row's own `hotelId` provides tenant isolation
+
+**Deferred (out of T14 primitive, tracked as follow-ups)**
+
+- **T14-followup** — Bull queue creation via T07 `createQueue<RetryJobData>({ name: queueName('whatsapp', 'dispatch'), redis, jobOptions })` + Bull processor registration via `registerProcessor()` that calls T13's `WhatsappOutboundDispatchService.dispatchMessage(...)` on retry + DLQ forwarder via `attachDeadLetterForwarder()` + `HttpRetryQueueAdapter` wrapping `queue.add()`. Blocked on Q-C-02 (worker.ts bootstrap + env config for Redis).
+- **T14-INTEG** — real-Redis Bull job execution + retry backoff timing verification (testcontainers Redis). Blocked on Q-C-01 + T14-followup.
+
+**GAPs / questions** (blocking PM B ACK before I write any code)
+
+- **GAP T14-#1 — Retry execution semantics: producer-only vs producer+worker**: MVP §4.9 mandates 3 attempts + backoff. **Options**: A) T14 primitive = PRODUCER + CLASSIFIER ONLY; Bull auto-retries via T07-baked config (attempts=3, backoff strategy 'integration'); worker execution logic (that calls T13.dispatchMessage on each retry) is T14-followup [my default; matches T07's `DEFAULT_JOB_ATTEMPTS = 3` design] · B) T14 primitive includes worker handler that re-calls T13 → circular dep + needs `WhatsappOutboundDispatchService` in ctor (breaks 3-dep minimalism) · C) T14 self-contained retry logic (skip DND/quota re-check, only re-call BSP) — violates spec §3.1 flow discipline.
+- **GAP T14-#2 — Permanent-fail classification rules**: Spec §4.9 says "Quota / template-not-approved failures are PERMANENT". Meta returns various status codes. **Options**: A) Classify: `status === undefined` → retryable (network) · `status >= 500` → retryable · `status === 429` → permanent (Meta rate-limit ~ quota) · `status in [401, 403]` → permanent (auth failed) · `status in [400, 422]` → permanent (template rejected / bad request) · other 4xx → permanent (fail-safe conservative) [my default; conservative — 5xx-only retry is standard REST pattern] · B) Retry ALL non-2xx once (aggressive retry — Meta rate-limit will trigger secondary permanent-fail) · C) File as Q-B-10 for HC/PO ratification of exact status-code table.
+- **GAP T14-#3 — Bull queue name convention**: T07 `queueName('whatsapp', 'dispatch')` → `'whatsapp:dispatch'`. **Options**: A) T14 retry jobs go on the SAME queue `'whatsapp:dispatch'` with a different Bull job NAME (e.g. `'dispatch-retry'` vs `'dispatch-initial'`) — Bull's `attempts + backoff` config applies queue-wide [my default; matches T07 factory queueName pattern] · B) Separate `'whatsapp:dispatch-retry'` queue — cleaner separation but doubles queue count · C) File as GAP with T07 author.
+- **GAP T14-#4 — `dead` status semantics**: Spec §7 L345 mentions "Optionally also `status: 'dead'` after stale period". Spec-optional. **Options**: A) NOT in T14 primitive — Bull's DLQ pattern (T07 `attachDeadLetterForwarder`) handles exhausted jobs; DB status stays `failed` [my default; matches T07 primitive design] · B) T14 adds `markDead(dispatchId)` method + tracks stale-period timer — over-engineered for MVP · C) File as T14-followup.
+- **GAP T14-#5 — Repository methods count**: **Options**: A) 2 methods (`markRetryScheduled` + `markPermanentFail`) [my default; matches T15 minimal envelope] · B) 3 methods (add `markDead` per §7) — over-scoped · C) 4 methods (add `getCurrentAttempts(dispatchId)` for classifier) — but service can accept `attemptsMade` as input from caller who already knows it.
+- **GAP T14-#6 — Discriminated union outcome variants**: **Options**: A) 2 variants (`scheduled | permanent`) — minimal [my default] · B) 3 variants (add `exhausted { finalAttempt: 3 }` — but this is a subset of `permanent`; exhaustion means "we tried 3 times so permanent" — subsumed by `permanent { reason: 'exhausted' }`) · C) 4 variants (add `already_permanent` for when caller retries an already-permanent-flagged dispatch — but that's an idempotency concern, not a shape concern).
+- **GAP T14-#7 — z.union INPUT-layer classification pattern (T13 precedent)**: T13 introduced `z.union([TextRequest, TemplateRequest])` for input discrimination at the type level. T14 could analogously use `z.union([RetryableInput, PermanentInput])`. **Options**: A) Pure classifier function `classifyFailure(status?: number, body?: unknown): 'retryable' | 'permanent'` — schema validates the T13 outcome INPUT shape as unified, classification is a runtime helper [my default; classification depends on multiple factors that don't cleanly discriminate at zod level] · B) True z.union with `.refine` guards on status ranges — over-complex zod usage · C) Discriminated union at TypeScript type level (not zod) with tag `kind: 'retryable' | 'permanent'` provided by caller — but caller doesn't know classification; that's T14's job.
+- **GAP T14-#8 — Primitive scope depth**: **Options**: A) 8 files (4 source + 1 type-only port + 3 tests) — matches T13 minus 1 port [my default; T14 has ONE Bull queue port, not 2 HC RPCs] · B) 9 files (add a `RetryClassifier` port for future strategy swap) — over-engineered · C) 7 files (drop RetryQueuePort — service takes `Bull.Queue<T>` directly) — couples primitive to Bull runtime, breaks T14-followup separation.
+- **GAP T14-#9 — RetryQueuePort abstraction shape**: **Options**: A) `enqueueRetry(input: RetryJobData): Promise<{ jobId: string }>` — minimal, Bull-agnostic [my default; T14-followup adapter wraps `queue.add(jobName, data, opts)` returning `job.id`] · B) Include job options in signature (attempts override, delay override) — over-flexible; T07 factory bakes defaults · C) Include `enqueueInitialDispatch` too — mixes T14 with T13-followup queue-producer concern.
+
+Awaiting PM B ACK on GAPs #1–#9 (esp. #1 execution split, #2 classification rules, #7 z.union pattern) before writing any code.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
