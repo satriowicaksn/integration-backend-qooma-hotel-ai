@@ -77,3 +77,18 @@ export type {
   WebhookEventProvider,
   WhatsappInboundMessage,
 } from './whatsapp-webhook-ingest.types.js';
+
+export { WhatsappDeliveryReceiptsRepository } from './whatsapp-delivery-receipts.repository.js';
+export {
+  WhatsappDeliveryStatusesEnvelopeSchema,
+  extractStatuses,
+} from './whatsapp-delivery-receipts.schema.js';
+export type { WhatsappDeliveryStatusesEnvelopeDto } from './whatsapp-delivery-receipts.schema.js';
+export { WhatsappDeliveryReceiptsService } from './whatsapp-delivery-receipts.service.js';
+export type {
+  DeliveryReceiptIngestOutcome,
+  DeliveryReceiptPersistenceInput,
+  DeliveryReceiptStatus,
+  WhatsappDeliveryReceiptsIngestResult,
+  WhatsappStatusEntry,
+} from './whatsapp-delivery-receipts.types.js';
