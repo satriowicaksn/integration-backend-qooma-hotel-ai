@@ -835,6 +835,93 @@ Primitive can build under assumptions A/A/A above without waiting for resolution
 
 **No attempt-2 PLAN required** — GAP #7 explicitly offered variants for me to pick from; I picked (modified B, 9 files). Executor code directly per the 9-file inventory + Q-B-01/02/03 assumption stamps (binding #13) + adapter resubmit strategy documented (binding #14). Precedent: T17-a1 needed a re-PLAN because scope was invented; here scope was choose-from-menu, so we skip the re-PLAN round-trip.
 
+#### SUBMIT T16 — exec-B (Nanak) at H17 01:04 (attempt 1, narrow primitive per PM ACK modified-B)
+
+Task: T16 — WhatsApp template Meta relay **primitive** (types + schema + service + BSP template-management port + HC callback port TYPE-ONLY + 1engage template adapter). Narrow scope per PM ACK modified-B (9 files, HC callback adapter dropped to T16-followup). Branch: `feat/wa-template-relay` @ commit `1a5c20d`.
+
+Files changed: **10** (9 create + 1 modify) — **1307 insertions** total (1281 new-file LOC + 26 net barrel delta).
+- `src/modules/whatsapp/whatsapp-template.types.ts` (new, 75 LOC — post-prettier from 80)
+- `src/modules/whatsapp/whatsapp-template.schema.ts` (new, 79 LOC)
+- `src/modules/whatsapp/whatsapp-template.service.ts` (new, 166 LOC — post-prettier from 169)
+- `src/modules/whatsapp/ports/whatsapp-template-management.port.ts` (new, 23 LOC)
+- `src/modules/whatsapp/ports/hotel-core-template-callback.port.ts` (new, 19 LOC — **TYPE-ONLY**, no adapter this attempt)
+- `src/modules/whatsapp/adapters/1engage-template.adapter.ts` (new, 189 LOC)
+- `src/modules/whatsapp/__tests__/whatsapp-template.schema.test.ts` (new, 185 LOC, 18 tests)
+- `src/modules/whatsapp/__tests__/whatsapp-template.service.test.ts` (new, 297 LOC — post-prettier from 293, 17 tests)
+- `src/modules/whatsapp/__tests__/1engage-template.adapter.test.ts` (new, 248 LOC, 13 tests)
+- `src/modules/whatsapp/index.ts` (modified, +26 net) — barrel additive; T06 BSP re-export block (L1-7) + T10 config exports (L9-18) byte-for-byte preserved
+
+DoD self-check — **all 14 ACK binding conditions**:
+- [x] **#1 `make check` PASS end-to-end** — lint 0/0 (`--max-warnings 0`), format-check clean, typecheck strict + `exactOptionalPropertyTypes`, test-unit 18/20 suites 184/186 tests (2 pre-existing `_template/*` baseline skips). PM B rerun invited.
+- [x] **#2 Drift scans 0 hits on module scope** across all 6 EXECUTOR §4.4 categories. Pre-existing baseline hits confined to `_template/*` + `core/config/env.ts` + `core/http/http-client.ts` (all in PLAN §Files-NOT-touched). Detail in §Drift scans.
+- [x] **#3 Coverage 100% stmt/branch/func/line** on 3 runtime files: `whatsapp-template.schema.ts`, `whatsapp-template.service.ts`, `adapters/1engage-template.adapter.ts`. Type-only files (`whatsapp-template.types.ts` + 2 port files) erased at compile per ts-jest — matches ACK #3 caveat. See §Test evidence.
+- [x] **#4 PII-floor log test present** — `whatsapp-template.service.test.ts:117-134` "should NEVER include the plaintext accessToken in the log payload (PII floor)": asserts `JSON.stringify(logger.info.mock.calls[0]?.[0])` does not contain `PLAINTEXT_ACCESS_TOKEN`; logged `accessToken` field equals `maskTokenForLog(PLAINTEXT_ACCESS_TOKEN)`. Ordering test `:136-153` asserts `events: ['log', 'bsp']` — log fires BEFORE any external BSP call. Resubmit PII-floor test `:197-210` mirrors same shape.
+- [x] **#5 Direct helper imports only** — `whatsapp-template.service.ts:28` `import { maskTokenForLog } from '@shared/utils/masking.js';` at top; no ctor-inject. Ctor at `:50-54` = `(bspPort, hcCallback, logger)`.
+- [x] **#6 No `throw new Error(`** — 0 hits on module scope (drift scan #3 verified). Upstream Meta failures → `ExternalServiceError` with `service: '1engage-template'` (adapter L54). Upstream HC callback failures → `ExternalServiceError` with `service: 'hotel-core-template-callback'` (service `:159-163`). Schema-parse failures at boundary → `ValidationError` (service `:62`, `:97`, `:131`).
+- [x] **#7 Barrel additive-only** — `src/modules/whatsapp/index.ts:1-7` T06 BSP re-export block byte-for-byte preserved vs `main`; `:9-18` T10 config block byte-for-byte preserved. New T16 exports appended L20-45 only. `diff` against `main` = +26 additive.
+- [x] **#8 HC callback port TYPE-ONLY** — `ports/hotel-core-template-callback.port.ts` = 19 LOC total: docstring + single interface + type-only re-export from types.ts. NO adapter file. NO placeholder impl. NO adapter reference in any file (barrel doesn't re-export any adapter — `no-restricted-imports` rule blocks it, T06 discipline confirmed).
+- [x] **#9 `git diff --stat main..HEAD` scope-clean** — exactly 9 create + 1 modify. Zero touches to `api.ts`, `prisma-client.ts`, `core/http/http-client.ts`, `plugins/*`, `prisma/schema.prisma`, `prisma/migrations/*`, `package.json`, `pnpm-lock.yaml`, `_template/*`, `telegram/*`, T06 BSP port/adapter/tests, T10 whatsapp-config.*. `.gitignore` unchanged.
+- [x] **#10 `HttpPoster` re-declared inline** — `1engage-template.adapter.ts:38-42` declares narrow `HttpPoster` interface with `post` + `patch` + `delete` methods. Mirror of T06's `1engage.adapter.ts:19-21` pattern. Zero coupling to stubbed `core/http/http-client.ts`.
+- [x] **#11 Meta template CRUD hits `/{waba_id}/message_templates`** — adapter `:82-84` `collectionUrl(wabaId)` builds `${baseUrl}/${apiVersion}/${wabaId}/message_templates`. `:86-88` `itemUrl(wabaId, metaTemplateId)` appends `/${metaTemplateId}` for PATCH/DELETE. Test `1engage-template.adapter.test.ts:73` asserts full URL `https://graph.facebook.com/v18.0/9876543210/message_templates` (submit) + `:154` for item URL (PATCH). NOT `/messages` (T06's surface).
+- [x] **#12 `ExternalServiceError` service tag disambiguated** — adapter L54 `const SERVICE = '1engage-template';` (distinct from T06's `'1engage'`). Service `:160` uses `'hotel-core-template-callback'` for wrapped HC failures.
+- [x] **#13 Q-B-01/02/03 assumption stamps present** — `whatsapp-template.types.ts:1-17` docstring explicitly stamps A/A/A with refactor-when-Qs-resolve markers. `whatsapp-template.schema.ts:1-14` stamps Q-B-03. `ports/whatsapp-template-management.port.ts:1-12` stamps Q-B-01. `ports/hotel-core-template-callback.port.ts:1-14` stamps Q-B-02 defer-to-followup.
+- [x] **#14 Adapter `resubmit` strategy documented** — `1engage-template.adapter.ts:11-25` docstring explains PATCH-preferred + DELETE+POST fallback with 2023 Meta rationale + explicit branch handling ("template not editable in state APPROVED" example + spec §3.1 alignment). Test coverage: `1engage-template.adapter.test.ts:142-166` PATCH-success branch, `:169-199` PATCH-non-2xx→fallback branch, `:201-215` PATCH-network-reject→fallback branch, `:217-240` fallback-DELETE/POST failure branches.
+
+Quality gate
+- `make typecheck`: PASS (0 errors, strict + `exactOptionalPropertyTypes`)
+- `make lint`: PASS (0 errors, 0 warnings — `eslint . --max-warnings 0`)
+- `make format-check`: PASS (all matched files use Prettier code style)
+- `make test-unit`: PASS (18 of 20 suites, 184 of 186 tests — 2 pre-existing baseline skips in `_template/*`; my 3 new suites 48/48 pass)
+- `make check`: PASS end-to-end (concatenation of the above)
+
+Drift scans (all 6 EXECUTOR §4.4 categories — 0 hits on my T16 files)
+- `any` types: 0 (pre-existing 2 in `_template/*` untouched)
+- `console.log/info/debug`: 0 (repo-wide 0)
+- `throw new Error(` in `src/modules/` + `src/core/`: 0 in module scope (pre-existing 4 in `_template/_template.repository.ts:23`, `core/config/env.ts:75`, `core/http/http-client.ts:19,27` — all untouched)
+- Forbidden imports: 0 (repo-wide 0)
+- `^export default ` outside entrypoints/config: 0 (repo-wide 0)
+- `.skip(` in `*.test.ts`: 0 in module scope (pre-existing 2 in `_template/*` untouched)
+
+Security check (CLAUDE §6 + spec §4.1 + spec §4.11 + PM ACK security intent)
+- **`ExternalServiceError` with `{status, body}` for Meta failures** — adapter `:112-120` non-2xx wraps `{ status, body }`; `:122-128` missing-template-id wraps `{ status, body }`; `:141-144` + `:172-175` network errors wrap `{ body }`. Same envelope T06 uses.
+- **PII floor log with `maskTokenForLog` BEFORE any external call** — service `:68-79` (submit) + `:103-115` (resubmit) log lines fire before `bspPort.submitTemplate` / `bspPort.resubmitTemplate`. Ordering test verifies `events: ['log', 'bsp']`.
+- **Unit test asserts `JSON.stringify` no-plaintext** — verified per DoD #4 above.
+- **No plaintext token in any adapter call, response, or log** — adapter's `requestOptions(accessToken)` at `:90-97` uses token in `Authorization` header only (network-boundary requirement); log floor is service-layer above with masked values.
+- **No secret hardcoded** — Meta URL via `OneEngageTemplateConfig.baseUrl` injected at construction; `wabaId` per-call per Q-B-01 assumption A stamp (from HC RPC payload); `accessToken` per-call from HC RPC payload (assumption Q-B-03 A). No `wa_configs.access_token_enc` decrypt in primitive (that's T16-followup wiring concern).
+
+Test evidence
+- Unit: **48 tests, 3 suites** — `whatsapp-template.schema.test.ts` (18), `whatsapp-template.service.test.ts` (17), `1engage-template.adapter.test.ts` (13)
+- Integration: 0 — deferred as T16-INTEG follow-up (see §Follow-ups)
+- Coverage (jest, scoped to 4 runtime files):
+  ```
+  File                           | % Stmts | % Branch | % Funcs | % Lines
+  --------------------------------|---------|----------|---------|--------
+  All files                      |   100   |   100    |   100   |   100
+   whatsapp                      |   100   |   100    |   100   |   100
+    whatsapp-template.schema.ts  |   100   |   100    |   100   |   100
+    whatsapp-template.service.ts |   100   |   100    |   100   |   100
+   whatsapp/adapters             |   100   |   100    |   100   |   100
+    1engage-template.adapter.ts  |   100   |   100    |   100   |   100
+  ```
+  `whatsapp-template.types.ts` + `ports/whatsapp-template-management.port.ts` + `ports/hotel-core-template-callback.port.ts` — pure type declarations, erased at compile per ts-jest; not instrumented. Matches ACK #3 caveat.
+
+Notes / tolerated deviations / discipline discoveries
+- **Q-B-01/02/03 assumption stamps embedded** — `whatsapp-template.types.ts:1-17` (A/A/A summary with refactor markers), `whatsapp-template.schema.ts:1-14` (Q-B-03 stamp on schema), `ports/whatsapp-template-management.port.ts:1-12` (Q-B-01 stamp on `wabaId` per-call), `ports/hotel-core-template-callback.port.ts:1-14` (Q-B-02 defer-to-followup stamp). When PO/HC-team ratify Q-B-01/02/03, refactor sites are the stamped files — well-scoped.
+- **Adapter re-exports BLOCKED by `no-restricted-imports`** — discovery during self-validate round 1: initial barrel re-exported `create1engageTemplateAdapter` factory and adapter config types, which the `.eslintrc.cjs no-restricted-imports` rule blocks (`'**/adapters/*'` pattern). Removed; T06 discipline confirmed (barrel exposes port interfaces + service class only; adapters wired at entrypoint via direct `./adapters/1engage-template.adapter.js` import when Q-C-02 lands `api.ts` bootstrap). Barrel delta dropped from +32 to +26.
+- **HC callback adapter DROPPED** per PM ACK modified-B — filed as T16-followup below. Port kept as TYPE-ONLY interface.
+- **PATCH-preferred resubmit strategy documented + tests cover both branches** — adapter docstring `:11-25` + adapter test suite has 3 tests covering PATCH-success, PATCH-non-2xx→DELETE+POST-fallback, PATCH-network-reject→DELETE+POST-fallback + failure paths on the fallback DELETE/POST.
+- **Q-A-03 test-env workaround re-appearance** — NOT triggered in T16 service tests (no crypto/env dependency in primitive; ports mocked at class-shape level). No env stamping needed. Cross-slot pattern remains pending PM A resolution.
+- **Prettier collapse** — `types.ts` 80→75 LOC and `service.ts` 169→166 LOC net delta after `pnpm prettier --write`; semantic content identical (multi-line optional-property widening + verb-wrapper single-line collapse). No exports added/removed/renamed vs PLAN §Approach.
+- **Typecheck iteration — `exactOptionalPropertyTypes` mismatch** — round 3 of self-validate surfaced that my `WaTemplateComponent.text?: string` did not match zod-inferred `text?: string | undefined` under `strict` + `exactOptionalPropertyTypes: true`. Widened optional fields to `T | undefined`. Non-semantic, canonical fix.
+- **Comment false-positive in drift scan** — `1engage-template.adapter.ts` docstring originally read "Upstream failure translation: any non-2xx..." which matched `: any` regex. Reworded to "every non-2xx" — semantic identical, scan-clean.
+
+Q register / follow-ups
+- **No new Q filed** — Q-B-01, Q-B-02, Q-B-03 filed in PM B ACK (H17 2026-07-05) and mirrored to PARENT §3a per PM authority. §3 mirror rows carry the tracking. All three under active PO / HC-team / Nathan routing.
+- **T16-followup** — routes for HC-facing inbound RPC (`submit_wa_template_to_meta` + `resubmit_wa_template_to_meta`) + Meta webhook branch handler + HC callback adapter (`http-hotel-core-callback.adapter.ts` + its test). Blocked on Q-B-01 (waba_id resolution) + Q-B-02 (HC callback contract) + Q-B-03 (HC → us RPC payload) + Q-C-01 (`prisma-client.ts` singleton, if `wa_configs` needed) + Q-C-02 (`api.ts` bootstrap + env for `HC_BASE_URL` + `INTERNAL_SECRET`) + Q-A-04 (WA `app_secret` for Meta webhook HMAC verify at T12 router layer).
+- **T16-INTEG** — cross-service integration test with mock Meta gateway + mock HC server + internal-RPC test harness. Blocked on T16-followup + Q-C-01/02.
+
+Requesting PM B VERDICT.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
