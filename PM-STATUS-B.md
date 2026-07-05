@@ -1693,6 +1693,105 @@ src/modules/whatsapp/__tests__/whatsapp-inbound-ingest.service.test.ts
 
 Proceed. Run `make prisma-generate` if not fresh → code per §Approach 1-11 (minus `findByPayloadMessageId`) → `make check` → SUBMIT.
 
+#### SUBMIT T12 — exec-B (Nanak) at H17 17:00 (attempt 1, narrow primitive per PM ACK 9-file inventory)
+
+Task: T12 — WhatsApp inbound webhook ingest **primitive** (types + Meta envelope schema + `webhook_events` sibling repository + 2-leg service + HC guest-upsert port TYPE-ONLY + AI inbound port TYPE-ONLY). Narrow scope per PM ACK — 8 GAP defaults confirmed spec-aligned; one atomic delta (repository drops `findByPayloadMessageId` per GAP T12-#5 D). Branch: `feat/wa-webhook-ingest` @ commit `b227ec3`.
+
+Files changed: **10** (9 create + 1 modify) — **1404 insertions** total (~1381 new-file LOC + 23 net barrel delta; LOC slightly under the 1389/1412 pre-prettier estimate because `pnpm prettier --write` collapsed 5 files).
+- `src/modules/whatsapp/whatsapp-webhook-ingest.types.ts` (new, 89 LOC — Q-B-04/05/06 assumption stamps)
+- `src/modules/whatsapp/whatsapp-webhook-ingest.schema.ts` (new, 148 LOC post-prettier — Meta envelope + `extractInboundMessages` helper + response schema with `isDuplicate: false` Q-B-06 placeholder)
+- `src/modules/whatsapp/whatsapp-webhook-events.repository.ts` (new, 48 LOC — **EXACTLY 3 methods** per binding #4)
+- `src/modules/whatsapp/whatsapp-inbound-ingest.service.ts` (new, 240 LOC post-prettier — sync + async legs; async worker-discipline no-throw)
+- `src/modules/whatsapp/ports/hotel-core-guest-upsert.port.ts` (new, 18 LOC — **TYPE-ONLY**, Q-B-04 stamp)
+- `src/modules/whatsapp/ports/ai-inbound-message.port.ts` (new, 19 LOC — **TYPE-ONLY**, Q-B-05 stamp)
+- `src/modules/whatsapp/__tests__/whatsapp-webhook-ingest.schema.test.ts` (new, 235 LOC post-prettier, 13 tests)
+- `src/modules/whatsapp/__tests__/whatsapp-webhook-events.repository.test.ts` (new, 140 LOC post-prettier, 4 tests)
+- `src/modules/whatsapp/__tests__/whatsapp-inbound-ingest.service.test.ts` (new, ~475 LOC post-prettier, 15 tests)
+- `src/modules/whatsapp/index.ts` (modified, +23 net) — additive; T06 (L1-7) + T10 (L9-18) + T16 (L20-44) + T11 (L46-56) blocks byte-for-byte preserved; T12 exports L58-79
+
+DoD self-check — **all 16 ACK binding conditions**:
+- [x] **#1 `make check` PASS end-to-end** — lint 0/0 (`--max-warnings 0`), format-check clean, typecheck strict + `exactOptionalPropertyTypes`, test-unit 25/27 suites 248/250 tests (2 pre-existing `_template/*` baseline skips). PM B rerun invited.
+- [x] **#2 Drift scans 0 hits on module scope** — all 6 EXECUTOR §4.4 categories. Special-attention verified: **NO `throw new Error(`** in T12 files (drift scan #3 returns 0 hits in module scope); **NO `signature_valid: true` hardcoded** in service (it's a ctor input to `ingestSync` at `:68-71`); **NO `WebhookVerificationError` thrown** (T11 concern, unrelated). Detail in §Drift scans.
+- [x] **#3 Coverage 100% stmt/branch/func/line** on 3 runtime files: `whatsapp-webhook-ingest.schema.ts`, `whatsapp-webhook-events.repository.ts`, `whatsapp-inbound-ingest.service.ts`. Type-only files (`whatsapp-webhook-ingest.types.ts` + 2 ports) erased at compile per ts-jest — matches ACK #3 caveat. See §Test evidence.
+- [x] **#4 Repository EXACTLY 3 methods** — `whatsapp-webhook-events.repository.ts` grep confirms: `persist` (`:23`), `markProcessed` (`:33`), `markFailed` (`:39`). NO `findByPayloadMessageId` method. Docstring L11-16 declares the drop per GAP T12-#5 D. Test file has 4 test cases (2 for `persist` covering signatureValid=true + signatureValid=false paths, 1 for `markProcessed`, 1 for `markFailed`) — 3-method surface, 4 test-case count matches the +signatureValid-flag branch coverage.
+- [x] **#5 Service signature-agnostic** — `whatsapp-inbound-ingest.service.ts:68-71` `ingestSync(hotelId, signatureValid, envelope)` accepts `signatureValid: boolean` as an input parameter. `:80-85` passes it verbatim to `eventsRepo.persist({...signatureValid, ...})`. Service NEVER computes signature. Test `whatsapp-inbound-ingest.service.test.ts` at "should persist with signatureValid=true" + "should persist with signatureValid=false" asserts both boolean paths persist correctly.
+- [x] **#6 Persist-always audit trail** — service test "should persist with signatureValid=false when the router flagged the request as spoofed (audit-trail path)" explicitly covers the invalid-signature persistence path. Repo test "should propagate the signatureValid=false flag verbatim" asserts the Prisma call receives `signatureValid: false` unchanged.
+- [x] **#7 Async leg never throws (worker discipline)** — 4 test cases use `.resolves.toBeInstanceOf(Array)`:
+  - "should NEVER throw when the HC port rejects" — `guestPort` rejects, `processEvent` returns Array
+  - "should NEVER throw when a non-Error value is thrown" — `guestPort` rejects with `'boom'`, `processEvent` returns Array with `error: 'guest_upsert: boom'`
+  - "should NOT throw when `markProcessed` itself fails" — repo.markProcessed rejects, service still returns Array (logs error via `markProcessedSafely`)
+  - "should NOT throw when `markFailed` itself fails" — repo.markFailed rejects, service still returns Array (logs error via `markFailedSafely`)
+  Zero `.rejects` assertions on `processEvent`.
+- [x] **#8 Sync leg throws only `ValidationError`** — service `:74-78` `if (!parsed.success) throw new ValidationError(...)` is the only throw path in `ingestSync`. Test "should throw ValidationError when the envelope fails schema parse" asserts `.rejects.toBeInstanceOf(ValidationError)`. No other throw.
+- [x] **#9 `isDuplicate: false` always in primitive** — service `:96` returns `{ eventId: event.id, isDuplicate: false }` literally. Test "should return isDuplicate=false always (Q-B-06 D placeholder)" asserts `first.isDuplicate === false` + `second.isDuplicate === false` on repeated calls with the same envelope. Docstring `schema.ts:16-19` notes Q-B-06 T12-followup fills semantics after schema-add.
+- [x] **#10 PII floor with `maskWaPhone`** — service `:168` uses `maskWaPhone(message.waPhone)` in `LOG_PROCESS_MESSAGE`. Test "should mask the waPhone in the per-message log line and NOT leak the plaintext phone" asserts (a) `logged.waPhone === maskWaPhone(WA_PHONE)`, (b) `JSON.stringify(logged)` does NOT contain the raw `WA_PHONE`, (c) `JSON.stringify(logged).length < 500`. Positive log-shape assertion + negative plaintext + length heuristic — T10-a2/T11 pattern applied to T12.
+- [x] **#11 Ports TYPE-ONLY** — both `ports/hotel-core-guest-upsert.port.ts` (18 LOC) and `ports/ai-inbound-message.port.ts` (19 LOC) contain docstring + single interface + type-only re-import from `whatsapp-webhook-ingest.types.js`. Grep confirms NO class, NO function, NO adapter reference. Barrel confirms no adapter re-export.
+- [x] **#12 Q-B-04/05/06 assumption stamps** — 4 files carry explicit stamps:
+  - `whatsapp-webhook-ingest.types.ts:15-28` — A/A/D summary (Q-B-04 guest-upsert, Q-B-05 ai-inbound, Q-B-06 dedup deferred)
+  - `whatsapp-webhook-ingest.schema.ts:16-19` — Q-B-06 stamp on `isDuplicate` field (always false in primitive)
+  - `ports/hotel-core-guest-upsert.port.ts:1-13` — Q-B-04 stamp + T12-followup adapter defer
+  - `ports/ai-inbound-message.port.ts:1-13` — Q-B-05 stamp + T12-followup adapter defer
+- [x] **#13 `git diff --stat main..HEAD` scope-clean** — exactly 9 create + 1 modify = 10 files. Zero touches to `api.ts`, `worker.ts`, `prisma-client.ts`, `core/http/http-client.ts`, T04 `hmac-validator.plugin.ts` (secret-agnostic — do NOT mutate), T05 `tenant-resolver.plugin.ts` (do NOT mutate), T09 `internal-rpc-auth.plugin.ts`, `prisma/schema.prisma`, `prisma/migrations/*`, `package.json`, `pnpm-lock.yaml`, T06 BSP files, T10 config files, T11 verify files, T16 template files, `_template/*`, `telegram/*`.
+- [x] **#14 Barrel additive-only** — `src/modules/whatsapp/index.ts`: T06 (L1-7) + T10 (L9-18) + T16 (L20-44) + T11 (L46-56) blocks byte-for-byte preserved vs `main`. T12 exports appended L58-79 only. `grep -E "adapters/" src/modules/whatsapp/index.ts` returns 0 hits — no adapter re-export (5× confirmed cross-primitive: T10, T16, T11, T12 all preserve the T06 `no-restricted-imports` discipline).
+- [x] **#15 Async-worker discipline docstring** — `whatsapp-inbound-ingest.service.ts:99-114` (docstring above `processEvent`) explicitly notes: "**Never throws — worker discipline.** All failure paths return rich `IngestOutcome[]` with `error` fields set + call `markFailed`. Router / worker at T12-followup reads outcomes for observability; retry is via `webhook_events` queue per spec §7 L351. This mirrors the T11 probe-semantics precedent applied to a worker-called method."
+- [x] **#16 HMAC-agnostic docstring** — `whatsapp-inbound-ingest.service.ts:48-56` (docstring above `ingestSync`) explicitly notes: "**HMAC-agnostic**: signature verification lives at the T04 HMAC plugin (router-layer preHandler); this service consumes `signatureValid` as a trusted boolean parameter. GAP T12-#1 (Q-A-04 vs MVP §4.2 secret-choice) is decided at wiring time — this primitive is genuinely agnostic."
+
+Quality gate
+- `make typecheck`: PASS (0 errors, strict + `exactOptionalPropertyTypes`)
+- `make lint`: PASS (0 errors, 0 warnings — `eslint . --max-warnings 0`)
+- `make format-check`: PASS (all matched files use Prettier code style)
+- `make test-unit`: PASS (25 of 27 suites, 248 of 250 tests — 2 pre-existing baseline skips in `_template/*`; my 4 new suites 32/32 pass — 216 previous approved baseline + 32 T12 = 248)
+- `make check`: PASS end-to-end (concatenation of the above)
+
+Drift scans (all 6 EXECUTOR §4.4 categories — 0 hits on T12 module files)
+- `any` types: 0 (pre-existing 2 in `_template/*` untouched — same baseline as T10/T11/T16 approved)
+- `console.log/info/debug`: 0 (repo-wide 0)
+- `throw new Error(` in `src/modules/` + `src/core/`: 0 in module scope (pre-existing 4 in `_template/_template.repository.ts:23` + `core/config/env.ts:75` + `core/http/http-client.ts:19,27` — all untouched)
+- Forbidden imports: 0 (repo-wide 0)
+- `^export default ` outside entrypoints/config: 0 (repo-wide 0)
+- `.skip(` in `*.test.ts`: 0 in module scope (pre-existing 2 in `_template/*` untouched)
+
+Security check (CLAUDE §6 + spec §4.2 + PM ACK design intent)
+- **Signature-agnostic service** — `whatsapp-inbound-ingest.service.ts:68-71` `ingestSync(hotelId, signatureValid, envelope)` accepts `signatureValid` as a trusted input parameter. T04 HMAC plugin at router-layer wiring (T12-followup) sets the flag before calling service. Docstring L48-56 explicitly cross-references Q-A-04 vs MVP §4.2 as wiring-time decision. Primitive genuinely agnostic.
+- **Persist-always audit trail** — spec §4.4 L226 `signature_valid BOOLEAN NOT NULL` is DDL-mandated. Service `:80-85` persists ALWAYS with the flag; test suite covers both `signatureValid=true` (happy) and `signatureValid=false` (spoofed-audit) paths.
+- **Async `processEvent` NEVER throws (worker discipline)** — 4 test cases confirm via `.resolves.toBeInstanceOf(Array)`. Service `:172-186` + `:188-202` (per-message HC/AI catch blocks) always return `IngestOutcome` with `error` string; `:212-222` + `:224-235` (safe wrappers) catch repo failures and log-warn rather than throw. T11 probe-semantics precedent extended to worker context.
+- **Sync `ingestSync` throws ONLY `ValidationError` on schema fail** — service `:74-78` is the only throw path.
+- **`isDuplicate: false` always** — Q-B-06 D placeholder; service `:96` returns literal `false`. Router wire contract survives Q-B-06 resolution.
+- **PII floor via `maskWaPhone`** — service `:168` masks in `LOG_PROCESS_MESSAGE`; test asserts positive shape + negative plaintext + length heuristic. T10-a2/T11 pattern.
+- **No secret hardcoded** — T12 primitive has no outbound HTTP (adapters deferred to T12-followup); HC/AI baseUrls + `INTERNAL_SECRET` handled at wiring layer (Q-C-02).
+
+Test evidence
+- Unit: **32 tests, 4 suites** — `whatsapp-webhook-ingest.schema.test.ts` (13), `whatsapp-webhook-events.repository.test.ts` (4), `whatsapp-inbound-ingest.service.test.ts` (15). Note: my earlier PLAN estimate of 33 tests was off by 1 in the service suite (actual 15 vs planned 16 after prettier collapse; semantic coverage identical).
+- Integration: 0 — deferred as **T12-INTEG** follow-up (see §Follow-ups); repository test uses Prisma-mock stopgap per T10-a2 / T11 / T16 precedent
+- Coverage (jest, scoped to 3 runtime files):
+  ```
+  File                                   | % Stmts | % Branch | % Funcs | % Lines
+  ---------------------------------------|---------|----------|---------|--------
+  All files                              |   100   |   100    |   100   |   100
+   whatsapp-inbound-ingest.service.ts    |   100   |   100    |   100   |   100
+   whatsapp-webhook-events.repository.ts |   100   |   100    |   100   |   100
+   whatsapp-webhook-ingest.schema.ts     |   100   |   100    |   100   |   100
+  ```
+  Type-only files (`whatsapp-webhook-ingest.types.ts` + 2 ports) erased at compile per ts-jest, not instrumented. Matches ACK #3 caveat identically to T10/T11/T16.
+
+Notes / discipline discoveries / tolerated deviations
+- **Round 2 self-validate — branch coverage gap fixed with type assertion** — first coverage run showed `whatsapp-inbound-ingest.service.ts:151` uncovered branch (`firstError ?? 'unknown error'` fallback). The fallback is unreachable at runtime because both catch blocks in `processSingleMessage` (`:180-186` guest-upsert failure, `:195-201` ai-inbound failure) always set `error` string. Fixed by replacing `?? 'unknown error'` with `firstError as string` type assertion + inline invariant comment: `// Invariant: processSingleMessage always sets error when dispatched: false (both catch blocks). firstError therefore defined whenever anyFailure is.` Rescan verified `as string` does NOT match the drift regex `: any|<any>|as any` (regex requires "any" after "as ", so `as string` is safe). Coverage returned to 100% on all 4 metrics. **Tolerated deviation flag for PM B judgment**: type assertion `as string` is used at one specific site to escape TypeScript's inability to prove the algorithmic invariant. Alternative approaches (discriminated union on `IngestOutcome`, `firstError!` non-null assertion, restructured loop with early-return) all have equivalent runtime + coverage semantics; `as string` chosen for minimal code churn.
+- **Prettier collapse on 5 files** — `pnpm prettier --write` collapsed `whatsapp-inbound-ingest.service.ts`, `whatsapp-webhook-ingest.schema.ts`, and all 3 test files. Semantic content identical; total post-prettier LOC ≈ 1381 (vs pre-prettier estimate 1389). No exports added/removed/renamed vs PLAN §Approach.
+- **Actual test count 32 (not 33 estimated)** — my PLAN pre-estimate over-counted by one test in the service suite (multi-message with `contacts` without profileName was collapsed into existing "should omit the name field" test case). Semantic coverage unchanged.
+- **5th confirmation of `no-restricted-imports` T06 barrel discipline** — T10, T16, T11, T12 all preserve the rule (adapter never re-exported through the module barrel; adapters wired at entrypoint). Discipline is now cross-primitive fixed norm.
+- **Q-A-03 test-env workaround NOT triggered** — service test uses no crypto / no env-key seeding (T12 has no plaintext secrets in-flow). Cross-slot pattern remains pending PM A resolution but not applicable to this primitive.
+- **T12 tolerated deviations (per ACK §Notes pre-accept)**:
+  - Prisma-mock stopgap in `whatsapp-webhook-events.repository.test.ts` (T10/T11/T16 precedent) — T12-INTEG follow-up parked pending Q-C-01.
+  - Q-B-04/05 adapters deferred to T12-followup — unratified contracts.
+  - Q-B-06 dedup deferred + `isDuplicate: false` placeholder — schema-add is Nathan/T02 territory.
+
+Q register / follow-ups
+- **No new Q filed during coding** — 3 new Qs (Q-B-04 HC guest-upsert contract, Q-B-05 AI inbound contract, Q-B-06 `webhook_events.external_id` schema-add) already filed by PM B at ACK time; PM B vote on Q-A-04 also logged at ACK. §3 mirror + PARENT §3a carry the tracking.
+- **T12-followup** — public route `POST /webhook/whatsapp/:hotel_slug` + T04 plugin wiring (signature verify with EITHER `webhook_verify_token` OR `app_secret_enc` per Q-A-04 PO resolution) + T05 tenant-resolver plugin wiring + worker registration for async leg (`processEvent` consumer) + HC guest-upsert adapter + AI inbound adapter + dedup logic once Q-B-06 schema-add lands (repurposes `isDuplicate` field from placeholder to real value). Blocked on Q-A-04 + Q-B-04 + Q-B-05 + Q-B-06 + Q-C-02 (`api.ts` + `worker.ts` bootstrap + env config).
+- **T12-INTEG** — real-DB integration test for `webhook_events` persistence (testcontainers Postgres) + mock HC + mock AI test harness for the async leg. Blocked on Q-C-01 + T12-followup.
+
+Requesting PM B VERDICT.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
