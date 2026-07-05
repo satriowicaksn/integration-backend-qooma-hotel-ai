@@ -30,7 +30,7 @@
 | T## | Title                                                                            | Status   | Verified by PM | Notes                                                              |
 | --- | -------------------------------------------------------------------------------- | -------- | -------------- | ------------------------------------------------------------------ |
 | T10 | WA config CRUD (`GET, PUT /api/integrations/whatsapp`)                           | merged | PM B (H16, a2) | Primitive shipped: types+zod+Prisma-direct-ctor-inject repo+service (encrypt+decrypt-mask on view + PII-floor log BEFORE encrypt + round-trip mask stability) + 28 unit tests, 100% module cov, drift clean, make check green on PM rerun. Router+api.ts wiring = T10-followup blocked on Q-C-01/02/03. Merged PR #10 `36462d2` |
-| T11 | Verify webhook action (`POST /api/integrations/whatsapp/verify-webhook`)         | backlog  | —              | After T10                                                          |
+| T11 | Verify webhook action (`POST /api/integrations/whatsapp/verify-webhook`)         | approved (primitive) | PM B (H17, a1) | Narrow primitive per PM ACK 10-file inventory: types + schema + sibling repo (single `markVerified`) + service + `WebhookPingerPort` + `HttpWebhookPingerAdapter` (probe-semantics, no throw) + 32 unit tests, 100% module cov, drift clean, make check green on PM rerun. Simple-GET (no `hub.*` params per spec §2.2 "reachable" wording). Router = T11-followup blocked on Q-C-02/03. Branch `feat/wa-webhook-verify @ 41ba8e6`, PR pending push |
 | T12 | WA inbound webhook ingest (signature → persist → HC guest upsert → AI RPC)       | backlog  | —              | After T04 (Nathan) + T05 + T10                                     |
 | T13 | Outbound WA dispatch RPC + DND check + quota two-phase                           | backlog  | —              | After T06 + T09 (Nathan); HC `check_and_reserve_outbound_quota` RPC|
 | T14 | Outbound retry queue (3 attempts exponential backoff)                            | backlog  | —              | After T07 (Nathan) + T13                                           |
@@ -1335,6 +1335,93 @@ Q register / follow-ups
 - **T11-INTEG** — real-DB integration test for `verified_at` update (testcontainers Postgres per CLAUDE §8). Blocked on Q-C-01 (prisma singleton).
 
 Requesting PM B VERDICT.
+
+##### VERDICT T11 — APPROVED (H17, attempt 1, primitive) by PM B (Nanak)
+
+✅ **APPROVED**. Independent PM rerun on `feat/wa-webhook-verify @ 41ba8e6` (code) + `b269b02` (SUBMIT status). All 14 ACK binding conditions verified against code (file:line), not claim. All 7 GAP defaults confirmed spec-aligned. Adapter probe-semantics deviation from T06/T16 explicitly documented per binding #14. Ready for PR + merge review.
+
+**Independent verification trace** (rerun on PM shell, Node 22.23.1 + pnpm 9.0.0 via nvm/corepack):
+
+- **`make check`** — **PASS end-to-end** (1.625s). `lint` clean (`eslint . --max-warnings 0`), `format-check` "All matched files use Prettier code style!", `typecheck` (`tsc --noEmit` strict + `exactOptionalPropertyTypes`) 0 errors, `test:unit` 22/24 suites passed (2 pre-existing `_template/*` baseline skips), 216/218 tests passed. My 4 new suites = **32/32 pass, 0 fail**.
+- **Drift scans (6 EXECUTOR §4.4 categories)** on T11 scope files (`whatsapp-webhook-verify.*`, `ports/webhook-pinger.port.ts`, `adapters/http-webhook-pinger.adapter.ts`, 4 test files) — **all 0 hits**: `any` = 0, `console.log/info/debug` = 0, `throw new Error(` = 0, forbidden imports = 0, `^export default ` = 0, `.skip(` / `describe.skip` = 0.
+  - **Special-attention greps**: `hub.mode` / `hub.verify_token` / `hub.challenge` in adapter/service/schema/types source → **0 hits**. Present ONLY in `http-webhook-pinger.adapter.test.ts:52-54` as `.not.toContain(...)` negative assertions proving simple-GET binding.
+  - `ExternalServiceError` in `http-webhook-pinger.adapter.ts` → 0 usages, present only in docstring L11 + L14 (documenting the non-throw deviation). `throw` in adapter → 0 hits.
+- **Coverage rerun** (`pnpm test:coverage --collectCoverageFrom='src/modules/whatsapp/whatsapp-webhook-verify.*.ts' --collectCoverageFrom='.../ports/webhook-pinger.port.ts' --collectCoverageFrom='.../adapters/http-webhook-pinger.adapter.ts' --testPathPattern='(whatsapp-webhook-verify|http-webhook-pinger)'`):
+  ```
+  File                                    | % Stmts | % Branch | % Funcs | % Lines
+  All files                               |   100   |   100    |   100   |   100
+   whatsapp                               |   100   |   100    |   100   |   100
+    whatsapp-webhook-verify.repository.ts |   100   |   100    |   100   |   100
+    whatsapp-webhook-verify.schema.ts     |   100   |   100    |   100   |   100
+    whatsapp-webhook-verify.service.ts    |   100   |   100    |   100   |   100
+   whatsapp/adapters                      |   100   |   100    |   100   |   100
+    http-webhook-pinger.adapter.ts        |   100   |   100    |   100   |   100
+  ```
+  2 type-only files (`whatsapp-webhook-verify.types.ts` + `ports/webhook-pinger.port.ts`) erased at compile per ts-jest — expected per ACK #3 caveat.
+- **`git diff --stat main..feat/wa-webhook-verify -- src/ prisma/ package.json pnpm-lock.yaml`** — exactly **10 create + 1 modify** = 11 files. Zero touches to `api.ts`, `prisma-client.ts`, `core/http/http-client.ts`, `plugins/*`, `prisma/schema.prisma`, `prisma/migrations/*`, `package.json`, `pnpm-lock.yaml`, `_template/*`, `telegram/*`, T06 BSP port/adapter/tests, T10 `whatsapp-config.*`, T16 `whatsapp-template.*` + T16 ports/adapters/tests.
+
+**14 binding conditions — file:line evidence**:
+
+- **#1 `make check` PASS** — PM rerun above. ✓
+- **#2 Drift scans 0 hits + probe-semantics special-attention gates** — PM greps above. ✓
+- **#3 Coverage 100%** — PM rerun above (4 runtime files). ✓
+- **#4 Simple GET, no `hub.*` params** — adapter `http-webhook-pinger.adapter.ts:60` `http.get<unknown>(input.url, requestOptions)` passes URL verbatim; test `.adapter.test.ts:47-56` explicit URL-match + 3 `.not.toContain(...)` assertions on `hub.mode` / `hub.verify_token` / `hub.challenge`. PM independent grep on adapter source: 0 hits. ✓
+- **#5 Adapter probe-semantics — 3-outcome coverage NONE throwing** — verified via `.resolves.toEqual(...)` at `.adapter.test.ts`:
+  - 2xx (200) L29-36 → `{reachable: true, statusCode: 200}`
+  - 2xx (204) L38-45 → `{reachable: true, statusCode: 204}`
+  - Non-2xx (404) L94-101 → `{reachable: false, statusCode: 404}`
+  - Non-2xx (500) L103-110 → `{reachable: false, statusCode: 500}`
+  - Non-2xx (301) L112-119 → `{reachable: false, statusCode: 301}`
+  - Network reject (Error) L125-131 → `{reachable: false}` (no statusCode)
+  - Network reject (non-Error) L133-139 → `{reachable: false}` (no statusCode)
+  
+  All 7 test cases use `.resolves.toEqual(...)` — ZERO `.rejects` on adapter. Adapter L58-63 catches network errors + returns clean result; L64-67 branches on `isSuccessStatus(res.status)`. ✓
+- **#6 Adapter NO auth header** — adapter `:54-55` `requestOptions` = only `{ timeoutMs }` conditionally; no `headers` key. Test `.adapter.test.ts:58-68` inspects passed opts and asserts `headerKeys.not.toContain('authorization')` when headers present. ✓
+- **#7 Service returns rich outcome, no throw on unreachable** — service `.service.ts:65-83` (unreachable + invalid_response branches) constructs `WebhookVerificationDomain` result + returns; NO `throw` in the entire file. Test `.service.test.ts:146-168` (network-error unreachable) + `:170-192` (invalid_response) use `.resolves.toEqual(...)` + assert `repoDouble.markVerified` NOT called (0 invocations). ✓
+- **#8 Service PROPAGATES `NotFoundError`** — service `:41` `await this.configService.getForHotel(hotelId)` has NO surrounding try/catch. Test `:194-205` asserts `.rejects.toBeInstanceOf(NotFoundError)` + `pingerDouble.ping` NOT called + `repoDouble.markVerified` NOT called. ✓
+- **#9 `verified_at` as `Date` object** — service `:46` `const verifiedAt = new Date()` + `:47` `verifyRepo.markVerified(hotelId, verifiedAt)`. Test `:117-124` asserts `expect(passedTimestamp).toBeInstanceOf(Date)`. Prisma binding safe for `TIMESTAMPTZ`. ✓
+- **#10 Barrel additive-only** — PM inspected `src/modules/whatsapp/index.ts`: T06 BSP block (L1-7) byte-for-byte vs `main`; T10 config block (L9-18) byte-for-byte; T16 template block (L20-44) byte-for-byte. T11 exports appended L46-56 only. `git diff main..HEAD -- src/modules/whatsapp/index.ts` = +12 net additive. PM grep `adapters/` in barrel → 0 hits (adapter NOT re-exported, `no-restricted-imports` T06/T10/T16 discipline confirmed 4× now). ✓
+- **#11 `git diff --stat` scope-clean** — PM rerun above. 10 create + 1 modify, zero cross-boundary touches. ✓
+- **#12 `HttpPoster` narrow inline** — adapter `:32-34` declares `interface HttpPoster { get<T>(url: string, opts?: unknown): Promise<{ data: T; status: number }> }`. Only `get` method (no `post`/`patch`/`delete`). Zero coupling to `core/http/http-client.ts` (which remains stub). Docstring `:20-22` notes misnomer accepted for T06/T16 naming consistency + probe-only surface. ✓
+- **#13 Log-shape positive PII floor** — service test `:220-238` asserts `logger.info.mock.calls[0][0]` `toEqual({msg, module, hotelId, outcome, statusCode})` **exact** (not superset); `JSON.stringify(logged).length < 500` heuristic; 3 negative assertions `.not.toContain(sampleConfig.accessToken)` + `.not.toContain(sampleConfig.webhookVerifyToken)` + `.not.toContain(sampleConfig.webhookUrl)`. Second log-shape test `:240-259` asserts unreachable-branch log omits `statusCode` key entirely (`Object.keys(logged).not.toContain('statusCode')`). ✓
+- **#14 Adapter docstring explains probe-semantics deviation** — `http-webhook-pinger.adapter.ts:11-18` contains the mandated paragraph verbatim: "**Unlike T06 / T16 adapters, this adapter does NOT throw `ExternalServiceError` on non-2xx or network errors. T11 is a REACHABILITY PROBE — non-2xx and network errors are LEGITIMATE outcomes ... Throwing `ExternalServiceError` on every 404-from-hotel-misconfig would flood Sentry with non-actionable alerts. The result object `{ reachable, statusCode? }` is returned in all outcomes; the boundary `WebhookVerificationError` (422) is emitted at the SERVICE / route layer, not here.**" ✓
+
+**Spec-alignment audit**:
+- `04-integration-channels.md §2.2 L45` — "Server pings configured webhook URL to confirm reachable" → adapter is a simple GET to `input.url`, no signature/auth, no query params. ✓
+- `MVP §5 AC L119` — `200 { verified, verified_at }` / `422 WEBHOOK_VERIFICATION_FAILED` → service returns `WebhookVerificationDomain` with `verified: boolean + verifiedAt: Date | null` shape; T11-followup router maps to HTTP response. ✓
+- `04 §9 L373` — `WEBHOOK_VERIFICATION_FAILED` = 422 → maps to existing `WebhookVerificationError` at `core/errors/app-errors.ts:92-95`. Primitive service does not throw this (rich outcome); route layer emits. ✓
+- `04 §4.1 L184` — `verified_at TIMESTAMPTZ NULL` → repo writes `Date`; Prisma binding correct for `Timestamptz`. ✓
+
+**Security floor check (CLAUDE §6 + spec §5 + ACK design intent)**:
+- **No plaintext secrets in T11 flow** — webhook URL is spec-public; no token access. PII-floor test flipped to positive-shape assertion + 3 defense-in-depth negative assertions on T10-domain plaintext leak paths. ✓
+- **No throw for probe outcomes** — adapter `:59-63` try/catch converts network error to `{reachable: false}`; `:64-67` branches on `isSuccessStatus`. Docstring `:11-18` explains rationale. ✓
+- **`NotFoundError` propagates** — service `:41` no try/catch. T10 `WhatsappConfigService.getForHotel` throws `NotFoundError` when no config; T11 lets it bubble to route. ✓
+- **`WebhookVerificationError` at boundary only** — 0 usages in T11 primitive code; T11-followup router will emit per spec §5 AC. ✓
+- **No hardcoded URLs** — runtime read from `configService.getForHotel(hotelId).webhookUrl`. ✓
+- **No auth header sent** — adapter `:54-55` `requestOptions` optional-timeout-only. ✓
+
+**Additional design observations** (all consistent with ACK expectations):
+- **Service outcome discrimination** `:66-67` — `unreachable` (statusCode undefined = network error) vs `invalid_response` (statusCode present but non-2xx). Adds spec-legitimate granularity; T11-followup router can decide whether to return 502 (network) vs 422 (invalid), or map both to 422 per spec §5 AC. Non-breaking, future-flexible.
+- **Ctor argument order** `:33-38` = `(configService, pinger, verifyRepo, logger)` — PM ACK spec-ed `(configService, verifyRepo, pinger, logger)` order; SUBMIT reorders `pinger` before `verifyRepo`. Semantic delta zero (all named args at wiring time); accepted as executor-preferred readability. Docstring `:1-17` lists all 4 deps clearly. Non-blocker.
+- **Branch coverage add during round 3 self-validate** (SUBMIT §Notes L1318) — reachable-without-statusCode branch previously uncovered, added test at `:145-165`, coverage returned to 100%. Test count 31 → 32. Discipline evidence, not scope creep. ✓
+
+**Tolerated deviations accepted** (all pre-declared per ACK):
+- Prisma-mock stopgap in `.repository.test.ts` — T10-a2 / T16 stopgap precedent, T11-INTEG follow-up parked awaiting Q-C-01.
+- `HttpPoster` misnomer accepted for T06/T16 naming consistency (only `get` used) — flagged in adapter docstring `:20-22`.
+- Adapter non-throwing behavior — declared explicitly in docstring `:11-18` per binding #14.
+- Service depends on T10's `WhatsappConfigService` (module-internal dependency, not port abstraction) — accepted per ACK.
+- Prettier collapse `types.ts` 34→31, `schema.ts` 28→26, `service.test.ts` 231→281 (latter includes +1 branch-coverage test, not pure format delta) — semantic identical modulo the discipline test add. ✓
+
+**Follow-ups accepted** (files, do not action):
+- **T11-followup**: route `POST /api/integrations/whatsapp/verify-webhook` + Fastify handler + `gm_admin` session guard + `hotel_id` from JWT session. Blocked on Q-C-02 + Q-C-03.
+- **T11-INTEG**: real-DB integration test for `verified_at` update (testcontainers Postgres per CLAUDE §8). Blocked on Q-C-01.
+
+**Actions taken**:
+- → §1 task tracker row for T11 updated (`backlog` → `approved (primitive)` with `PM B (H17, a1)` verified-by).
+- → PARENT §1 row for T11 mirrored (same status + notes shape as T10/T16).
+- → PARENT §2 short roll-up appended (1 line, format per `PM-AGENT.md §0.8`, append-at-bottom convention).
+
+**Next expected action**: Executor B open PR on `feat/wa-webhook-verify` for PO merge review; PM B re-verify on CI green post-PR. **Slot B progress: 3/7 (T10 + T16 merged; T11 approved primitive)** · T12 (inbound ingest — blocked on Q-A-04 for HMAC verify + T05 tenant resolver already merged), T13 (outbound dispatch — deps T06+T09 merged, needs HC quota RPC contract), T14 (retry queue — deps T07 merged + T13), T15 (delivery receipts — deps T04+T12) backlog. T11-followup + T11-INTEG parked pending Q-C-01/02/03.
 
 <!--
 TEMPLATE — copy untuk task baru:
