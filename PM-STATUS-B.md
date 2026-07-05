@@ -32,7 +32,7 @@
 | T10 | WA config CRUD (`GET, PUT /api/integrations/whatsapp`)                           | merged | PM B (H16, a2) | Primitive shipped: types+zod+Prisma-direct-ctor-inject repo+service (encrypt+decrypt-mask on view + PII-floor log BEFORE encrypt + round-trip mask stability) + 28 unit tests, 100% module cov, drift clean, make check green on PM rerun. Router+api.ts wiring = T10-followup blocked on Q-C-01/02/03. Merged PR #10 `36462d2` |
 | T11 | Verify webhook action (`POST /api/integrations/whatsapp/verify-webhook`)         | merged | PM B (H17, a1) | Narrow primitive per PM ACK 10-file inventory: types + schema + sibling repo (single `markVerified`) + service + `WebhookPingerPort` + `HttpWebhookPingerAdapter` (probe-semantics, no throw) + 32 unit tests, 100% module cov, drift clean, make check green on PM rerun. Simple-GET (no `hub.*` params per spec §2.2 "reachable" wording). Router = T11-followup blocked on Q-C-02/03. Merged PR #13 `b083295` |
 | T12 | WA inbound webhook ingest (signature → persist → HC guest upsert → AI RPC)       | merged | PM B (H17, a1) | Narrow primitive per PM ACK 9-file inventory: types + Meta envelope zod schema + `webhook_events` sibling repo (3 methods) + 2-leg service (sync `ingestSync` + async `processEvent` worker-discipline no-throw) + HC guest-upsert port TYPE-ONLY (Q-B-04) + AI inbound port TYPE-ONLY (Q-B-05) + 32 unit tests, 100% module cov, drift clean, make check green on PM rerun. Signature-agnostic (T04 plugin at wiring). `isDuplicate: false` placeholder (Q-B-06 D). `as string` invariant assertion at service.ts:153 (accepted, future refactor: discriminated union). Router+adapters = T12-followup blocked on Q-A-04 + Q-B-04/05/06 + Q-C-02. Merged PR #14 `23bfea1` (**SQUASH** — first squash merge repo-wide, CLAUDE §12 enforced) |
-| T13 | Outbound WA dispatch RPC + DND check + quota two-phase                           | backlog  | —              | After T06 + T09 (Nathan); HC `check_and_reserve_outbound_quota` RPC|
+| T13 | Outbound WA dispatch RPC + DND check + quota two-phase                           | approved (primitive) | PM B (H17, a1) | Most complex slot B task shipped as narrow primitive per T12 modified-B envelope + PM ACK atomic delta (repo 4-method + service 5-dep). Types + zod z.union([TextRequest, TemplateRequest]) + cross-table repo (findConfigForDispatch decrypt-internally + persistPending + markSent + markFailed) + 6-step service orchestrator (config → DND → quota reserve → persist → BSP → commit/rollback) + 2 TYPE-ONLY HC ports (Q-B-08/09) + 37 unit tests, 100% module cov, drift clean, make check green on PM rerun. Fail-early persist + rollback discipline (both tested). VVIP-exempt bypass. **Design win: Round-5 z.union refactor extends T15 discriminated-union to INPUT schema layer — cross-slot ratification recommended.** Router+adapters = T13-followup blocked on Q-B-08/09 + Q-C-02. Branch `feat/wa-outbound-dispatch @ 0541369`, PR pending push |
 | T14 | Outbound retry queue (3 attempts exponential backoff)                            | backlog  | —              | After T07 (Nathan) + T13                                           |
 | T15 | Delivery receipts ingest (WA Cloud webhook stream)                               | merged | PM B (H17, a1) | Narrow primitive per PM ACK clean-approval 7-file inventory: types (discriminated-union outcome) + Meta statuses envelope zod schema + cross-table sibling repo (2 methods: `findDispatchByExternalId` tenant-guarded + `persist`) + single-method sync service (orphan skip + count + never throws per-status) + 28 unit tests, **first-pass 100% module cov** (no branch iteration needed), drift clean, make check green on PM rerun. Signature-agnostic (T04 plugin at wiring). Multi-row per triple accepted (Q-B-07 D placeholder). **`as string` recurrence eliminated** — discriminated union up-front successfully applied T12 lesson. Router = T15-followup blocked on Q-A-04 + Q-C-02 + T12-followup structure. Merged PR #15 `780dca9` (**SQUASH** — 2nd in a row after PR #14, CLAUDE §12 pattern established) |
 | T16 | WA template Meta relay (submit/resubmit/callback to HC)                          | merged | PM B (H17, a1) | Narrow primitive per PM ACK modified-B: types + zod + service + BSP template port + HC callback port TYPE-ONLY + 1engage template adapter (PATCH-preferred + DELETE+POST fallback) + 48 unit tests, 100% module cov, drift clean, make check green on PM rerun. Q-B-01/02/03 stamped in 4 files; HC adapter dropped to T16-followup pending Q-B-02/Q-C-02. Merged PR #12 `95863c3` |
@@ -2684,6 +2684,107 @@ Q register / follow-ups
 - **T14 retry queue** — separate primitive. T13's rich `meta_failed` outcomes feed T14 worker (retry policy per spec §4.9: 3 attempts + exponential backoff; quota_exhausted + rejected_dnd = permanent per §4.9 "quota / template-not-approved failures are PERMANENT").
 
 Requesting PM B VERDICT.
+
+##### VERDICT T13 — APPROVED (H17, attempt 1, primitive) by PM B (Nanak)
+
+✅ **APPROVED** — the most complex slot B primitive delivered with the highest polish. Independent PM rerun on `feat/wa-outbound-dispatch @ 0541369` (code) + `74f56b5` (SUBMIT status). All 21 ACK binding conditions verified against code (file:line), not claim. **Design win worth cross-slot ratification**: the Round-5 `z.union` refactor extends T15's discriminated-union outcome pattern to the INPUT schema layer, categorically eliminating the `?? '' → as string` risk at type level (not runtime). Ready for PR + squash-merge review.
+
+**Independent verification trace** (rerun on PM shell, Node 22.23.1 + pnpm 9.0.0 via nvm/corepack):
+
+- **`make check`** — **PASS end-to-end** (1.362s). `lint` clean, `format-check` "All matched files use Prettier code style!", `typecheck` (strict + `exactOptionalPropertyTypes`) 0 errors, `test:unit` 31/33 suites (2 pre-existing `_template/*` skips), 313/315 tests. My 3 new suites = **37/37 pass**.
+- **Drift scans (6 EXECUTOR §4.4 categories)** on T13 scope — **all 0 hits**. Special-attention gates:
+  - `as string` / `as X` grep on runtime `.ts` files: **2 hits, BOTH IN DOCSTRINGS** (`service.ts:31` + `types.ts:13`, both comments explaining pattern is avoided per T12 lesson + T15 precedent). **Zero runtime type assertions.**
+  - `throw new Error(` in T13 files: 0 hits. Only `ValidationError` (sync boundary) + propagated `NotFoundError` throw paths.
+  - `DndBlockError` / `OutboundQuotaError` in T13 service: 0 hits — discriminated union outcome per T15 pattern.
+  - T10 `WhatsappConfigService` import in T13 runtime: 0 imports; 1 hit only at `service.ts:7` in **docstring explaining T10 is NOT a dep** (5-dep ctor per binding #6).
+  - `decrypt` direct import in T13 repo: 1 hit at `repository.ts:18` `import { decrypt } from '@shared/utils/crypto.js'` — T15 cross-table crypto pattern applied.
+- **Coverage rerun** (`pnpm test:coverage --collectCoverageFrom='src/modules/whatsapp/whatsapp-outbound-dispatch.*.ts' --collectCoverageFrom='.../ports/hotel-core-quota.port.ts' --collectCoverageFrom='.../ports/hotel-core-dnd.port.ts' --testPathPattern='whatsapp-outbound-dispatch'`):
+  ```
+  File                                      | % Stmts | % Branch | % Funcs | % Lines
+  All files                                 |   100   |   100    |   100   |   100
+   whatsapp-outbound-dispatch.repository.ts |   100   |   100    |   100   |   100
+   whatsapp-outbound-dispatch.schema.ts     |   100   |   100    |   100   |   100
+   whatsapp-outbound-dispatch.service.ts    |   100   |   100    |   100   |   100
+  ```
+  3 type-only files (`types.ts` + 2 ports) erased per ts-jest. **Final 100% is the result of Round-5 z.union refactor** — not test artifice.
+- **`git diff --stat`**: exactly **9 create + 1 modify** = 10 files. Zero touches to `api.ts`, `worker.ts`, `plugins/*`, `prisma/*`, `package.json`, T06/T10/T11/T12/T15/T16 primitive files.
+
+**21 binding conditions — file:line evidence**:
+
+- **#1 `make check` PASS** — PM rerun above. ✓
+- **#2 Drift + special-attention gates** — PM greps above. ✓
+- **#3 Coverage 100%** — PM rerun above. ✓
+- **#4 Repository EXACTLY 4 methods** — `repository.ts` grep: `findConfigForDispatch:26`, `persistPending:36`, `markSent:52`, `markFailed:64`. Docstring L1-15 cross-references PM ACK atomic delta (3→4 methods). Test file has 7 cases covering all 4 methods. ✓
+- **#5 Repository `findConfigForDispatch` decrypts internally** — `:18` `import { decrypt } from '@shared/utils/crypto.js'`; `:31` `decrypt(row.accessTokenEnc)`. Test end-to-end round-trip verifies `accessTokenPlaintext === PLAINTEXT_TOKEN` after `encrypt(PLAINTEXT_TOKEN)` in test setup. Tenant guard via `hotelId` PK lookup asserted. Q-A-03 env-stamp pattern re-appears (cross-slot). ✓
+- **#6 Service ctor is 5 deps** — service `:94-101`: `(repo, bspPort, quotaPort, dndPort, logger)`. **NO `WhatsappConfigService`** (verified via grep + docstring at `:7`). T10 primitive preserved byte-for-byte. ✓
+- **#7 Discriminated union 4 variants** — `types.ts:105-115` matches ACK verbatim. No `dispatchId` on `rejected_dnd` / `quota_exhausted` (fail-early per GAP #4). ✓
+- **#8 Service never throws for external failures** — 6 `.resolves.toEqual(...)` test cases: BSP Error reject, BSP non-Error reject, rollback fails, markFailed fails, markSent fails happy-path, `quotaPort.commit` fails happy-path. Zero `.rejects` on external paths. ✓
+- **#9 Sync throws `ValidationError` + propagates `NotFoundError`** — service `:106-108` sole `ValidationError` throw; `:122-124` propagates `NotFoundError`. Tests `.rejects.toBeInstanceOf(...)` for both; additional test asserts `dndPort.isDndForRecipient` NOT called when config missing. ✓
+- **#10 Fail-early persist discipline** — DND-reject test asserts `persistPending NOT called + checkAndReserve NOT called`. Quota-exhausted test asserts `persistPending NOT called + sendText/Template NOT called + commit/rollback NOT called`. ✓
+- **#11 Quota rollback on Meta failure** — test asserts `rollback(RESERVATION_ID) called + commit NOT called + markFailed called + markSent NOT called`. Service `:229` `await this.rollbackQuotaSafely(reservationId)` in catch. ✓
+- **#12 Quota commit on Meta success** — happy-path test asserts `commit(RESERVATION_ID) called + rollback NOT called + markSent called`. Service `:211` `await this.commitQuotaSafely(reservationId)`. ✓
+- **#13 VVIP-exempt bypass** — 2 dedicated tests: `{blocked: true, vvipExempt: true}` → proceeds to dispatch (persistPending + checkAndReserve + commit called); `{blocked: true, vvipExempt: false}` → returns `rejected_dnd` immediately. ✓
+- **#14 T06 BSP branching** — body-only test asserts `sendText called + sendTemplate NOT called`; template-only asserts `sendTemplate called + sendText NOT called` with `templateName + languageCode + variables` passed verbatim. Schema rejects "BOTH" + "NEITHER" via z.union failure. ✓
+- **#15 PII floor via `maskWaPhone`** — service `:117` masks. Test asserts (a) `logged.recipientPhone === maskWaPhone(RECIPIENT)`, (b) no raw RECIPIENT, (c) no PLAINTEXT_TOKEN, (d) `length < 500`. **Defense-in-depth test iterates all 4 logger methods × all calls asserting no `PLAINTEXT_TOKEN` leak anywhere across the full happy path.** ✓
+- **#16 Ports TYPE-ONLY** — `hotel-core-quota.port.ts` (21 LOC) + `hotel-core-dnd.port.ts` (20 LOC): docstring + interface + type imports. No class/function/adapter. Q-B-08/09 stamps at L1-13 each. ✓
+- **#17 `git diff --stat` scope-clean** — PM rerun. 9 create + 1 modify, zero cross-boundary. ✓
+- **#18 Barrel additive-only** — `index.ts`: T06 (L1-7) + T10 (L9-18) + T16 (L20-44) + T11 (L46-56) + T12 (L58-79) + T15 (L81-95) byte-for-byte preserved. T13 exports appended L97-114. `grep "adapters/" index.ts` = 0. **7th cross-primitive T06 discipline confirmation — norm now unshakeable across 7 primitives.** ✓
+- **#19 Auth-agnostic docstring** — service `:11-15` + types `:8-12` verbatim: "Auth-agnostic: T09 internal-RPC-auth plugin guards the INBOUND RPC route at router-layer preHandler (T13-followup wiring); this primitive consumes an already-authorized RPC payload. Extends T12 signature-agnostic + T15 receiver-only precedents to the RPC receiver context." ✓
+- **#20 Q-B-08/09 assumption stamps** — 4 files: `types.ts:14-24` (A/A summary), `ports/hotel-core-quota.port.ts:1-13` (Q-B-08 + `reservationId` TTL note), `ports/hotel-core-dnd.port.ts:1-12` (Q-B-09 + HC-vs-Auth open Q), `service.ts:17-22` (port abstraction refactor-flexibility). ✓
+- **#21 Rollback discipline docstring** — service `:17-22` verbatim: "Quota two-phase discipline: `checkAndReserve` returns `reservationId`; on Meta success → `commit(reservationId)` records actual send; on Meta failure → `rollback(reservationId)` releases reservation. Matches spec §4.5 wording 'meter reflects only actually-sent messages'. Rollback failure is worker-tolerant (logged, does not throw) — mirrors T12/T15 worker discipline." ✓
+
+**Spec-alignment audit**:
+- `04 §2.4 L83` RPC signature `send_wa_message(hotel_id, guest_id, body, template?, variables?)` → `OutboundDispatchRequestSchema` z.union preserves discriminated shape. ✓
+- `04 §3.1 L98-107` 6-step flow → service `dispatchMessage` implements config → DND → quota reserve → persist → BSP → commit/rollback in order. ✓
+- `MVP §4.4` DND cross-service + VVIP-exempt + inbound-trigger → DND port owns `vvipExempt`; inbound-trigger is caller responsibility per PM ACK GAP #9. ✓
+- `MVP §4.5` quota two-phase "meter reflects only actually-sent" → rollback on Meta failure per PM ACK GAP #5 + explicit test. ✓
+- `MVP §4.9` retry PERMANENT for quota / template-not-approved → T13 primitive doesn't retry; T14 consumes rich outcome for retry policy. ✓
+- `04 §9` DND_BLOCK 422 + RATE_LIMIT 429 → discriminated union `rejected_dnd` + `quota_exhausted` — T13-followup router maps to HTTP codes. ✓
+
+**Security floor check (CLAUDE §6)**:
+- **Fail-early persist** — DND/quota rejects NEVER touch `outbound_dispatch_queue`; tested explicitly. ✓
+- **Quota two-phase + rollback** — spec-explicit; rollback failure worker-tolerant (logged, non-throwing). ✓
+- **PII floor + defense-in-depth accessToken assertion** — all 4 logger methods × all call sites verified no plaintext leak. ✓
+- **Repo owns wa_configs cross-table READ + decrypt DIRECTLY** — T15 cross-table precedent extended; T10 preserved byte-for-byte. ✓
+- **Ports TYPE-ONLY + Q-B-08/09 stamps** — adapters deferred to T13-followup. ✓
+- **Never throws for external failures** — 6 `.resolves` cases. ✓
+- **Sync throws `ValidationError` + propagates `NotFoundError`** — 2 `.rejects` cases; no other throw paths. ✓
+
+**🎯 Design win worth cross-slot ratification** — Round-5 `z.union` refactor:
+
+Initial schema used `z.object().refine(exactly-one-of-body-template)` → service used `req.body ?? ''` fallback → coverage stuck at 97.67% because `?? ''` branch was unreachable per refine but TypeScript couldn't prove it categorically.
+
+**Refactored to `z.union([TextRequest, TemplateRequest])`** at `schema.ts:54`:
+- Each variant has ONE field required at TYPE LEVEL.
+- Service uses `'template' in req` narrowing (`service.ts`).
+- TypeScript proves the discriminated variant categorically.
+- **Fallback eliminated ENTIRELY at type level, not runtime.**
+- Coverage returned to 100% on all 4 metrics WITHOUT any test artifice or `as X` cast.
+
+**T15 introduced discriminated union at the OUTCOME layer; T13 extends the pattern to the INPUT SCHEMA layer.** This means primitives with discriminated request payloads (T13-like: text vs template; and future T14-like: retry-vs-drop; slot C future) can categorically avoid the T12 `as string` recurrence by encoding the discrimination in zod itself.
+
+**Cross-slot recommendation**: PM B recommends adopting the T13 z.union pattern across future primitives with discriminated request shapes. Combined with T15's discriminated-union outcome, we now have TYPE-LEVEL guarantees at both the INPUT and OUTPUT boundaries — the T12 `as string` failure mode is categorically closed at both ends.
+
+**Tolerated deviations accepted** (pre-declared):
+- Prisma-mock stopgap (6× cross-primitive precedent now) — T13-INTEG parked pending Q-C-01 + T14.
+- Q-B-08/09 adapters deferred to T13-followup.
+- Cross-table sibling read in `findConfigForDispatch` — T15 precedent.
+- Q-A-03 test-env workaround RE-APPEARS in `repository.test.ts` (env-stamp `beforeEach` for `decrypt` call) — cross-slot pattern; not on slot B.
+- `Prisma.JsonNull` mixed value+type import (`repo.ts:17`) — design fix (JsonNull is a value expression, needs mixed import).
+- Actual test count 37 (not 36 pre-estimated) — +2 branch-coverage tests during Round 4.
+- Round 1-6 iteration polish — 6 rounds documented, high polish evident.
+
+**Follow-ups accepted** (files, do not action):
+- **T13-followup**: RPC receiver route + T09 auth guard wiring + HC quota adapter + HC DND adapter + T06 BSP adapter wiring. Blocked on Q-B-08 + Q-B-09 + Q-C-02.
+- **T13-INTEG**: real-DB integration + mock HC + mock Meta. Blocked on Q-C-01 + T13-followup.
+- **T14 retry queue**: T13 rich `meta_failed` outcomes feed T14 worker.
+
+**Actions taken**:
+- → §1 task tracker row for T13 updated (`backlog` → `approved (primitive)` with `PM B (H17, a1)` verified-by).
+- → PARENT §1 row for T13 mirrored.
+- → PARENT §2 short roll-up appended (with z.union cross-slot design-win recommendation).
+
+**Next expected action**: Executor B open PR on `feat/wa-outbound-dispatch` for PO merge review; **PR SHOULD squash-merge per PR #14/#15 CLAUDE §12 precedent** (3rd consecutive squash). PM B re-verify on CI green post-PR. **Slot B progress: 6/7 = 86%** (T10 + T11 + T16 + T12 + T15 merged; T13 approved). **Only T14 (retry queue) remaining** — deps T07 + T13 both approved/merged, no cross-service contracts blocking. Slot B home stretch.
 
 <!--
 TEMPLATE — copy untuk task baru:
