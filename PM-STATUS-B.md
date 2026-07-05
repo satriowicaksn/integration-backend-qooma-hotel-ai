@@ -33,7 +33,7 @@
 | T11 | Verify webhook action (`POST /api/integrations/whatsapp/verify-webhook`)         | merged | PM B (H17, a1) | Narrow primitive per PM ACK 10-file inventory: types + schema + sibling repo (single `markVerified`) + service + `WebhookPingerPort` + `HttpWebhookPingerAdapter` (probe-semantics, no throw) + 32 unit tests, 100% module cov, drift clean, make check green on PM rerun. Simple-GET (no `hub.*` params per spec §2.2 "reachable" wording). Router = T11-followup blocked on Q-C-02/03. Merged PR #13 `b083295` |
 | T12 | WA inbound webhook ingest (signature → persist → HC guest upsert → AI RPC)       | merged | PM B (H17, a1) | Narrow primitive per PM ACK 9-file inventory: types + Meta envelope zod schema + `webhook_events` sibling repo (3 methods) + 2-leg service (sync `ingestSync` + async `processEvent` worker-discipline no-throw) + HC guest-upsert port TYPE-ONLY (Q-B-04) + AI inbound port TYPE-ONLY (Q-B-05) + 32 unit tests, 100% module cov, drift clean, make check green on PM rerun. Signature-agnostic (T04 plugin at wiring). `isDuplicate: false` placeholder (Q-B-06 D). `as string` invariant assertion at service.ts:153 (accepted, future refactor: discriminated union). Router+adapters = T12-followup blocked on Q-A-04 + Q-B-04/05/06 + Q-C-02. Merged PR #14 `23bfea1` (**SQUASH** — first squash merge repo-wide, CLAUDE §12 enforced) |
 | T13 | Outbound WA dispatch RPC + DND check + quota two-phase                           | merged | PM B (H17, a1) | Most complex slot B task shipped as narrow primitive per T12 modified-B envelope + PM ACK atomic delta (repo 4-method + service 5-dep). Types + zod z.union([TextRequest, TemplateRequest]) + cross-table repo (findConfigForDispatch decrypt-internally + persistPending + markSent + markFailed) + 6-step service orchestrator (config → DND → quota reserve → persist → BSP → commit/rollback) + 2 TYPE-ONLY HC ports (Q-B-08/09) + 37 unit tests, 100% module cov, drift clean, make check green on PM rerun. Fail-early persist + rollback discipline (both tested). VVIP-exempt bypass. **Design win: Round-5 z.union refactor extends T15 discriminated-union to INPUT schema layer — cross-slot ratification recommended.** Router+adapters = T13-followup blocked on Q-B-08/09 + Q-C-02. Merged PR #16 `688a102` (**SQUASH** — 3rd in a row, CLAUDE §12 fully established; z.union INPUT-layer design win) |
-| T14 | Outbound retry queue (3 attempts exponential backoff)                            | backlog  | —              | After T07 (Nathan) + T13                                           |
+| T14 | Outbound retry queue (3 attempts exponential backoff)                            | approved (primitive) | PM B (H18, a1) | **FINAL slot B primitive — 7/7 = 100%.** Narrow per PM ACK 8-file inventory + atomic delta (input schema 5 fields). Types (2-variant outcome + 5-variant `PermanentFailReason`) + zod 5-field input + pure `classifyFailure` + repo (2 methods, `describeBody` helper avoids `as X`) + service (3-dep ctor, 5-step flow) + 1 TYPE-ONLY `RetryQueuePort` + 43 unit tests, 100% module cov, drift clean, make check green on PM rerun. **ZERO cross-service Q blockers** (first slot-B primitive with no cross-team gaps). Bull runtime abstraction complete (no Bull/bullmq/ioredis imports; T07 CONSUMED via docstring reference). 429 → `quota_exhausted` (Meta rate-limit, PM ACK judgment call). Adapter+worker+DLQ = T14-followup blocked on Q-C-02. Branch `feat/wa-outbound-retry @ efedfc3`, PR pending push |
 | T15 | Delivery receipts ingest (WA Cloud webhook stream)                               | merged | PM B (H17, a1) | Narrow primitive per PM ACK clean-approval 7-file inventory: types (discriminated-union outcome) + Meta statuses envelope zod schema + cross-table sibling repo (2 methods: `findDispatchByExternalId` tenant-guarded + `persist`) + single-method sync service (orphan skip + count + never throws per-status) + 28 unit tests, **first-pass 100% module cov** (no branch iteration needed), drift clean, make check green on PM rerun. Signature-agnostic (T04 plugin at wiring). Multi-row per triple accepted (Q-B-07 D placeholder). **`as string` recurrence eliminated** — discriminated union up-front successfully applied T12 lesson. Router = T15-followup blocked on Q-A-04 + Q-C-02 + T12-followup structure. Merged PR #15 `780dca9` (**SQUASH** — 2nd in a row after PR #14, CLAUDE §12 pattern established) |
 | T16 | WA template Meta relay (submit/resubmit/callback to HC)                          | merged | PM B (H17, a1) | Narrow primitive per PM ACK modified-B: types + zod + service + BSP template port + HC callback port TYPE-ONLY + 1engage template adapter (PATCH-preferred + DELETE+POST fallback) + 48 unit tests, 100% module cov, drift clean, make check green on PM rerun. Q-B-01/02/03 stamped in 4 files; HC adapter dropped to T16-followup pending Q-B-02/Q-C-02. Merged PR #12 `95863c3` |
 
@@ -3148,6 +3148,115 @@ Q register / follow-ups
 **🎯 THIS IS THE FINAL SUBMIT FOR SLOT B — APPROVAL BRINGS SLOT B TO 7/7 = 100%** (all primitives shipped: T10 + T11 + T12 + T13 + T15 + T16 + T14). Cross-service Q blockers (Q-A-04, Q-B-04..09, Q-C-01/02/03) all belong to T##-followup work parked in T##-followup / T##-INTEG lanes; no additional slot-B primitive coding remains.
 
 Requesting PM B VERDICT.
+
+##### VERDICT T14 — APPROVED (H18, attempt 1, primitive) by PM B (Nanak)
+
+✅ **APPROVED — 🎉 SLOT B 7/7 = 100% PRIMITIVES SHIPPED**. Independent PM rerun on `feat/wa-outbound-retry @ efedfc3` (code) + `193120c` (SUBMIT status). All 20 ACK binding conditions verified against code (file:line). **First slot-B primitive with zero cross-service Q blockers** — home-stretch benefit. **Bull runtime abstraction complete** — RetryQueuePort TYPE-ONLY, zero Bull/bullmq/ioredis imports in T14 primitive. Design win: `describeBody` helper extends T13/T15 discriminated-union philosophy to unknown-body type handling. Ready for PR + squash-merge review — completing slot B fleet.
+
+**Independent verification trace** (rerun on PM shell, Node 22.23.1 + pnpm 9.0.0):
+
+- **`make check`** — **PASS end-to-end** (1.406s). `lint` clean, `format-check` clean, `typecheck` strict + `exactOptionalPropertyTypes` = 0 errors, `test:unit` 34/36 suites (2 pre-existing `_template/*` skips), 356/358 tests. My 3 new suites = **43/43 pass**.
+- **Drift scans (6 EXECUTOR §4.4 categories + 2 BONUS)** on T14 scope — **all 0 hits**:
+  - `any` = 0, `console` = 0, `throw new Error(` = 0, forbidden imports = 0, `^export default ` = 0, `.skip(` = 0
+  - **BONUS `Bull` / `bullmq` / `ioredis` in T14 primitive**: **0 runtime imports**. Only 1 hit at `ports/retry-queue.port.ts:6` in **DOCSTRING** ("Primitive never imports `Bull` / `bullmq` / `ioredis` — that's a...") — meta-explanation, not import. ✓
+  - **BONUS `as X` in T14 runtime**: **0 hits** (T13/T15 discriminated-union pattern preserved). ✓
+  - T07 `bull-factory.ts` references: 2 hits, **BOTH in DOCSTRINGS** (`types.ts:7` + `port.ts:4`) — T07 CONSUMED as constant reference, not imported at runtime. ✓
+- **Coverage rerun** (`pnpm test:coverage --collectCoverageFrom='src/modules/whatsapp/whatsapp-outbound-retry.*.ts' --collectCoverageFrom='.../ports/retry-queue.port.ts' --testPathPattern='whatsapp-outbound-retry'`):
+  ```
+  File                                   | % Stmts | % Branch | % Funcs | % Lines
+  All files                              |   100   |   100    |   100   |   100
+   whatsapp-outbound-retry.repository.ts |   100   |   100    |   100   |   100
+   whatsapp-outbound-retry.schema.ts     |   100   |   100    |   100   |   100
+   whatsapp-outbound-retry.service.ts    |   100   |   100    |   100   |   100
+  ```
+  2 type-only files (`types.ts` + `ports/retry-queue.port.ts`) erased per ts-jest.
+- **`git diff --stat main..feat/wa-outbound-retry -- src/ prisma/ package.json pnpm-lock.yaml`** — exactly **8 create + 1 modify** = 9 files. Zero touches to `api.ts`, `worker.ts`, `plugins/*`, `prisma/*`, `package.json`, T06/T10/T11/T12/T13/T15/T16 primitive files, `core/queue/bull-factory.ts` T07 (**CONSUMED not mutated**).
+
+**20 binding conditions — file:line evidence**:
+
+- **#1 `make check` PASS** — PM rerun above. ✓
+- **#2 Drift + Bull/`as X` special-attention gates** — PM greps above. ✓
+- **#3 Coverage 100%** — PM rerun above. ✓
+- **#4 Repository EXACTLY 2 methods** — `repository.ts:24` `markRetryScheduled(dispatchId, attemptCount)` + `:30` `markPermanentFail(dispatchId, lastError)`. NO `markDead` (spec-optional). NO extra methods. Test file 5 cases including JSON.stringify circular-ref edge. ✓
+- **#5 Service ctor 3 deps** — service `:72-76` `(repo: WhatsappOutboundRetryRepository, retryQueuePort: RetryQueuePort, logger: Logger)`. ✓
+- **#6 Input schema 5 fields** — `schema.ts:29-36` `MetaFailureInputSchema` = `{ dispatchId (uuid), hotelId (uuid), attemptsMade (int 0-3), status? (int), body? (unknown) }.strict()`. 9 schema tests cover all field validations. ✓
+- **#7 Discriminated union 2 variants + 5 PermanentFailReason** — `types.ts:53-55` matches ACK verbatim: `{kind: 'scheduled', attemptNumber, jobId} | {kind: 'permanent', reason}`. `PermanentFailReason` at `types.ts:24-29` = 5 variants: `'auth_failed' | 'template_rejected' | 'quota_exhausted' | 'bad_request' | 'exhausted'` — no 6th `'rate_limit'` (429 → `'quota_exhausted'` per ACK L2993). ✓
+- **#8 `classifyFailure` pure function with 12 test matrix** — `schema.test.ts` has 12 tests: 5 retryable (undefined, 500, 502, 503, 504) + 7 permanent (429 quota_exhausted, 401/403 auth_failed, 400 bad_request, 422 template_rejected, 404/409 conservative bad_request). Exceeds ACK ≥9 minimum. ✓
+- **#9 Attempt-cap enforcement** — 4 dedicated cap tests: `attemptsMade=2 status=500 → exhausted`, `attemptsMade=3 regardless → exhausted`, `attemptsMade=1 status=502 → scheduled`, Round-3 branch-fix `attemptsMade=2 status=undefined → exhausted`. ✓
+- **#10 Service never throws for external failures** — 4 `.resolves` cases: queue rejects Error → `permanent{exhausted}`; queue rejects non-Error → `permanent{exhausted}`; `markRetryScheduled` rejects → still `scheduled`; `markPermanentFail` rejects → still `permanent`. Worker discipline extended from T15/T13/T12. ✓
+- **#11 Sync throws only `ValidationError`** — service `:80-84` sole throw. Test `.rejects.toBeInstanceOf(ValidationError)`. ✓
+- **#12 PII floor — MINIMAL job payload** — 3-tier verified:
+  - **Tier 1** — job payload key assertion: `Object.keys(enqueueRetry.mock.calls[0][0]).sort() === ['attemptNumber', 'dispatchId', 'hotelId']`. PM independent verify: `types.ts:44-48` `RetryJobData` = exactly 3 fields; service `:145-149` passes exactly those 3. ✓
+  - **Tier 2** — defense-in-depth iterates all 4 logger method calls asserting `JSON.stringify(call[0])` excludes plaintext token / phone / body content.
+  - **Tier 3** — attempt-level log payload key assertion: `['attemptsMade', 'dispatchId', 'hasStatus', 'hotelId', 'module', 'msg']` (6 keys — status boolean only, no status VALUE; no body) + `length < 500`.
+- **#13 Ports TYPE-ONLY** — `ports/retry-queue.port.ts` (18 LOC) = docstring + interface + type import only. No class, no function, no Bull import. **ZERO Q-B/Q-A stamps** (T14 has no cross-service Q deps — home-stretch first). ✓
+- **#14 `git diff --stat` scope-clean** — PM rerun above. 8 create + 1 modify. ✓
+- **#15 Barrel additive-only** — `index.ts`: T06 (L1-7) + T10 (L9-18) + T16 (L20-44) + T11 (L46-56) + T12 (L58-79) + T15 (L81-95) + T13 (L97-114) all byte-for-byte preserved. T14 exports appended L116-127 only. **8th cross-primitive T06 discipline confirmation — norm now spans all 7 slot B primitives, unshakeable pattern across the entire delivery slice**. ✓
+- **#16 Auth-agnostic docstring** — service `:14-18` verbatim: "**Auth-agnostic**: T14 primitive is called by the T13-followup RPC receiver or the T14-followup worker; both handle auth at their respective layer... Extends T12/T13/T15 precedent to retry-producer context." ✓
+- **#17 429 = permanent judgment note** — `schema.ts:38-48` cites spec §4.9 + PM ACK T14 H17 (Meta rate-limit resets per hour/day; 1s+5s+30s backoff won't recover) + future T14-followup can add `Retry-After` header. ✓
+- **#18 T07 consumption docstring** — service `:11-13` verbatim: "**T07 infrastructure consumed**: `RETRY_BACKOFF_DELAYS_MS = [1000, 5000, 30000]` + `DEFAULT_JOB_ATTEMPTS = 3` baked in T07 factory match spec §4.9 verbatim. T14 primitive is producer + classifier only; Bull auto-retry semantics + DLQ pattern from T07 execute at T14-followup adapter wiring." ✓
+- **#19 No `as X` runtime** — PM grep confirmed 0 hits. `describeBody` helper at repo `:47-53` (`typeof body === 'string' ? body : JSON.stringify(body)` with try/catch for circular refs) elegantly avoids the `as X` need on `Prisma.InputJsonValue` coercion. Repo test covers circular-ref case. ✓
+- **#20 T07 primitive preserved byte-for-byte** — zero touches to `src/core/queue/bull-factory.ts`. Verified via git diff. ✓
+
+**Spec-alignment audit**:
+- `MVP §4.9 L106` retry policy (1s/5s/30s + 3 attempts + quota/template-not-approved permanent) → T07 constants baked spec-verbatim; T14 classifier handles permanent classification. ✓
+- `04 §7 L340-346` retry strategy detail → T14 marks `status='failed'` on permanent; `dead` status deferred (spec-explicitly-optional). ✓
+- `04 §4.5 L245-257` `outbound_dispatch_queue` DDL — `attempts` + `last_error` columns used by repo. ✓
+- `04 §9 L376` `RATE_LIMIT 429` maps to `permanent{quota_exhausted}` — surfaced to T13-followup router for HTTP mapping. ✓
+- T13 `meta_failed` outcome shape (`{dispatchId, status?, body?}`) is T14's input contract — verified match at `schema.ts:29-36`. ✓
+
+**Security floor check (CLAUDE §6)**:
+- **MINIMAL Bull job payload** — verified `RetryJobData` = 3 fields only, no phone/token/body/status leak. T07 factory mandate honored. ✓
+- **NO Bull/bullmq/ioredis imports in T14 primitive** — runtime abstracted behind `RetryQueuePort`. ✓
+- **PII floor 3-tier** — job payload key assertion + defense-in-depth logger iteration + log payload key assertion + length heuristic. ✓
+- **Never throws external failures** — 4 `.resolves` cases confirm worker discipline. ✓
+- **Sync throws only `ValidationError`** — sole throw path. ✓
+- **T07 primitive CONSUMED not mutated** — zero touches to bull-factory.ts. ✓
+
+**🎯 Design wins worth highlighting**:
+
+1. **`describeBody` helper extends T13/T15 discriminated-union philosophy** — repo `:47-53` handles unknown-body coercion to `Prisma.InputJsonValue` via `typeof body === 'string' ? body : JSON.stringify(body)` with try/catch for circular refs. Elegant alternative to `as X` on `unknown` type. Extends the T13 pattern principle: **use pure functions for multi-factor / unknown-input decisions where discriminated union doesn't cleanly apply**.
+
+2. **Bull runtime abstraction COMPLETE** — RetryQueuePort TYPE-ONLY, zero Bull/bullmq/ioredis imports in T14 primitive. T07 infrastructure CONSUMED via docstring reference only. Adapter deferred to T14-followup with clean interface separation.
+
+3. **8th cross-primitive T06 barrel discipline confirmation** — norm spans **ALL 7 slot B primitives** (T10 + T16 + T11 + T12 + T15 + T13 + T14). Unshakeable pattern across the entire delivery slice.
+
+4. **ZERO cross-service Q blockers** — T14 is the **first and only slot-B primitive with no cross-service contract gaps**. Home-stretch benefit: T02 schema + T07 Bull factory + T13 outbound dispatch service all provide the required infrastructure. Confirms that as the slot matures, primitives can build on merged foundation.
+
+**Tolerated deviations accepted** (all pre-declared):
+- Prisma-mock stopgap (7× cross-primitive precedent now) — T14-INTEG parked pending Q-C-01 + T14-followup
+- Bull queue adapter deferred to T14-followup — needs Redis wiring per Q-C-02
+- 429 permanent classification = judgment call — documented in code per binding #17
+
+**Follow-ups accepted** (files, do not action):
+- **T14-followup**: Bull queue creation via T07 `createQueue<RetryJobData>` + processor registration calling T13 `WhatsappOutboundDispatchService.dispatchMessage(...)` on retry + `attachDeadLetterForwarder` + `HttpRetryQueueAdapter`. Optional: `Retry-After` header for 429; stale-period `markDead` timer. Blocked on Q-C-02.
+- **T14-INTEG**: real-Redis Bull job execution + retry backoff timing verification. Blocked on Q-C-01 + T14-followup.
+
+**Actions taken**:
+- → §1 task tracker row for T14 updated (`backlog` → `approved (primitive)` with `PM B (H18, a1)` verified-by).
+- → PARENT §1 row for T14 mirrored.
+- → PARENT §2 short roll-up appended with **🎉 SLOT B 7/7 = 100% PRIMITIVES SHIPPED** celebration.
+
+**Next expected action**: Executor B open PR on `feat/wa-outbound-retry` for PO merge review; **squash-merge per PR #14/#15/#16 CLAUDE §12 precedent** (4th consecutive expected).
+
+---
+
+**🏆 🎉 SLOT B 7/7 = 100% MILESTONE ACHIEVED 🎉 🏆**
+
+**All slot-B primitives shipped**:
+- **T10** (WA config CRUD) — merged PR #10
+- **T11** (verify-webhook) — merged PR #13
+- **T12** (WA inbound webhook ingest) — merged PR #14 (1st squash)
+- **T13** (outbound dispatch RPC + DND + quota two-phase) — merged PR #16 (3rd squash)
+- **T15** (delivery receipts ingest) — merged PR #15 (2nd squash)
+- **T16** (WA template Meta relay) — merged PR #12
+- **T14** (outbound retry queue) — approved primitive, PR pending push
+
+**Slot B fleet delivered**: 7 primitives, all TYPE-LEVEL discipline (T13 z.union INPUT + T15 discriminated-union OUTCOME both extended across the fleet), 8th cross-primitive T06 barrel discipline confirmation, zero `as X` runtime casts (T13/T15 lesson categorically applied), zero drift hits repo-wide on slot-B files.
+
+**Router-layer follow-ups parked**: T10-followup, T11-followup, T12-followup, T13-followup, T14-followup, T15-followup, T16-followup — all blocked on Q-A-04 + Q-B-01..09 + Q-C-01/02/03 (foundation gaps: prisma singleton, api.ts bootstrap, JWT plugin, WA app_secret, HC RPC contracts × 6, HC callback contract, quota+DND ports).
+
+**Slot B primitive delivery: COMPLETE.**
 
 <!--
 TEMPLATE — copy untuk task baru:
