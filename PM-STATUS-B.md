@@ -35,7 +35,7 @@
 | T13 | Outbound WA dispatch RPC + DND check + quota two-phase                           | backlog  | —              | After T06 + T09 (Nathan); HC `check_and_reserve_outbound_quota` RPC|
 | T14 | Outbound retry queue (3 attempts exponential backoff)                            | backlog  | —              | After T07 (Nathan) + T13                                           |
 | T15 | Delivery receipts ingest (WA Cloud webhook stream)                               | backlog  | —              | After T04 + T12                                                    |
-| T16 | WA template Meta relay (submit/resubmit/callback to HC)                          | approved (primitive) | PM B (H17, a1) | Narrow primitive per PM ACK modified-B: types + zod + service + BSP template port + HC callback port TYPE-ONLY + 1engage template adapter (PATCH-preferred + DELETE+POST fallback) + 48 unit tests, 100% module cov, drift clean, make check green on PM rerun. Q-B-01/02/03 stamped in 4 files; HC adapter dropped to T16-followup pending Q-B-02/Q-C-02. Branch `feat/wa-template-relay @ 1a5c20d`, PR pending push |
+| T16 | WA template Meta relay (submit/resubmit/callback to HC)                          | merged | PM B (H17, a1) | Narrow primitive per PM ACK modified-B: types + zod + service + BSP template port + HC callback port TYPE-ONLY + 1engage template adapter (PATCH-preferred + DELETE+POST fallback) + 48 unit tests, 100% module cov, drift clean, make check green on PM rerun. Q-B-01/02/03 stamped in 4 files; HC adapter dropped to T16-followup pending Q-B-02/Q-C-02. Merged PR #12 `95863c3` |
 
 ---
 
