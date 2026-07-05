@@ -110,3 +110,16 @@ export type {
   OutboundDispatchTemplate,
   QuotaCheckResult,
 } from './whatsapp-outbound-dispatch.types.js';
+
+export type { RetryQueuePort } from './ports/retry-queue.port.js';
+export { WhatsappOutboundRetryRepository } from './whatsapp-outbound-retry.repository.js';
+export { MetaFailureInputSchema, classifyFailure } from './whatsapp-outbound-retry.schema.js';
+export type { MetaFailureInputDto } from './whatsapp-outbound-retry.schema.js';
+export { WhatsappOutboundRetryService } from './whatsapp-outbound-retry.service.js';
+export type {
+  PermanentFailPersistenceInput,
+  PermanentFailReason,
+  RetryClassification,
+  RetryJobData,
+  RetryScheduleOutcome,
+} from './whatsapp-outbound-retry.types.js';
