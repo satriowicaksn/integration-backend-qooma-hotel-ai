@@ -1569,6 +1569,130 @@ Coding order:
 
 Awaiting PM B ACK on GAPs #1–#8 (esp. #1 Q-A-04 tension, #2 sync/async split, #3/#4 RPC contracts, #5 idempotency) before writing any code.
 
+##### PM B ACK-with-scope-narrow — T12 PLAN attempt 1 (H17, 2026-07-05) by PM B (Nanak)
+
+**ACK conditional** on one file-inventory tightening (repository drops `findByPayloadMessageId` per GAP #5 D). Not a REJECT — all 8 GAP defaults defensible + spec-aligned; 3 items are cross-service / spec-side contracts I cannot decide alone → filing **Q-B-04 / Q-B-05 / Q-B-06** with primitive built against explicit assumptions so refactor is targeted when PO/HC/AI/Nathan ratify.
+
+**Independent spec verification** (PM read):
+- `MVP §4.2 L92` VERBATIM: "`/webhook/whatsapp/:hotel_slug` MUST verify `X-Hub-Signature-256` against the hotel's `wa_configs.webhook_verify_token`. `/webhook/telegram/:hotel_slug` MUST verify per Telegram's scheme. Reject with 401 if invalid. NO exceptions." → **Spec-explicit contradiction with Meta canonical** (Meta docs: `X-Hub-Signature-256` signed by App Secret, verify_token only for GET hub.verify_token challenge). Q-A-04 is the correct Meta-canonical read; MVP §4.2 wording is either drafting error or a deliberate MVP shortcut (using verify_token as makeshift HMAC secret since App Secret is not in schema).
+- **T04 plugin genuinely secret-agnostic** — verified `src/plugins/hmac-validator.plugin.ts:38-43` `resolveSecret: ResolveSecret = (req) => string | Promise<string>` callback. Docstring L14-15: "The per-hotel secret is injected via `resolveSecret` (hexagonal-disiplin) — this primitive has no knowledge of tenant resolution or config storage." Plugin doesn't decide which secret; wiring-time choice. **Executor's read: correct.** T12 primitive genuinely doesn't depend on Q-A-04.
+- `04-integration-channels.md §3.1 L115-116` RPC signatures verified — `upsert_guest_by_wa_phone(hotel_id, wa_phone, name?) → guest_id` + `inbound_wa_message(guest_id, body, hotel_id)`. Zero URL/path/response body shape. Analogous to Q-B-02 (T16 HC callback). Real contract gaps. ✓
+- `04 §4.4 L218-232` `webhook_events` DDL verified: columns = `id, hotel_id, provider, received_at, signature_valid, payload, processed_at, process_error` + `webhook_events_provider_check` CHECK. **NO `external_id` / `dedup_key` column** confirmed. Prisma model `WebhookEvent` (schema.prisma:72-83) matches — no external_id. Spec `MVP §4.6` mandates `(provider, external_id)` dedupe → **real spec-drift**. Contrast: `outbound_dispatch_queue.external_id VARCHAR(80) NULL` (§4.5 L251) + `delivery_receipts.external_id VARCHAR(80) NOT NULL` (§4.6 L267) both have it — pattern established, just missing on `webhook_events`. Sibling to Q-A-04.
+- `04 §4.4 L226` DDL has `signature_valid BOOLEAN NOT NULL` — DDL literally mandates persist-always-with-flag semantic. GAP #6 A is not a choice, it's the schema requirement.
+- `04 §3.2 L311` — "**To AI (opaque)**: RPC only — `inbound_wa_message(guest_id, body, hotel_id)`. No DB FK." → confirms AI is external-service with no persistence coupling (adapter-only concern).
+- Spec §3.1 3-leg flow (§4.7 persist-fast pattern) + §7 L351 "If processing fails, retry from `webhook_events` queue" → sync + async split is spec-mandated shape.
+
+---
+
+**GAP decisions** (all 8, A/B/C/D per GAP with rationale):
+
+- **GAP T12-#1 (Q-A-04 vs MVP §4.2 HMAC secret contradiction)** — **N/A confirmed for primitive**. Executor read is correct: T04 plugin's `resolveSecret` callback pattern (verified above) makes primitive genuinely signature-agnostic. Router-layer T12-followup decides which secret at wiring time. **PM B interpretation vote** (appended to Q-A-04 register): recommend PO/Nathan resolve as follows — either (a) affirm Meta canonical (add `app_secret_enc VARCHAR + KMS`-encrypted column to `wa_configs`, analogous to `access_token_enc`) OR (b) explicitly ratify MVP §4.2 as MVP-scoped shortcut using `webhook_verify_token` as HMAC secret + amend Meta compatibility note. Either interpretation lands at plugin wiring, primitive unchanged. **Not blocking T12 primitive.**
+
+- **GAP T12-#2 (sync/async split)** — **A** (single service class with 2 methods `ingestSync` + `processEvent`). Rationale: spec-mandated shape per `MVP §4.7` (persist-fast return-200 within 10s) + `04 §7 L351` retry-from-webhook-events queue. B (single sync) violates §4.7 timeout budget. C (drop async leg) loses HC/AI orchestration meat + primitive would be truncated. Executor A matches spec 1:1.
+
+- **GAP T12-#3 (HC `upsert_guest_by_wa_phone` contract)** — **ESCALATE as Q-B-04** (see §3 mirror below). Port TYPE-ONLY in primitive per T16 modified-B precedent. Adapter (`http-hotel-core-guest-upsert.adapter.ts`) deferred to T12-followup pending Q-B-04 resolution + Q-C-02 wiring config. Primitive builds against assumption A (HC exposes single-shot RPC returning `{ guestId }`) with schema/types stamps.
+
+- **GAP T12-#4 (AI `inbound_wa_message` contract)** — **ESCALATE as Q-B-05** (see §3 mirror below). Same shape as GAP #3: port TYPE-ONLY, adapter deferred to T12-followup. Primitive assumes fire-and-forget void response (spec §3.2 L311 "opaque, RPC only, no DB FK" — no return payload contract).
+
+- **GAP T12-#5 (idempotency schema gap)** — **ESCALATE as Q-B-06** (see §3 mirror below) + **D** (skip dedup in primitive; DEFAULT confirmed). Rationale: sibling to Q-A-04 (spec-drift from schema). Executor B (JSON-path query) is slow at scale + would need to be REPLACED once schema-add lands (write-throw). Executor C (synthetic key) has same JSON-parse cost + still doesn't survive spec-reconciliation. **D is the T16 modified-B precedent** — dedup lands at T12-followup after Q-B-06 ratifies schema addition. **Concrete direction: DROP `findByPayloadMessageId` method from `WhatsappWebhookEventsRepository`.** Repository has 3 methods only: `persist`, `markProcessed`, `markFailed`. `WhatsappInboundIngestResponseSchema.isDuplicate` field kept in wire response as `boolean` (always `false` in primitive) so router contract survives Q-B-06 resolution — refactor at T12-followup fills `isDuplicate` semantics correctly.
+
+- **GAP T12-#6 (persist-always with signatureValid flag)** — **A** (schema-mandated, not a choice). `webhook_events.signature_valid BOOLEAN NOT NULL` per §4.4 L226 = DDL-level guarantee. B (persist-only-if-valid) would leave the field with no semantic meaning + lose audit trail for spoof-investigation (docs/SECURITY.md audit intent). C (router persists, service just processes) removes primitive value + violates MODULE_TEMPLATE convention. Executor A is spec-mandated. **Router-layer contract**: T12-followup route MUST pass `signatureValid` flag to `ingestSync`; T04 plugin does NOT reject-with-401 for invalid sig on webhook route (per audit requirement), it sets a request decoration `req.signatureValid = false` that the route reads. Note this cross-references binding for T12-followup — outside T12 primitive scope but PM records here for continuity.
+
+- **GAP T12-#7 (branch discrimination)** — **A** (T12 primitive handles inbound-messages branch ONLY). Spec §2.3 L73 endpoint carries 3 branches (inbound / delivery-receipts / template-status). T15 owns delivery-receipts, T16 already owns template-status (merged PR #12). Router discriminates by payload branch + forwards per-branch payload to per-primitive service. `extractInboundMessages(envelope)` returns `[]` for non-messages branches — service marks event `processed` with empty outcomes. B (T12 handles all 3) collapses SRP + duplicates T15/T16 scope. C (T12 parses full envelope + discriminates) loses SRP — router owns discrimination.
+
+- **GAP T12-#8 (scope depth)** — **A** (9 files, T16 modified-B envelope). Rationale: 2 unratified cross-service contracts (Q-B-04/05) mirror T16 HC callback (Q-B-02) → adapter-defer pattern proven. B (11 files with adapters) invents URL/path/secret assumptions vs Q-B-04/05 unratified — refactor risk. C (7 files, drop async leg) contradicts spec §4.7 pattern.
+
+---
+
+**Q escalations filed** (§3 mirror below + PARENT §3a):
+
+- **Q-B-04** (cross-service contract, HC-team + PO) — HC `upsert_guest_by_wa_phone` RPC endpoint contract (URL/path/payload/response/error catalog). Sibling to Q-B-02. Blocks T12-followup HC adapter.
+- **Q-B-05** (cross-service contract, AI-team + PO) — AI `inbound_wa_message` RPC endpoint contract. Sibling to Q-B-04. Blocks T12-followup AI adapter.
+- **Q-B-06** (schema follow-up, Nathan T02 territory) — `webhook_events.external_id VARCHAR(80) NULL` column addition + partial unique index `WHERE external_id IS NOT NULL`. Sibling to Q-A-04 pattern (spec drift from schema). Blocks T12-followup dedup. `MVP §4.6` mandates `(provider, external_id)` dedupe.
+
+Primitive builds under assumptions with explicit stamps in `types.ts` + `schema.ts` docstrings — refactor sites well-scoped when Qs resolve.
+
+**Q-A-04 update note** (PM B vote appended per GAP #1 verification): T04 plugin's `resolveSecret` callback pattern is genuinely secret-agnostic (verified `hmac-validator.plugin.ts:38-43` + docstring L14-15). T12 primitive builds without needing this resolved. PM B recommendation to PO: either (a) affirm Meta canonical → add `app_secret_enc` schema column analogous to `access_token_enc` (Nathan T02 follow-up); OR (b) explicitly ratify MVP §4.2 as MVP-shortcut using `webhook_verify_token` as HMAC secret + amend spec note. Non-blocking for primitive; blocks T12-followup route wiring only.
+
+---
+
+**Scope tightening (only material change from Executor's plan)**:
+
+- **DROP `findByPayloadMessageId` from `whatsapp-webhook-events.repository.ts`** — repository has EXACTLY 3 methods: `persist`, `markProcessed`, `markFailed`. Test file drops the dedup-lookup test case. Reason: GAP #5 D. Dedup lands at T12-followup after Q-B-06 schema-add ratifies.
+- **KEEP `WhatsappInboundIngestResponseSchema.isDuplicate: boolean`** in wire response schema — router contract survives Q-B-06 resolution. Service returns `isDuplicate: false` always in primitive; T12-followup fills semantics after schema-add.
+- File count unchanged: still 9 files (4 source + 2 type-only ports + 3 tests) + 1 barrel modify.
+
+**Files to create** (9 — unchanged from Executor's plan):
+```
+src/modules/whatsapp/whatsapp-webhook-ingest.types.ts
+src/modules/whatsapp/whatsapp-webhook-ingest.schema.ts
+src/modules/whatsapp/whatsapp-webhook-events.repository.ts        ← 3 methods only
+src/modules/whatsapp/whatsapp-inbound-ingest.service.ts
+src/modules/whatsapp/ports/hotel-core-guest-upsert.port.ts        ← TYPE-ONLY, Q-B-04 stamp
+src/modules/whatsapp/ports/ai-inbound-message.port.ts             ← TYPE-ONLY, Q-B-05 stamp
+src/modules/whatsapp/__tests__/whatsapp-webhook-ingest.schema.test.ts
+src/modules/whatsapp/__tests__/whatsapp-webhook-events.repository.test.ts
+src/modules/whatsapp/__tests__/whatsapp-inbound-ingest.service.test.ts
+```
+
+**Files to modify** (1): `src/modules/whatsapp/index.ts` — append T12 exports (types, schemas, repo class, service class, 2 port interfaces). Preserve T06 (L1-7) + T10 (L9-18) + T16 (L20-44) + T11 (L46-56) blocks byte-for-byte.
+
+**Files explicitly NOT touched** — extends Executor's list: all confirmed. Special-attention: `hmac-validator.plugin.ts` (T04 secret-agnostic already, do NOT mutate), `tenant-resolver.plugin.ts` (T05 slug→hotel_id already, do NOT mutate), all prior primitive files byte-for-byte.
+
+---
+
+**Binding conditions for SUBMIT** (PM B independent-verify on rerun — 16-item pattern extending T11's 14 for T12's additional design gates):
+
+**Quality gate**
+1. `make check` PASS end-to-end on your push. Zero lint / format / typecheck / test failures.
+2. Drift scans per PM-AGENT §3 Step 2 — 6 categories = 0 hits on T12 module files. Special attention: **NO `throw new Error(`** anywhere in module (schema-parse fails → `ValidationError`; sync-leg service parse fails → `ValidationError`); **NO `signature_valid: true` hardcoded** in service code (must come from ctor input to `ingestSync`); **NO `throw new WebhookVerificationError`** (that's T11 concern, unrelated).
+3. Coverage **100% stmt/branch/func/line** on 3 runtime files (`whatsapp-webhook-ingest.schema.ts`, `whatsapp-webhook-events.repository.ts`, `whatsapp-inbound-ingest.service.ts`). Type-only files (`whatsapp-webhook-ingest.types.ts` + both ports) erased at compile per ts-jest — expected.
+
+**Design gate (each MUST be present + provable via test evidence)**
+4. **Repository has EXACTLY 3 methods** (`persist`, `markProcessed`, `markFailed`) — NOT 4. `findByPayloadMessageId` DROPPED per GAP #5 D. PM greps the repo file for the method name → 0 hits. Repository test file has 3 method's-worth of cases (not 4).
+5. **Service is signature-agnostic** — `ingestSync(hotelId, signatureValid, envelope)` accepts `signatureValid: boolean` as ctor input parameter and passes it directly to `eventsRepo.persist({...signatureValid, ...})`. Service NEVER computes signature. Test case asserts both `signatureValid: true` AND `signatureValid: false` paths persist correctly.
+6. **Persist-always audit trail** — service test explicitly covers `ingestSync(hotelId, false, envelope)` — persists with `signatureValid: false`, does NOT throw, returns `{eventId, isDuplicate: false}`.
+7. **Async leg never throws (worker discipline)** — `processEvent` catches HC/AI failures and returns `IngestOutcome[]` with `error` fields set + calls `markFailed`. Test asserts `.resolves.toEqual(...)` not `.rejects` for all failure paths (guestPort failure, aiPort failure). Similar to T11 probe-semantics.
+8. **Sync leg throws only `ValidationError` on bad envelope** — schema parse fail → `ValidationError` at boundary. Test asserts `.rejects.toBeInstanceOf(ValidationError)`. No other throw from `ingestSync`.
+9. **`isDuplicate: false` always in primitive** — service test asserts `expect(result.isDuplicate).toBe(false)` in all sync-leg success cases. Docstring on schema notes Q-B-06 T12-followup will fill semantics.
+10. **PII floor with `maskWaPhone`** — service test asserts `JSON.stringify(logger.info.mock.calls[N])` does NOT contain raw `waPhone` (e.g., `+6281234567890`); does contain masked form (e.g., `+628*******7890`). Positive log-shape assertion + negative plaintext assertion. Same shape as T10-a2/T11 pattern.
+11. **Ports TYPE-ONLY** — both `ports/hotel-core-guest-upsert.port.ts` and `ports/ai-inbound-message.port.ts` = docstring + single interface + type imports only. No adapter file present. NO barrel re-export of any adapter. Same shape as T16 `hotel-core-template-callback.port.ts`.
+12. **Q-B-04/05/06 assumption stamps** — 4 files carry explicit stamps:
+    - `whatsapp-webhook-ingest.types.ts` docstring: A/A/D summary (Q-B-04 guest-upsert, Q-B-05 ai-inbound, Q-B-06 dedup deferred)
+    - `whatsapp-webhook-ingest.schema.ts` docstring: Q-B-06 stamp on `isDuplicate` field (always false in primitive)
+    - `ports/hotel-core-guest-upsert.port.ts` docstring: Q-B-04 stamp + T12-followup adapter defer
+    - `ports/ai-inbound-message.port.ts` docstring: Q-B-05 stamp + T12-followup adapter defer
+
+**Scope gate**
+13. `git diff --stat main..HEAD` — must show exactly **9 create + 1 modify** = 10 files. Zero touches to `api.ts`, `worker.ts`, `prisma-client.ts`, `core/http/http-client.ts`, `plugins/*` (including T04 hmac-validator, T05 tenant-resolver — DO NOT modify), `prisma/*`, `package.json`, `pnpm-lock.yaml`, T06/T10/T11/T16 files, `_template/*`, `telegram/*`.
+14. **Barrel additive-only** — T06 (L1-7) + T10 (L9-18) + T16 (L20-44) + T11 (L46-56) byte-for-byte preserved. T12 exports appended after L56. No adapter re-export.
+
+**Documentation gate**
+15. **Async-worker discipline docstring** — `whatsapp-inbound-ingest.service.ts` `processEvent` docstring explicitly notes: "Never throws — worker discipline. All failure paths return rich `IngestOutcome[]` with `error` fields set + call `markFailed`. Router/worker at T12-followup reads outcomes for observability; retry is via `webhook_events` queue per spec §7 L351."
+16. **HMAC-agnostic docstring** — `whatsapp-inbound-ingest.service.ts` `ingestSync` docstring notes: "Signature verification lives at T04 HMAC plugin (router-layer preHandler); this service consumes `signatureValid` as a trusted boolean parameter. GAP T12-#1 (Q-A-04 vs MVP §4.2 secret-choice) is decided at wiring time — this primitive is genuinely agnostic."
+
+**Tolerated deviations to declare in SUBMIT §Notes** (pre-accepted):
+- Prisma-mock stopgap in `whatsapp-webhook-events.repository.test.ts` — T10/T11/T16 stopgap precedent; T12-INTEG follow-up parked awaiting Q-C-01.
+- Q-B-04/05 adapters deferred to T12-followup — Q-B-04 (HC contract) + Q-B-05 (AI contract) unratified; adapter would bake assumptions.
+- Q-B-06 dedup deferred + `isDuplicate: false` placeholder — schema-add is Nathan/T02 territory; primitive keeps wire contract stable.
+- Q-A-03 test-env workaround MAY re-appear if service test needs env — cross-slot pattern, not on slot B to solve.
+
+**Follow-ups to file in SUBMIT** (list, do NOT implement):
+- **T12-followup** — public route `POST /webhook/whatsapp/:hotel_slug` + T04 plugin wiring (signature-verify with EITHER `webhook_verify_token` OR `app_secret_enc` per Q-A-04 resolution) + T05 tenant-resolver plugin wiring + worker registration for async leg + HC guest-upsert adapter + AI inbound adapter. Blocked on Q-A-04 + Q-B-04 + Q-B-05 + Q-C-02 (api.ts / worker.ts bootstrap + env config).
+- **T12-INTEG** — real-DB integration test for `webhook_events` persistence (testcontainers Postgres) + mock HC + mock AI test harness. Blocked on Q-C-01 + T12-followup.
+
+**Discipline**:
+- Branch `feat/wa-webhook-ingest` per CLAUDE §12.
+- Conventional commit: `feat(whatsapp): T12 inbound webhook ingest primitive (types + schema + repo + service + HC/AI ports type-only)`.
+- Single commit for the primitive.
+- Push branch; do NOT open PR until PM B rerun locally + says "open PR" in VERDICT.
+
+**Rebuttal channel**: If any of the 16 conditions, 8 GAP decisions, or 3 Q escalations feels wrong for T12, post `REBUTTAL T12 item-#N` before coding — PM B re-checks in-session.
+
+**No attempt-2 PLAN required** — GAP #5 D re-tightens Executor's default from 4 repo methods to 3; that's an atomic delta, not a re-plan. Executor codes directly per 9-file inventory + 16 binding conditions + Q-B-04/05/06 assumption stamps.
+
+Proceed. Run `make prisma-generate` if not fresh → code per §Approach 1-11 (minus `findByPayloadMessageId`) → `make check` → SUBMIT.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
@@ -1679,6 +1803,9 @@ Re-run `make check` after fix, confirm pass, resubmit (attempt N+1).
 | Q-B-01 | **`waba_id` (WhatsApp Business Account ID) storage location.** Meta's `/{waba_id}/message_templates` needs WABA ID (account-level, distinct from per-phone `phone_number_id`). `wa_configs` DDL §4.1 has NO `waba_id` column. **Options**: A) HC sends `waba_id` per-RPC in the payload (defers to HC-side config; primitive assumes this) [PM B default in T16 primitive]; B) add `waba_id VARCHAR(80) NOT NULL` to `wa_configs` — schema follow-up analogous to Q-A-04 `app_secret_enc`, needs slot-A/Nathan land; C) new `wa_business_accounts` table — overkill for MVP. **Sibling to Q-A-04.** Blocks T16 router-layer + possibly T13 dispatch (if T13 also needs waba_id). Mirrored to PARENT §3a. | PM B (Nanak) H17 | schema.prisma:33 vs Meta `/message_templates` API; T16 PLAN GAP-#2 | open | — |
 | Q-B-02 | **HC callback endpoint contract for `updateWaTemplateStatus` (cross-service).** Spec `04-integration-channels.md §3.1` L108 mentions "internal callback to HC" for template status transitions — no URL, no path, no payload shape, no expected HC response. `docs/spec/02-hotel-core.md` file does NOT exist in this repo. **Options**: A) narrow port `HotelCoreTemplateCallbackPort` — adapter accepts `{ baseUrl, path, internalSecret }` at construction, PM/HC ratifies exact path via config later [PM B keeps port as TYPE-ONLY in T16 primitive; adapter deferred to T16-followup]; B) hard-code assumed `POST /internal/wa-templates/:id/status` with body `{ status, reason?, meta_template_id }` — clean if HC confirms, otherwise refactor churn; C) block T16 until HC exposes contract. Cross-service ratification (HC-team + PO). Blocks T16-followup HC adapter. Mirrored to PARENT §3a. | PM B (Nanak) H17 | spec §3.1 L108 vs missing `02-hotel-core.md`; T16 PLAN GAP-#5 | open | — |
 | Q-B-03 | **HC → us RPC payload shape for `submit_wa_template_to_meta` / `resubmit_wa_template_to_meta` (cross-service, Q-CONTRACT-07 territory).** Spec §2.4 L85-86 signatures are `submit_wa_template_to_meta(template_id)` + `resubmit_wa_template_to_meta(template_id)` — template_id only. But Meta's `/message_templates` needs `{ name, category, language, components[], waba_id, access_token }`. **Options**: A) HC sends full payload in RPC body — `template_id` is shorthand for a richer payload; matches spec §3.1 narrative; avoids HC→us→HC round-trip [PM B default in T16 primitive]; B) HC sends only `{ template_id }` and we RPC HC back via a new `getWaTemplate(template_id)` internal RPC — extra hop, requires new RPC contract; C) block T16 until PO ratifies (spec §10 Q-CONTRACT-07 designated for endpoint shape ratification). Cross-service ratification. Blocks T16-followup inbound RPC receiver. Mirrored to PARENT §3a. | PM B (Nanak) H17 | spec §2.4 L85-86 + §3.1 L108 + §10 Q-CONTRACT-07; T16 PLAN GAP-#1 | open | — |
+| Q-B-04 | **HC `upsert_guest_by_wa_phone` RPC endpoint contract (cross-service).** Spec `04 §3.1 L115` gives signature `upsert_guest_by_wa_phone(hotel_id, wa_phone, name?) → guest_id` — no URL, no path, no payload shape, no HC response envelope, no error catalog. `docs/spec/02-hotel-core.md` does NOT exist in repo. **Options**: A) narrow port `HotelCoreGuestUpsertPort` — adapter accepts `{ baseUrl, path, internalSecret }` at construction, PM/HC ratifies exact path later [PM B keeps port TYPE-ONLY in T12 primitive; adapter deferred to T12-followup]; B) hard-code assumed `POST /internal/hc/guests/upsert-by-wa-phone` with `{ hotelId, waPhone, name? } → { guestId }`; C) block T12 until HC exposes contract. Cross-service ratification (HC-team + PO). Sibling to Q-B-02. Blocks T12-followup HC adapter. Mirrored to PARENT §3a. | PM B (Nanak) H17 | spec §3.1 L115 vs missing `02-hotel-core.md`; T12 PLAN GAP-#3 | open | — |
+| Q-B-05 | **AI `inbound_wa_message` RPC endpoint contract (cross-service, AI-team).** Spec `04 §3.1 L116` + `§3.2 L311` gives signature `inbound_wa_message(guest_id, body, hotel_id)` marked "opaque, RPC only, no DB FK" — no URL, no path, no response shape, no error catalog. **Options**: A) narrow port `AiInboundMessagePort` — adapter accepts `{ baseUrl, path, internalSecret }` at construction, PM/AI ratifies later [PM B keeps port TYPE-ONLY in T12 primitive; adapter deferred to T12-followup]; B) hard-code assumed `POST /internal/ai/inbound/wa-message` with `{ hotelId, guestId, body, messageId } → void`; C) block. Cross-service ratification (AI-team + PO). Sibling to Q-B-04. Blocks T12-followup AI adapter. Mirrored to PARENT §3a. | PM B (Nanak) H17 | spec §3.1 L116 + §3.2 L311; T12 PLAN GAP-#4 | open | — |
+| Q-B-06 | **`webhook_events.external_id` column addition — schema follow-up sibling to Q-A-04.** `MVP §4.6` mandates dedupe on `(provider, external_id)` for inbound webhook messages. `04 §4.4 L221-232` DDL + Prisma model (schema.prisma:72-83) have **NO `external_id` column** on `webhook_events`. Contrast: `outbound_dispatch_queue.external_id VARCHAR(80) NULL` (§4.5 L251) + `delivery_receipts.external_id VARCHAR(80) NOT NULL` (§4.6 L267) both have it — pattern established, missing on webhook_events. **Options**: A) add `external_id VARCHAR(80) NULL` on `webhook_events` + partial unique index `WHERE external_id IS NOT NULL` (analogous to Q-A-02 `outbound_dispatch_queue.external_id` index pattern) — Nathan/T02 territory [T12 primitive assumes this shape; `WhatsappInboundIngestResponseSchema.isDuplicate` field always `false` in primitive as placeholder]; B) JSON-path query on `payload->'entry'->0->'changes'->0->'value'->'messages'->0->>'id'` — slow at scale, write-throw when A lands; C) synthetic key at runtime — same JSON-parse cost as B; D) skip dedup entirely in primitive (T16 modified-B precedent) [PM B default]. Schema follow-up + slot-A/Nathan land. Blocks T12-followup dedup semantics. Mirrored to PARENT §3a. | PM B (Nanak) H17 | schema.prisma:72-83 + spec §4.4 L221-232 vs §4.6 dedupe mandate; T12 PLAN GAP-#5 | open | — |
 
 ---
 
