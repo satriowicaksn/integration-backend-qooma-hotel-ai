@@ -711,6 +711,130 @@ Hexagonal Disiplin (CLAUDE §4 + ADR-0001): both external systems (Meta BSP + HC
 
 Awaiting PM B ACK on GAPs #1–#7 (esp. #1 payload + #2 WABA storage + #7 scope depth) before writing any code.
 
+##### PM B ACK-with-scope-narrow — T16 PLAN attempt 1 (H17, 2026-07-05) by PM B (Nanak)
+
+**ACK conditional** on 3 changes below. NOT a REJECT — the design of the 11-file default is defensible, but per GAP #7 Executor explicitly offered narrower alternatives and per T10-a2 / T17-a2 precedent the narrow variant is the right shape. Also: 3 items are cross-service contracts I cannot decide alone — filing as **Q-B-01 / Q-B-02 / Q-B-03** with primitive built against explicit assumptions so refactor is targeted when PO/HC-team ratifies.
+
+**Independent spec verification** (PM read):
+- `04-integration-channels.md §1` L7 confirms "Does NOT own ... WA template approval CRUD (Hotel Core owns `wa_templates`)" — HC state ownership ✓
+- `§2.4` L85-86 signatures `submit_wa_template_to_meta(template_id)` + `resubmit_wa_template_to_meta(template_id)` — payload shape ambiguous ✓ (Executor's GAP #1 is real spec-side gap)
+- `§3.1` L108 flow narrative confirms 3-leg pattern (HC→us RPC, us→Meta relay, Meta→us→HC callback) ✓
+- `§7` L346 template-not-approved permanent (no retry) — informs error class choice ✓
+- `§10` L387 Q-CONTRACT-07 is designated for endpoint shape ratification — Executor's GAP #4 sub-question answered: yes this touches Q-CONTRACT-07 (broader ratification) but not blocking primitive
+- `MVP §4.11` L110 shared-secret client-side pattern ✓
+- **`waba_id`** — full spec search, ZERO mention. Real gap analogous to Q-A-04 (`app_secret`), affects `wa_configs` DDL §4.1 ✓
+- **`02-hotel-core.md`** — file does NOT exist in this repo. HC-side template CRUD + callback contract undefined here ✓
+- T06 port (`ports/whatsapp-bsp.port.ts`) — `sendText` + `sendTemplate` are `/messages` surface (message dispatch), distinct from `/message_templates` (template CRUD). GAP #3 A confirmed: separate concerns, NEW port + SRP + preserve T06.
+
+---
+
+**Scope decision — narrow to 9 files (drop HC callback adapter + its test)**:
+
+Per T10-a2 / T17-a2 precedent + Executor's GAP #7 offering, ship **9 files (6 source + 3 tests + 1 barrel modify)**. Drop `http-hotel-core-callback.adapter.ts` + its test from attempt 1. Keep `hotel-core-template-callback.port.ts` as **type-only port** (no adapter) — service is testable via mocked port.
+
+Rationale: the HC callback adapter has THREE undefined dependencies today — HC baseUrl (Q-C-02 env), HC endpoint path (Q-B-02 contract), HC internal secret (Q-C-02 env). Two shared-infra + one contract. Building against placeholders bakes assumptions likely to refactor when Q-B-02 resolves. BSP adapter, by contrast, targets a documented external API surface (Meta `/{waba_id}/message_templates` + 1engage pass-through per T06); the ONE unknown (`waba_id` per Q-B-01) enters via port input, not adapter config.
+
+**Files to create** (6 source + 3 tests):
+```
+src/modules/whatsapp/whatsapp-template.types.ts
+src/modules/whatsapp/whatsapp-template.schema.ts
+src/modules/whatsapp/whatsapp-template.service.ts
+src/modules/whatsapp/ports/whatsapp-template-management.port.ts
+src/modules/whatsapp/ports/hotel-core-template-callback.port.ts       ← keep as port TYPE ONLY (no adapter this attempt)
+src/modules/whatsapp/adapters/1engage-template.adapter.ts
+src/modules/whatsapp/__tests__/whatsapp-template.schema.test.ts
+src/modules/whatsapp/__tests__/whatsapp-template.service.test.ts
+src/modules/whatsapp/__tests__/1engage-template.adapter.test.ts
+```
+
+**Files to modify** (1):
+- `src/modules/whatsapp/index.ts` — append primitive exports (types, schemas, service class, 2 port types, 1 adapter factory). Preserve T06 BSP + T10 config blocks byte-for-byte at top.
+
+**Files DROPPED from attempt 1 default** (defer to T16-followup):
+- `src/modules/whatsapp/adapters/http-hotel-core-callback.adapter.ts` — parked until Q-B-02 resolves + Q-C-02 lands api.ts + env config
+- `src/modules/whatsapp/__tests__/http-hotel-core-callback.adapter.test.ts` — paired with above
+
+**Files explicitly NOT touched** — extends Executor's list: `prisma/*`, `api.ts`, `prisma-client.ts`, `plugins/*`, `package.json`/`pnpm-lock.yaml`, `core/http/http-client.ts` (still stub — will re-declare `HttpPoster` narrow interface inline in the BSP-template adapter per T06 precedent, NOT modify core), T06 primitive (`ports/whatsapp-bsp.port.ts`, `adapters/1engage.adapter.ts`, `__tests__/1engage.adapter.test.ts`) byte-for-byte, T10 primitive (`whatsapp-config.*`) byte-for-byte, `src/modules/telegram/*`, `src/modules/_template/*`.
+
+---
+
+**GAP decisions** (A/B/C per GAP with rationale):
+
+- **GAP T16-#1 (HC → us RPC payload shape)** — **ESCALATE as Q-B-03** (see §3 mirror below). Primitive builds against assumption **A** (HC sends full payload `{ templateId, name, category, language, components[], wabaId, accessToken }` in RPC body) because: (a) avoids HC→us→HC round-trip that would need a separate RPC contract, (b) matches spec §3.1 narrative "HC RPCs this service which relays to Meta", (c) if PO ratifies B (template_id-only), the refactor is targeted at `whatsapp-template.schema.ts` + service ctor call sites (well-typed → compiler-driven). Explicit assumption stamped in schema docstring + SUBMIT §Notes. **Q-B-03 is Q-CONTRACT-07 territory** (spec §10 designates); Parent PM to route.
+
+- **GAP T16-#2 (`waba_id` storage location)** — **ESCALATE as Q-B-01** (see §3 mirror below). Primitive builds against assumption **A** (`wabaId` accepted per-call in port input from HC RPC payload) — no schema change here, no `wa_configs.waba_id_enc` invented. If PO ratifies B (add column to `wa_configs`), that's a schema follow-up analogous to Q-A-04's `app_secret_enc` and belongs to slot A / Nathan. **Sibling to Q-A-04**; Parent PM to route.
+
+- **GAP T16-#3 (BSP port strategy: NEW vs EXTEND)** — **A (NEW port `WhatsappTemplateManagementPort`)**. Rationale: (a) SRP — `/messages` (T06) and `/message_templates` (T16) are distinct Meta surfaces with potentially different Meta auth scopes; (b) preserves T06 file byte-for-byte per T10-a2 discipline; (c) barrel additive; (d) if Meta collapses the surfaces later, EXTEND is a targeted refactor. Sub-folder (option C) rejected — over-structure for one port.
+
+- **GAP T16-#4 (Resubmit semantics — Meta has no `/resubmit`)** — **Adapter-implementation detail, NOT a Q**. The port contract `resubmitTemplate(input): Promise<{ metaTemplateId, status }>` is clean; adapter picks the strategy. **Recommended strategy for adapter docstring**: PATCH-if-editable-else-DELETE+POST (Meta added PATCH for `IN_REVIEW`/`REJECTED` in 2023 per your GAP body — that's the modern preferred path; fallback to DELETE+POST when PATCH not applicable). Adapter test covers PATCH branch + DELETE+POST fallback branch. **Not filing a Q — this is Meta external spec, not Qooma contract**. Executor's sub-question re Q-CONTRACT-07 is answered: it applies to broader endpoint shapes but not to this Meta-side implementation choice.
+
+- **GAP T16-#5 (HC callback contract)** — **ESCALATE as Q-B-02** (see §3 mirror below). Primitive keeps the PORT (`HotelCoreTemplateCallbackPort` type only) so service is testable via port mock. **DROP the adapter and its test from attempt 1 per scope decision above** — build the adapter in T16-followup after Q-B-02 lands + Q-C-02 wires config. Parent PM to route (HC-team + PO ratification needed).
+
+- **GAP T16-#6 (Meta webhook signature verify)** — **A confirmed**. Service is signature-agnostic; signature verify lives at router/plugin layer (T04 HMAC verifier is already merged, T12 will wire it into the WA webhook route). `handleMetaStatusUpdate(event)` receives a parsed status-branch payload as trusted input. Zod schema at `whatsapp-template.schema.ts` still validates STRUCTURE of the event (defense-in-depth type-safety), but NOT signature. Explicit note in service docstring.
+
+- **GAP T16-#7 (scope depth)** — **modified B (9 files, not Executor's 7)** — see §Scope decision above. Executor's B (7 files) drops BOTH adapters; my 9-file variant keeps BSP adapter (spec-known surface) and drops only HC adapter (unratified contract). Coverage envelope reasonable: 3 tests ≈ T17-a2's 3 test files pattern; not a full 4-file test envelope but not the 2-file variant either. Adjust upward if a genuine 4th test cluster surfaces during coding (e.g., a `types.test.ts` for enum unions — allowed).
+
+---
+
+**Q escalations filed** (mirror rows appended to §3 below + PARENT §3a):
+
+- **Q-B-01** (schema follow-up, sibling Q-A-04) — `waba_id` storage location. Blocks T16 router-layer + potentially T13 dispatch. Options A/B/C from GAP #2. PARENT §3a target.
+- **Q-B-02** (cross-service contract) — HC callback endpoint contract (`updateWaTemplateStatus` URL + payload shape + response). Blocks T16-followup HC adapter. Needs PO + HC-team ratification. PARENT §3a target.
+- **Q-B-03** (cross-service contract, Q-CONTRACT-07 territory) — HC → us RPC payload shape for `submit_wa_template_to_meta` / `resubmit_wa_template_to_meta`. Blocks T16 router-layer inbound RPC receiver. PARENT §3a target.
+
+Primitive can build under assumptions A/A/A above without waiting for resolution — refactor when the Qs land is well-scoped (schema.ts + service ctor sites; not adapter code).
+
+---
+
+**Binding conditions for SUBMIT** (PM B will independent-verify on rerun — mirrors T10 ACK §14 pattern):
+
+**Quality gate**
+1. `make check` PASS end-to-end on your push — PM B rerun independently. Zero lint / format / typecheck / test failures.
+2. Drift scans per `PM-AGENT.md §3 Step 2` on touched files — all 14 categories = 0 hits. Special attention: no `throw new Error(` (use `ExternalServiceError` for upstream Meta failures; `ValidationError` for zod-parse failures at service boundary).
+3. Coverage: **100% stmt/branch/func/line** on `src/modules/whatsapp/whatsapp-template.*.ts` + `ports/whatsapp-template-management.port.ts` + `ports/hotel-core-template-callback.port.ts` + `adapters/1engage-template.adapter.ts`. Report coverage delta in SUBMIT. (`whatsapp-template.types.ts` erased at compile per ts-jest — expected.)
+
+**Design gate (each MUST be present + provable via test evidence)**
+4. **PII-floor log test present** — `whatsapp-template.service.test.ts` asserts `JSON.stringify(logger.info.mock.calls[N]?.[0])` does NOT contain plaintext `accessToken` (if present in submit/resubmit inputs). Same shape as T10-a2 service test.
+5. **Direct helper imports only** — `whatsapp-template.service.ts` top has literal `import { maskTokenForLog } from '@shared/utils/masking.js'` (no ctor-inject). If crypto is touched (unlikely at primitive layer — HC payload spec says `accessToken` — mask it in log; but DECRYPT if HC sends `access_token_enc` is a wiring decision at T16-followup, not this primitive).
+6. **No `throw new Error(`** — 0 hits on module scope. All upstream failures → `ExternalServiceError` w/ `service` tag (`'1engage-template'` for BSP, `'hotel-core-template-callback'` for HC — though HC adapter dropped this attempt). Schema-parse failures at boundary → `ValidationError`.
+7. **Barrel additive-only** — `index.ts:1-7` T06 BSP re-export block byte-for-byte preserved; `:9-18` T10 config exports preserved. New template exports append after L18. Diff `+N net` where N reflects the new exports; git diff against main HEAD confirms preservation.
+8. **Port type-only surface for HC callback** — `ports/hotel-core-template-callback.port.ts` contains ONLY the interface + input/output types. NO adapter reference. NO placeholder impl.
+
+**Scope gate**
+9. `git diff --stat main..HEAD` — must show exactly **6 source + 3 tests + 1 modify** = 10 lines in diff-stat. Any unexpected file = REJECT-scope. No `.gitignore`/`package.json`/`pnpm-lock.yaml` touch. No touches to T06 BSP files, T10 config files, `_template/*`, `telegram/*`, `plugins/*`, `api.ts`, `prisma-client.ts`, `prisma/*`, `core/http/*`.
+10. `HttpPoster` interface **re-declared inline** in `1engage-template.adapter.ts` (mirror T06's `1engage.adapter.ts:19-21` — do NOT modify `core/http/http-client.ts`, that's stub / Q-C-02 territory).
+11. **Meta template CRUD hits `/{waba_id}/message_templates`** in the adapter — assert URL construction in adapter test. Not `/messages` (T06's surface).
+12. **`ExternalServiceError` service tag**: BSP adapter uses `service: '1engage-template'` (not just `'1engage'` — disambiguates from T06 in log grep).
+
+**Assumption declarations (SUBMIT §Notes MUST spell out)**
+13. **Q-B-01/02/03 assumption stamp** — service + schema docstrings + SUBMIT §Notes explicitly state: (a) primitive assumes `wabaId` arrives per-call in port input (Q-B-01), (b) HC callback contract stubbed as type-only port pending Q-B-02, (c) HC → us RPC payload assumed rich `{ templateId, name, category, language, components[], wabaId, accessToken }` (Q-B-03).
+14. **Adapter `resubmit` strategy documented** — adapter file docstring explains PATCH-if-editable-else-DELETE+POST strategy + which Meta template states each branch handles + test coverage for both branches.
+
+**Tolerated deviations to declare in SUBMIT §Notes**:
+- HC callback adapter deferred to T16-followup (per GAP #5 → Q-B-02).
+- Test-double at port-shape level (not Prisma) — no stopgap-declaration analogous to T10-a2 because there IS no Prisma in T16; ports ARE the boundary.
+- Q-A-03 test-env workaround likely re-appears in service test (env-stamp in `beforeEach`) — cross-slot pattern with T10-a2 + T17-a2.
+
+**Follow-ups to file in SUBMIT** (list, do NOT implement):
+- **T16-followup** — routes for HC-facing inbound RPC + Meta webhook branch handler + HC callback adapter (`http-hotel-core-callback.adapter.ts` + its test). Blocked on Q-B-01 + Q-B-02 + Q-B-03 (contracts) + Q-C-02 (`api.ts` bootstrap + env for HC baseUrl/secret).
+- **T16-INTEG** — cross-service integration test (mock Meta gateway + mock HC server + internal-RPC test harness). Blocked on T16-followup + Q-C-01/02.
+
+**Do NOT file**:
+- No new Q for GAP #4 (Meta resubmit semantics) — external Meta spec, adapter implementation detail.
+- No new Q for GAP #3 — resolved by PM decision (A).
+- No new Q for GAP #6 — confirmed (A), service is signature-agnostic; router-layer plane covers it.
+- Reference Q-A-04 (WA `app_secret`) as router-layer blocker (T12 concern, not T16 primitive).
+
+**Discipline**:
+- Branch `feat/wa-template-relay` per CLAUDE §12.
+- Conventional commit: `feat(whatsapp): T16 template relay primitive (types + schema + service + BSP port/adapter + HC-callback port)`.
+- Single commit for the primitive shape (T10-a2 + T17-a2 pattern).
+- Push branch; do NOT open PR until PM B rerun locally + says "open PR" in VERDICT.
+
+**Rebuttal channel**: If the scope-narrow direction, GAP decisions, or any binding condition looks wrong for T16, post `REBUTTAL T16 item-#N` before coding — PM B re-checks in-session.
+
+**No attempt-2 PLAN required** — GAP #7 explicitly offered variants for me to pick from; I picked (modified B, 9 files). Executor code directly per the 9-file inventory + Q-B-01/02/03 assumption stamps (binding #13) + adapter resubmit strategy documented (binding #14). Precedent: T17-a1 needed a re-PLAN because scope was invented; here scope was choose-from-menu, so we skip the re-PLAN round-trip.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
@@ -816,9 +940,11 @@ Re-run `make check` after fix, confirm pass, resubmit (attempt N+1).
 
 > PM B catat di sini ketika executor B raise `GAP` atau `BLOCKED`. Setelah resolve atau eskalasi ke Parent PM, update status. Parent PM consolidate ke `PM-STATUS-PARENT.md §3`.
 
-| ID            | Question | Source         | Status | Resolution |
-| ------------- | -------- | -------------- | ------ | ---------- |
-| —             | —        | —              | —      | —          |
+| ID            | Question | Raised by | Source         | Status | Resolution |
+| ------------- | -------- | --------- | -------------- | ------ | ---------- |
+| Q-B-01 | **`waba_id` (WhatsApp Business Account ID) storage location.** Meta's `/{waba_id}/message_templates` needs WABA ID (account-level, distinct from per-phone `phone_number_id`). `wa_configs` DDL §4.1 has NO `waba_id` column. **Options**: A) HC sends `waba_id` per-RPC in the payload (defers to HC-side config; primitive assumes this) [PM B default in T16 primitive]; B) add `waba_id VARCHAR(80) NOT NULL` to `wa_configs` — schema follow-up analogous to Q-A-04 `app_secret_enc`, needs slot-A/Nathan land; C) new `wa_business_accounts` table — overkill for MVP. **Sibling to Q-A-04.** Blocks T16 router-layer + possibly T13 dispatch (if T13 also needs waba_id). Mirrored to PARENT §3a. | PM B (Nanak) H17 | schema.prisma:33 vs Meta `/message_templates` API; T16 PLAN GAP-#2 | open | — |
+| Q-B-02 | **HC callback endpoint contract for `updateWaTemplateStatus` (cross-service).** Spec `04-integration-channels.md §3.1` L108 mentions "internal callback to HC" for template status transitions — no URL, no path, no payload shape, no expected HC response. `docs/spec/02-hotel-core.md` file does NOT exist in this repo. **Options**: A) narrow port `HotelCoreTemplateCallbackPort` — adapter accepts `{ baseUrl, path, internalSecret }` at construction, PM/HC ratifies exact path via config later [PM B keeps port as TYPE-ONLY in T16 primitive; adapter deferred to T16-followup]; B) hard-code assumed `POST /internal/wa-templates/:id/status` with body `{ status, reason?, meta_template_id }` — clean if HC confirms, otherwise refactor churn; C) block T16 until HC exposes contract. Cross-service ratification (HC-team + PO). Blocks T16-followup HC adapter. Mirrored to PARENT §3a. | PM B (Nanak) H17 | spec §3.1 L108 vs missing `02-hotel-core.md`; T16 PLAN GAP-#5 | open | — |
+| Q-B-03 | **HC → us RPC payload shape for `submit_wa_template_to_meta` / `resubmit_wa_template_to_meta` (cross-service, Q-CONTRACT-07 territory).** Spec §2.4 L85-86 signatures are `submit_wa_template_to_meta(template_id)` + `resubmit_wa_template_to_meta(template_id)` — template_id only. But Meta's `/message_templates` needs `{ name, category, language, components[], waba_id, access_token }`. **Options**: A) HC sends full payload in RPC body — `template_id` is shorthand for a richer payload; matches spec §3.1 narrative; avoids HC→us→HC round-trip [PM B default in T16 primitive]; B) HC sends only `{ template_id }` and we RPC HC back via a new `getWaTemplate(template_id)` internal RPC — extra hop, requires new RPC contract; C) block T16 until PO ratifies (spec §10 Q-CONTRACT-07 designated for endpoint shape ratification). Cross-service ratification. Blocks T16-followup inbound RPC receiver. Mirrored to PARENT §3a. | PM B (Nanak) H17 | spec §2.4 L85-86 + §3.1 L108 + §10 Q-CONTRACT-07; T16 PLAN GAP-#1 | open | — |
 
 ---
 
