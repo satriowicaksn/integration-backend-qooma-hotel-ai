@@ -2456,6 +2456,129 @@ Hexagonal Disiplin: T06 BSP (external Meta) already has port+adapter — my serv
 
 Awaiting PM B ACK on GAPs #1–#9 (esp. #3 T10 plaintext access, #4 persistence timing, #5 rollback) before writing any code.
 
+##### PM B ACK-with-scope-clarification — T13 PLAN attempt 1 (H17, 2026-07-05) by PM B (Nanak)
+
+**ACK conditional** on 1 material clarification (GAP #3 sibling-read layout) + 2 Q escalations (Q-B-08 quota RPC + Q-B-09 DND RPC contracts). Not a REJECT — all 9 GAP defaults defensible + spec-aligned; but Executor's PLAN §3 has a contradiction with GAP #3 A default that needs resolution before coding.
+
+**Independent spec verification** (PM read):
+- `04 §2.4 L83` RPC signature `send_wa_message(hotel_id, guest_id, body, template?, variables?)` ✓
+- `04 §3.1 L98-107` 6-step flow verbatim: config lookup → DND check (with VVIP-exempt + inbound-trigger) → quota check+reserve → dispatch → quota commit on success ✓ (spec has 7th step for delivery receipt persist — that's T15 concern)
+- `MVP §4.4 L96` DND cross-service + VVIP-exempt + inbound-trigger flags CONFIRMED ✓
+- `MVP §4.5 L98` two-phase quota: `check_and_reserve_outbound_quota` + `commit_outbound_quota_increment`. **Wording "meter reflects only actually-sent messages" strongly supports rollback semantic** (Meta failure = not actually sent = shouldn't consume quota). ✓
+- `MVP §4.9 L106` retry policy — "quota / template-not-approved failures are PERMANENT" — informs T14 retry logic (not T13 primitive) ✓
+- `04 §9 L376-377` — `DND_BLOCK 422` + `RATE_LIMIT 429` catalog codes ✓
+- `04 §4.5 L245-257` `outbound_dispatch_queue` DDL — `scheduled_for` field exists for potential DND-deferred scheduling (T14 concern) ✓
+- **No RPC signatures for quota/DND** — URL/response shape/error catalog all absent. Q-B-08/09 warranted (sibling to Q-B-04/05 pattern).
+- T10 `whatsapp-config.service.ts:49-100` verified: `getForHotel` returns `WhatsappConfigDomain` with `accessToken: maskTokenForLog(plaintextAccessToken)` (`:97`). Plaintext never leaves service. GAP #3 legitimate. ✓
+- T06 `whatsapp-bsp.port.ts` verified: `sendText({credentials, to, body})` + `sendTemplate({credentials, to, templateName, languageCode, variables?})`; `BspCredentials = {phoneNumberId, accessToken}` — plaintext accessToken required. ✓
+- `core/errors/app-errors.ts:108` `DndBlockError` (422) + `:114` `OutboundQuotaError` (429) available — but PM prefers discriminated union outcome per T15 pattern (deriving `AppError` from outcome variants happens at T13-followup router → HTTP response mapping).
+
+---
+
+**GAP decisions** (all 9, A/B/C per GAP with rationale):
+
+- **GAP T13-#1 (HC quota RPC contract)** — **ESCALATE as Q-B-08** (see §3 mirror below). Port TYPE-ONLY per T12 modified-B precedent; adapter deferred to T13-followup pending Q-B-08 resolution + Q-C-02 wiring config. Primitive builds under assumption A (HC exposes 2-phase quota RPC + rollback endpoint) with type stamps.
+
+- **GAP T13-#2 (HC DND RPC contract)** — **ESCALATE as Q-B-09** (see §3 mirror below). Port TYPE-ONLY. Sub-decision: **separate ports (not combined precheck)** — spec §3.1 L101-102 checks DND + quota sequentially in that order, and the outcomes surface distinct error codes (`DND_BLOCK 422` vs `RATE_LIMIT 429`). Combining would collapse spec's error-code distinction. Adapter deferred to T13-followup.
+
+- **GAP T13-#3 (plaintext accessToken accessor) — CRITICAL CLARIFICATION**: **A CONFIRMED** (sibling read in T13's repo — T15 cross-table pattern) but PLAN §3 has a contradiction that MUST be resolved before coding.
+  - **PLAN §3 currently says**: repository has "EXACTLY 3 methods (T12 precedent)" + "NO WaConfig read here (per GAP #3 default — separate concern)"
+  - **But GAP #3 A default says**: sibling read IN this repo (`whatsapp-outbound-dispatch.repository.ts` also reads `wa_configs`)
+  - **Contradiction resolution**: PM B ratifies GAP #3 A → **Repository has EXACTLY 4 methods**:
+    1. `findConfigForDispatch(hotelId): Promise<{ bsp, phoneNumberId, accessTokenPlaintext } | null>` — reads `wa_configs`, decrypts `accessTokenEnc` via `decrypt` from `@shared/utils/crypto.js`, returns plaintext for BSP call. Tenant-guarded via `hotelId` PK lookup.
+    2. `persistPending(input)` — creates `outbound_dispatch_queue` row with `status='pending'`
+    3. `markSent(dispatchId, externalId, sentAt)` — updates to `status='sent'`
+    4. `markFailed(dispatchId, lastError)` — updates to `status='failed'` with JSON error
+  - **Service ctor collapses to 5 deps** (not Executor's 6): `(repo, bspPort, quotaPort, dndPort, logger)`. **NO `WhatsappConfigService` (T10) dependency** — T13's repo does the cross-table config read directly, exactly mirroring T15's cross-table read pattern on `outbound_dispatch_queue`. T10 primitive preserved byte-for-byte.
+  - **Why NOT consume T10 configService**: T10's public API returns masked domain (correct security for CRUD read path). Adding a `getForDispatch(...)` unmasked method to T10 would mutate T10 (breaks byte-for-byte discipline). Sibling read is spec-neutral, preserves T10, and follows the T15 cross-table precedent (T15 reads `outbound_dispatch_queue` directly, not through T13 which doesn't exist).
+  - **Update PLAN §3 + §4 wording**: repo has 4 methods (not 3); service ctor is 5 deps (not 6).
+
+- **GAP T13-#4 (persistence sequence timing)** — **A** (fail-early — no persist for immediate DND/quota rejects). Rationale: (a) Spec §4.5 audit intent "meter reflects only actually-sent" concerns the QUOTA meter, not disposition audit; (b) `outbound_dispatch_queue` DDL `status ∈ pending|sent|failed|dead` doesn't mandate persist for pure rejects; (c) `§4.4 "queue for after DND end OR drop, per exception_* flags"` implies caller-decided disposition — T13 primitive returns `{kind: 'rejected_dnd', reason}` outcome; T13-followup router or T14 decides queue-vs-drop based on `exception_*` flags. Executor A preserves primitive simplicity; audit trail via router-layer log (not `outbound_dispatch_queue` write). B (persist-always) would expand primitive scope + require `scheduled_for` semantics that belong to T14. C rejected — persist-on-reserve leaves DND rejects orphaned.
+
+- **GAP T13-#5 (rollback semantics on Meta failure)** — **A** (rollback reservation on Meta failure). Rationale: spec §4.5 wording "meter reflects only actually-sent messages" is EXPLICIT support for rollback. Meta failure = not actually sent = quota should be released. §4.9 "quota / template-not-approved failures are PERMANENT do NOT retry" concerns retry policy (T14), not rollback (T13). C rejected — sub-question filing would delay a spec-clear decision.
+
+- **GAP T13-#6 (discriminated union outcome variants)** — **A** (4 variants: `dispatched | rejected_dnd | quota_exhausted | meta_failed`). Rationale: `config_not_found` correctly propagates as `NotFoundError` from T13 repo's `findConfigForDispatch` returning null → service throws (boundary error, not outcome). `schema_invalid` correctly throws `ValidationError` from zod parse. Both are propagated errors — outcomes are for "successful reach past validation but reject/fail during execution". 4 variants is complete for T13 primitive scope.
+
+- **GAP T13-#7 (T06 BSP method selection)** — **A** (schema-level discriminated union: exactly one of `body` or `template`; service branches on presence). Rationale: `OutboundDispatchRequest` zod schema uses `z.union([bodyOnlyShape, templateOnlyShape])` for exclusivity. Service `if (request.template) bspPort.sendTemplate(...) else bspPort.sendText(...)`. T06 BSP port signatures stable (merged PR #6).
+
+- **GAP T13-#8 (scope depth)** — **A** (9 files: 4 source + 2 type-only ports + 3 tests). Matches T12 modified-B envelope. Adapter deferral for Q-B-08/09 mirrors T12 (Q-B-04/05) and T16 (Q-B-02) precedents. B (11 files with adapters) invents URL/response assumptions vs unratified contracts. C (7 files without repo tests) breaks Prisma-mock stopgap cross-primitive precedent.
+
+- **GAP T13-#9 (VVIP-exempt handling)** — **A** (DND port response includes `vvipExempt: boolean`; service proceeds if `inDnd: true, vvipExempt: true`; inbound-trigger is caller responsibility). Rationale: HC owns VVIP data model; DND port centralizes bypass decision — clean SRP. B (T13 fetches Auth's `hotels.vvip_list` separately) requires a 3rd RPC contract + violates SRP. C (skip VVIP) drops a spec §4.4 requirement.
+
+---
+
+**Q escalations filed** (§3 mirror below + PARENT §3a):
+
+- **Q-B-08** (cross-service contract, HC-team + PO) — HC outbound quota RPC endpoint contract for `check_and_reserve_outbound_quota` + `commit_outbound_quota_increment` + rollback endpoint (URL/path/payload/response/error catalog). Sibling to Q-B-04. Blocks T13-followup HC quota adapter.
+- **Q-B-09** (cross-service contract, HC-team + PO) — HC DND RPC endpoint contract for `checkDnd(hotelId, guestId?)` returning `{inDnd, vvipExempt?}`. Sibling to Q-B-04/08. Whether DND lives in HC or Auth is HC-team's call. Blocks T13-followup HC DND adapter.
+
+Primitive builds under assumption A/A for both — no assumption stamps needed on service (ports abstract the contracts).
+
+---
+
+**Binding conditions for SUBMIT** (extending T15's 18-item pattern for T13 specifics — 21 items total):
+
+**Quality gate**
+1. `make check` PASS end-to-end. Zero lint / format / typecheck / test failures.
+2. Drift scans per PM-AGENT §3 Step 2 — 6 categories = 0 hits on T13 module files. Special attention: **NO `throw new Error(`**; **NO `DndBlockError` / `OutboundQuotaError` thrown from service** (discriminated union outcome per T15 pattern; error-class mapping happens at T13-followup router → HTTP response, not primitive); **NO `as string` / `as X` runtime type assertion** (T12 lesson + T15 precedent — encode discriminated union up-front).
+3. Coverage **100% stmt/branch/func/line** on 3 runtime files (`schema.ts`, `repository.ts`, `service.ts`). Type-only files (`types.ts` + 2 ports) erased per ts-jest.
+
+**Design gate (each MUST be present + provable via test evidence)**
+4. **Repository EXACTLY 4 methods** (not Executor's original 3): `findConfigForDispatch` + `persistPending` + `markSent` + `markFailed`. Test file has 4 method's-worth of cases minimum: `findConfigForDispatch` happy + null + decrypt-round-trip, `persistPending` happy, `markSent` happy, `markFailed` happy.
+5. **Repository `findConfigForDispatch` decrypts internally** — uses `decrypt` from `@shared/utils/crypto.js` DIRECT import (T10/T15 pattern). Returns plaintext to service. Test asserts (a) `decrypt` called, (b) returned `accessTokenPlaintext` = decrypt(row.accessTokenEnc), (c) tenant-guarded via `hotelId` PK lookup (Prisma `where: { hotelId }`).
+6. **Service ctor is 5 deps** (not Executor's 6): `(repo, bspPort, quotaPort, dndPort, logger)`. NO `WhatsappConfigService` dependency. T10 primitive preserved byte-for-byte.
+7. **Discriminated union outcome — 4 variants** (T15 pattern) at `types.ts`:
+   ```
+   type OutboundDispatchOutcome =
+     | { kind: 'dispatched'; dispatchId: string; externalId: string }
+     | { kind: 'rejected_dnd'; reason: string }
+     | { kind: 'quota_exhausted'; reason: string }
+     | { kind: 'meta_failed'; dispatchId: string; status?: number; body?: unknown };
+   ```
+   No `dispatchId` on `rejected_dnd` / `quota_exhausted` (fail-early per GAP #4).
+8. **Service never throws for external failures** — worker discipline: `.resolves` on all failure paths (BSP fail, quota port fail, DND port fail, mark* fail, rollback fail). Tests use `.resolves.toEqual(...)` for these 5+ failure cases.
+9. **Sync throws only `ValidationError`** on schema parse + **propagates `NotFoundError`** from `repo.findConfigForDispatch` returning null (service throws `NotFoundError('wa_config', hotelId)`). Both are propagated errors, not outcome variants.
+10. **Fail-early persist discipline** — test cases assert `repo.persistPending` NOT called for `rejected_dnd` outcome, NOT called for `quota_exhausted` outcome. Only called when both DND + quota pass.
+11. **Quota rollback on Meta failure** — test asserts `quotaPort.rollback(reservationId)` called + `quotaPort.commit` NOT called when BSP throws or returns non-2xx. Sequence: `checkAndReserve` succeeds → `persistPending` → `bspPort.send*` fails → `markFailed` + `rollback` → outcome `{kind: 'meta_failed', dispatchId}`.
+12. **Quota commit on Meta success** — test asserts `quotaPort.commit(reservationId)` called + `quotaPort.rollback` NOT called on happy path.
+13. **VVIP-exempt bypass** — test with DND port returning `{inDnd: true, vvipExempt: true}` proceeds to quota check → dispatch. Test with `{inDnd: true, vvipExempt: false}` returns `{kind: 'rejected_dnd', ...}` immediately.
+14. **T06 BSP branching** — test with `body`-only request calls `bspPort.sendText` (not `sendTemplate`); test with `template`-only calls `bspPort.sendTemplate` (not `sendText`); test with both or neither → `ValidationError`.
+15. **PII floor via `maskWaPhone(recipientPhone)`** — service log statements mask. Test asserts (a) `logged.recipientPhone === maskWaPhone(RAW_PHONE)`, (b) `JSON.stringify(logged).not.toContain(RAW_PHONE)`, (c) `JSON.stringify(logged).length < 500`. Additional test: `accessTokenPlaintext` NEVER in log (defense-in-depth — even though it's not in log path, negative assertion).
+16. **Ports TYPE-ONLY** — both `ports/hotel-core-quota.port.ts` + `ports/hotel-core-dnd.port.ts` = docstring + interface(s) + type imports only. No adapter files.
+
+**Scope gate**
+17. `git diff --stat main..HEAD` — exactly **9 create + 1 modify** = 10 files. Zero touches to `api.ts`, `worker.ts`, `plugins/*`, `prisma/*`, `package.json`, `pnpm-lock.yaml`, T06/T10/T11/T12/T15/T16 primitive files (byte-for-byte), `_template/*`, `telegram/*`, `core/http/*`, `core/prisma/*`.
+18. **Barrel additive-only** — T06 (L1-7) + T10 (L9-18) + T16 (L20-44) + T11 (L46-56) + T12 (L58-79) + T15 (L81-95) blocks byte-for-byte preserved. T13 exports appended after L95. **7th cross-primitive T06 discipline confirmation**.
+
+**Documentation gate**
+19. **HMAC-agnostic / auth-agnostic docstring** — service docstring notes: "**Auth-agnostic**: T09 internal-RPC-auth plugin (`X-Internal-Secret` header) guards the INBOUND RPC route at router-layer preHandler (T13-followup wiring); this service consumes an already-authorized RPC payload. Extends T12 signature-agnostic + T15 receiver-only precedents to the RPC receiver context."
+20. **Q-B-08/09 assumption stamps** — 4 files carry explicit stamps: `types.ts` (A/A summary for both), `ports/hotel-core-quota.port.ts` (Q-B-08 stamp + T13-followup adapter defer), `ports/hotel-core-dnd.port.ts` (Q-B-09 stamp + defer), service docstring notes port abstractions preserve refactor-flexibility on contract resolution.
+21. **Rollback discipline docstring** — service docstring above `dispatchMessage` notes: "**Quota two-phase discipline**: `checkAndReserve` returns `reservationId`; on Meta success → `commit(reservationId)` records actual send; on Meta failure → `rollback(reservationId)` releases reservation. Matches spec §4.5 wording 'meter reflects only actually-sent messages'. Rollback failure is worker-tolerant (logged, does not throw)."
+
+**Tolerated deviations to declare in SUBMIT §Notes** (pre-accepted):
+- Prisma-mock stopgap in `.repository.test.ts` — T10/T11/T12/T15/T16 precedent (6× now); T13-INTEG parked pending Q-C-01.
+- Q-B-08/09 adapters deferred to T13-followup — unratified contracts.
+- Cross-table sibling read in `findConfigForDispatch` — legitimate SRP within dispatch concern; T15 precedent explicitly ratified this pattern for cross-table primitives.
+- Q-A-03 test-env workaround MAY re-appear if service test needs env (for `decrypt` call) — cross-slot pattern.
+
+**Follow-ups to file in SUBMIT** (list, do NOT implement):
+- **T13-followup** — RPC receiver route `POST /internal/rpc/send-wa-message` + T09 auth guard wiring + HC quota adapter + HC DND adapter + T06 BSP adapter wiring in entrypoint. Blocked on Q-B-08 + Q-B-09 + Q-C-02.
+- **T13-INTEG** — real-DB integration test with `wa_configs` + `outbound_dispatch_queue` populated + mock HC quota/DND servers + mock Meta. Blocked on Q-C-01 + T13-followup.
+- **T14** — retry queue primitive; T13 rich outcomes feed T14 worker (retry semantics on `meta_failed`; drop-vs-defer decision on `rejected_dnd`/`quota_exhausted` per `exception_*` flags).
+
+**Discipline**:
+- Branch `feat/wa-outbound-dispatch` per CLAUDE §12.
+- Conventional commit: `feat(whatsapp): T13 outbound dispatch primitive (types + schema + repo + service + HC quota/DND ports type-only)`.
+- Single commit for the primitive.
+- Push branch; do NOT open PR until PM B rerun locally + says "open PR" in VERDICT.
+- **Squash-merge per PR #14/#15 CLAUDE §12 precedent**.
+
+**Rebuttal channel**: If any of the 21 conditions, 9 GAP decisions, or 2 Q escalations feels wrong for T13, post `REBUTTAL T13 item-#N` before coding — PM B re-checks in-session. Especially: if PLAN §3 clarification on 4-method repo doesn't sit right, rebut before coding.
+
+**No attempt-2 PLAN required** — GAP #3 clarification is an atomic delta (repo 3 → 4 methods, ctor 6 → 5 deps). Executor codes directly per the 9-file inventory + 4-method repo + 5-dep service + 21 binding conditions.
+
+Proceed. Code per §Approach 1-9 (with repo bullet updated to 4 methods) → `make check` → SUBMIT.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
@@ -2570,6 +2693,8 @@ Re-run `make check` after fix, confirm pass, resubmit (attempt N+1).
 | Q-B-05 | **AI `inbound_wa_message` RPC endpoint contract (cross-service, AI-team).** Spec `04 §3.1 L116` + `§3.2 L311` gives signature `inbound_wa_message(guest_id, body, hotel_id)` marked "opaque, RPC only, no DB FK" — no URL, no path, no response shape, no error catalog. **Options**: A) narrow port `AiInboundMessagePort` — adapter accepts `{ baseUrl, path, internalSecret }` at construction, PM/AI ratifies later [PM B keeps port TYPE-ONLY in T12 primitive; adapter deferred to T12-followup]; B) hard-code assumed `POST /internal/ai/inbound/wa-message` with `{ hotelId, guestId, body, messageId } → void`; C) block. Cross-service ratification (AI-team + PO). Sibling to Q-B-04. Blocks T12-followup AI adapter. Mirrored to PARENT §3a. | PM B (Nanak) H17 | spec §3.1 L116 + §3.2 L311; T12 PLAN GAP-#4 | open | — |
 | Q-B-06 | **`webhook_events.external_id` column addition — schema follow-up sibling to Q-A-04.** `MVP §4.6` mandates dedupe on `(provider, external_id)` for inbound webhook messages. `04 §4.4 L221-232` DDL + Prisma model (schema.prisma:72-83) have **NO `external_id` column** on `webhook_events`. Contrast: `outbound_dispatch_queue.external_id VARCHAR(80) NULL` (§4.5 L251) + `delivery_receipts.external_id VARCHAR(80) NOT NULL` (§4.6 L267) both have it — pattern established, missing on webhook_events. **Options**: A) add `external_id VARCHAR(80) NULL` on `webhook_events` + partial unique index `WHERE external_id IS NOT NULL` (analogous to Q-A-02 `outbound_dispatch_queue.external_id` index pattern) — Nathan/T02 territory [T12 primitive assumes this shape; `WhatsappInboundIngestResponseSchema.isDuplicate` field always `false` in primitive as placeholder]; B) JSON-path query on `payload->'entry'->0->'changes'->0->'value'->'messages'->0->>'id'` — slow at scale, write-throw when A lands; C) synthetic key at runtime — same JSON-parse cost as B; D) skip dedup entirely in primitive (T16 modified-B precedent) [PM B default]. Schema follow-up + slot-A/Nathan land. Blocks T12-followup dedup semantics. Mirrored to PARENT §3a. | PM B (Nanak) H17 | schema.prisma:72-83 + spec §4.4 L221-232 vs §4.6 dedupe mandate; T12 PLAN GAP-#5 | open | — |
 | Q-B-07 | **`delivery_receipts` UNIQUE constraint on `(dispatch_id, external_id, status)` triple — OPTIONAL future enhancement (schema follow-up, sibling to Q-B-06 pattern).** `04 §4.6 L263-272` DDL only has status CHECK constraint; NO UNIQUE on triple. Multi-row per triple is NATIVE to `delivery_receipts` semantics (status progression `sent → delivered → read` produces 3 rows for same message). BUT Meta CAN send duplicate status events on network retry — currently produces duplicate DB rows. **Options**: A) add `UNIQUE (dispatch_id, external_id, status)` + partial UNIQUE index + `ON CONFLICT DO NOTHING` upsert semantic in T15-followup repo — Nathan/T02 territory + T15-followup wiring [PM B default for future ratification]; B) skip Q-B-07 entirely — accept duplicate rows as harmless append-only audit noise; C) compute synthetic dedup key at runtime — polluting service logic. **NOT blocking T15 primitive** (multi-row accepted per DDL). Filed for future enhancement scheduling. Mirrored to PARENT §3a. | PM B (Nanak) H17 | schema.prisma:108-119 + spec §4.6 L263-272; T15 PLAN GAP-#5 | open | — |
+| Q-B-08 | **HC outbound quota RPC endpoint contract (cross-service, HC-team + PO).** Spec `MVP §4.5 L98` + `04 §3.1 L102/L105` mandate 2-phase: `check_and_reserve_outbound_quota(hotel_id)` + `commit_outbound_quota_increment(hotel_id, 1)` + implicit rollback endpoint per PM B GAP T13-#5 A ratification. NO URL, NO path, NO payload/response shape, NO error catalog. `docs/spec/02-hotel-core.md` does NOT exist in repo. **Options**: A) narrow port `HotelCoreQuotaPort` with `checkAndReserve` + `commit` + `rollback` methods — adapter accepts `{ baseUrl, path, internalSecret }` at construction, PM/HC ratifies exact path later [PM B keeps port TYPE-ONLY in T13 primitive; adapter deferred to T13-followup]; B) hard-code assumed `POST /internal/hc/quota/check-and-reserve` + `/commit` + `/rollback` with `{ hotelId, reservationId? }`; C) block T13. Sibling to Q-B-04. Blocks T13-followup HC quota adapter. Mirrored to PARENT §3a. | PM B (Nanak) H17 | spec §4.5 + §3.1 vs missing `02-hotel-core.md`; T13 PLAN GAP-#1 | open | — |
+| Q-B-09 | **HC DND RPC endpoint contract (cross-service, HC-team + PO).** Spec `MVP §4.4 L96` + `04 §3.1 L101` mandate DND cross-service check with VVIP-exempt + inbound-trigger flags. `hotels.dnd` lives in Auth per §4.4; whether HC exposes an RPC or shared-DB read is HC-team's call. NO URL, NO signature, NO response shape. **Options**: A) narrow port `HotelCoreDndPort` with `checkDnd(hotelId, guestId?)` returning `{inDnd: false} | {inDnd: true, vvipExempt?: boolean, reason: string}` — adapter accepts `{ baseUrl, path, internalSecret }` at construction, PM/HC ratifies exact contract later [PM B keeps port TYPE-ONLY in T13 primitive; adapter deferred]; B) hard-code assumed `POST /internal/hc/dnd/check` with `{ hotelId, guestId? } → { inDnd, vvipExempt? }`; C) block T13. **Sub-decision (PM B ratified per T13 PLAN GAP #2)**: separate ports — NOT combined `precheck_outbound(hotelId, guestId)` — because spec §3.1 sequences DND + quota separately and each surfaces distinct error codes (`DND_BLOCK 422` vs `RATE_LIMIT 429`). Sibling to Q-B-04/08. Blocks T13-followup HC DND adapter. Mirrored to PARENT §3a. | PM B (Nanak) H17 | spec §4.4 + §3.1 vs missing `02-hotel-core.md`; T13 PLAN GAP-#2 | open | — |
 
 ---
 
