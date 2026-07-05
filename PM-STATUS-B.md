@@ -35,7 +35,7 @@
 | T13 | Outbound WA dispatch RPC + DND check + quota two-phase                           | backlog  | —              | After T06 + T09 (Nathan); HC `check_and_reserve_outbound_quota` RPC|
 | T14 | Outbound retry queue (3 attempts exponential backoff)                            | backlog  | —              | After T07 (Nathan) + T13                                           |
 | T15 | Delivery receipts ingest (WA Cloud webhook stream)                               | backlog  | —              | After T04 + T12                                                    |
-| T16 | WA template Meta relay (submit/resubmit/callback to HC)                          | backlog  | —              | After T06; HC internal `updateWaTemplateStatus` callback           |
+| T16 | WA template Meta relay (submit/resubmit/callback to HC)                          | approved (primitive) | PM B (H17, a1) | Narrow primitive per PM ACK modified-B: types + zod + service + BSP template port + HC callback port TYPE-ONLY + 1engage template adapter (PATCH-preferred + DELETE+POST fallback) + 48 unit tests, 100% module cov, drift clean, make check green on PM rerun. Q-B-01/02/03 stamped in 4 files; HC adapter dropped to T16-followup pending Q-B-02/Q-C-02. Branch `feat/wa-template-relay @ 1a5c20d`, PR pending push |
 
 ---
 
@@ -921,6 +921,89 @@ Q register / follow-ups
 - **T16-INTEG** — cross-service integration test with mock Meta gateway + mock HC server + internal-RPC test harness. Blocked on T16-followup + Q-C-01/02.
 
 Requesting PM B VERDICT.
+
+##### VERDICT T16 — APPROVED (H17, attempt 1, primitive) by PM B (Nanak)
+
+✅ **APPROVED**. Independent PM rerun on `feat/wa-template-relay @ 1a5c20d` (code) + `ef03a7b` (SUBMIT status). All 14 ACK binding conditions verified against code (file:line), not claim. Scope contained per ACK modified-B direction (9 files exact); HC callback adapter correctly dropped to T16-followup. Ready for PR + merge review.
+
+**Independent verification trace** (rerun on PM shell, Node 22.23.1 + pnpm 9.0.0 via nvm/corepack):
+
+- **`make check`** — **PASS end-to-end** (0.921s). `lint` clean (`eslint . --max-warnings 0`), `format-check` "All matched files use Prettier code style!", `typecheck` (`tsc --noEmit` strict + `exactOptionalPropertyTypes`) 0 errors, `test:unit` 18/20 suites passed (2 pre-existing `_template/*` baseline skips), 184/186 tests passed. My 3 new suites = 48/48 pass, 0 fail.
+- **Drift scans (6 EXECUTOR §4.4 categories)** on T16 scope files (`whatsapp-template.*`, both new ports, `1engage-template.adapter.ts`, 3 test files) — all 0 hits: `any` = 0, `console.log/info/debug` = 0, `throw new Error(` = 0, forbidden imports = 0, `^export default ` = 0, `.skip(` / `describe.skip` = 0. Pre-existing baseline hits confined to `_template/*` + `core/config/env.ts` + `core/http/http-client.ts` (all in Files-NOT-touched list).
+- **Coverage rerun** (`pnpm test:coverage --collectCoverageFrom='src/modules/whatsapp/whatsapp-template.*.ts' --collectCoverageFrom='.../ports/whatsapp-template-management.port.ts' --collectCoverageFrom='.../ports/hotel-core-template-callback.port.ts' --collectCoverageFrom='.../adapters/1engage-template.adapter.ts' --testPathPattern='(whatsapp-template|1engage-template)'`):
+  ```
+  File                           | % Stmts | % Branch | % Funcs | % Lines
+  All files                      |   100   |   100    |   100   |   100
+   whatsapp                      |   100   |   100    |   100   |   100
+    whatsapp-template.schema.ts  |   100   |   100    |   100   |   100
+    whatsapp-template.service.ts |   100   |   100    |   100   |   100
+   whatsapp/adapters             |   100   |   100    |   100   |   100
+    1engage-template.adapter.ts  |   100   |   100    |   100   |   100
+  ```
+  3 type-only files (`whatsapp-template.types.ts` + 2 port files) erased at compile per ts-jest — matches ACK #3 caveat.
+- **`git diff --stat main..feat/wa-template-relay -- src/ prisma/ package.json pnpm-lock.yaml`** — exactly **9 create + 1 modify** = 10 files. Zero touches to `api.ts`, `prisma-client.ts`, `core/http/http-client.ts`, `plugins/*`, `prisma/schema.prisma`, `prisma/migrations/*`, `package.json`, `pnpm-lock.yaml`, `_template/*`, `telegram/*`, T06 BSP port/adapter/tests, T10 whatsapp-config.*.
+
+**14 binding conditions — file:line evidence**:
+
+- **#1 `make check` PASS** — PM rerun above. ✓
+- **#2 Drift scans 0 hits on module scope** — PM rerun above. ✓
+- **#3 Coverage 100%** — PM rerun above (3 runtime files). ✓
+- **#4 PII-floor log test present** — `whatsapp-template.service.test.ts:117-134` submit PII-floor + `:197-210` resubmit PII-floor: `JSON.stringify(logger.info.mock.calls[0]?.[0])` excludes `PLAINTEXT_ACCESS_TOKEN`. **Extra rigor**: `:136-153` events-array ordering test proves log fires BEFORE `bspPort.submitTemplate` (`events: ['log', 'bsp']`). ✓
+- **#5 Direct helper imports only** — `whatsapp-template.service.ts:28` literal `import { maskTokenForLog } from '@shared/utils/masking.js';`. Ctor at `:50-54` = `(bspPort, hcCallback, logger)` — no helper ctor-inject. ✓
+- **#6 No `throw new Error(`** — drift scan #3 confirms 0 in module scope. Upstream Meta failures → `ExternalServiceError` w/ `service: '1engage-template'` (adapter `:113`, `:124`, `:142`, `:173`); HC failures → `ExternalServiceError` w/ `service: 'hotel-core-template-callback'` (service `:159-163`); schema-parse failures → `ValidationError` (service `:62`, `:97`, `:131`). ✓
+- **#7 Barrel additive-only** — `src/modules/whatsapp/index.ts:1-7` T06 BSP re-export block byte-for-byte preserved vs `main`; `:9-18` T10 config block byte-for-byte preserved. New T16 exports appended L20-44 only. Diff-against-main = +26 net additive. ✓
+- **#8 HC callback port TYPE-ONLY** — `ports/hotel-core-template-callback.port.ts` = 19 LOC total: docstring L1-13 (with Q-B-02 defer stamp) + type import L15 + single interface L17-19. NO adapter file present (verified: `ls src/modules/whatsapp/adapters/` shows only `1engage-template.adapter.ts` + T06's `1engage.adapter.ts` — HC adapter DROPPED per ACK modified-B). NO adapter re-export in barrel (would fail `no-restricted-imports`). ✓
+- **#9 `git diff --stat` scope-clean** — PM rerun above. 9 create + 1 modify, zero cross-boundary touches. ✓
+- **#10 `HttpPoster` re-declared inline** — `1engage-template.adapter.ts:38-42` declares narrow `HttpPoster` interface with `post` + `patch` + `delete` methods. Mirror of T06's `1engage.adapter.ts:19-21` pattern. Zero coupling to stubbed `core/http/http-client.ts`. ✓
+- **#11 Meta template CRUD hits `/{waba_id}/message_templates`** — adapter `:82-84` `collectionUrl(wabaId)` builds `${baseUrl}/${apiVersion}/${wabaId}/message_templates`; `:86-88` `itemUrl(wabaId, metaTemplateId)` appends `/${metaTemplateId}` for PATCH/DELETE. Test `1engage-template.adapter.test.ts:32` COLLECTION_URL constant `'https://graph.facebook.com/v18.0/9876543210/message_templates'` asserted at L73 (POST), L154 for item URL (PATCH). NOT `/messages` (T06 surface). ✓
+- **#12 `ExternalServiceError` service tag disambiguated** — adapter `:54` `const SERVICE = '1engage-template';` (distinct from T06's `'1engage'`). Service `:160` uses `'hotel-core-template-callback'` for wrapped HC failures. Both unique in log grep. ✓
+- **#13 Q-B-01/02/03 assumption stamps present** — 4 files carry explicit stamps:
+  - `whatsapp-template.types.ts:6-17` A/A/A summary with refactor markers
+  - `whatsapp-template.schema.ts:5-13` + `:41-43` Q-B-03 stamp on HotelCoreSubmitRpcPayloadSchema
+  - `ports/whatsapp-template-management.port.ts:9-11` Q-B-01 stamp (`wabaId` per-call)
+  - `ports/hotel-core-template-callback.port.ts:6-13` Q-B-02 defer-to-followup stamp
+  Refactor sites well-scoped when Qs resolve. ✓
+- **#14 Adapter `resubmit` strategy documented + tests cover both branches** — `1engage-template.adapter.ts:11-25` docstring explains PATCH-preferred with DELETE+POST fallback + 2023 Meta editing rationale + spec §3.1 alignment. Test coverage in `1engage-template.adapter.test.ts:147-172` PATCH-success branch, `:174-198` PATCH-non-2xx→DELETE+POST fallback, `:200-214` PATCH-network-reject→DELETE+POST fallback, `:216-244` failure paths on the fallback DELETE/POST. Adapter `:149-164` tryPatch swallows errors and returns null (fallback trigger); `:166-178` deleteThenPost reuses `submitTemplate` after DELETE. ✓
+
+**Prettier / typecheck iterations (SUBMIT §Notes L914-915) — accepted**:
+- Prettier collapse `types.ts` 80→75 + `service.ts` 169→166 = semantic-identical formatting delta. Consistent with T10-a2 prettier note pattern.
+- `exactOptionalPropertyTypes` widening on `WaTemplateComponent.text?: string` → `T | undefined` — canonical fix, non-semantic. Correctly applied at `types.ts:27-29` + `service.ts:153` (spread pattern for conditional `reason` field).
+
+**Comment false-positive drift discovery (SUBMIT §Notes L916)** — original `"any non-2xx"` wording matched `: any` regex, reworded to `"every non-2xx"`. PM verify: current adapter docstring at `:23` reads `"every non-2xx or thrown network error"` — clean. ✓
+
+**Discipline discovery (SUBMIT §Notes L910)** — adapter re-exports blocked by `no-restricted-imports` `'**/adapters/*'` pattern. PM verify: barrel `index.ts:20-44` exports only port INTERFACES + service CLASS + zod schemas + type DTOs. NO `create1engageTemplateAdapter` factory in barrel. Adapter wiring happens at entrypoint via direct `./adapters/1engage-template.adapter.js` import when Q-C-02 lands. T06 discipline confirmed cross-slot. ✓
+
+**Spec-alignment audit**:
+- Spec `04-integration-channels.md §2.4` L85-86 RPC signatures — service methods `submit(hotelId, payload)` + `resubmit(hotelId, payload)` map to `submit_wa_template_to_meta` / `resubmit_wa_template_to_meta` with hotelId separately (routing extracts from URL, per spec §2.2 slug pattern). Payload assumption A stamped at `types.ts:10-14`. ✓
+- Spec `§3.1` L108 3-leg flow (HC→us RPC → us→Meta relay → Meta→us→HC callback) — service handles all 3 (`submit` + `resubmit` cover legs 1-2; `handleMetaStatusUpdate` covers leg 3). ✓
+- Spec `§7` template-not-approved permanent — reflected via `WaTemplateStatus = 'REJECTED'` union member + no retry logic in primitive (retry belongs to T14 outbound retry queue, out of scope). ✓
+- MVP `§4.11` shared-secret client-side pattern — reflected via `Q-B-02` port shape (`{ baseUrl, path, internalSecret }`); adapter deferred to T16-followup. ✓
+- Meta API constraints — schema caps sensible: `TEMPLATE_NAME_MAX 512` (Meta ≤ 512), `COMPONENT_TEXT_MAX 1024` (Meta body ≤ 1024), `WABA_ID_MAX 80` (WABA IDs are numeric strings, 80 is generous), `LANGUAGE_CODE_MAX 20` (BCP-47 tags fit), `REASON_MAX 500`. ✓
+
+**Security floor check (CLAUDE §6 + spec §4.1 + spec §4.11)**:
+- **PII-floor log fires BEFORE any external call** — service `:68-79` submit log BEFORE `:81` `bspPort.submitTemplate`; `:103-115` resubmit log BEFORE `:117` `bspPort.resubmitTemplate`. Ordering asserted by events-array test. ✓
+- **Access token masked in log** — `accessToken: maskTokenForLog(input.accessToken)` at service `:78` (submit) + `:114` (resubmit). Test `service.test.ts:131` `JSON.stringify(logged).not.toContain(PLAINTEXT_ACCESS_TOKEN)` + `:133` `logged.accessToken === maskTokenForLog(PLAINTEXT_ACCESS_TOKEN)`. ✓
+- **Plaintext token only crosses BSP boundary (Authorization header)** — adapter `:90-97` `requestOptions(accessToken)` uses in `Bearer` header only. Adapter never logs the token. ✓
+- **No hardcoded secrets** — Meta URL via `OneEngageTemplateConfig.baseUrl` injected at construction; `wabaId` per-call (Q-B-01 A); `accessToken` per-call (Q-B-03 A). Zero env references in module code. ✓
+- **`ExternalServiceError` w/ `{status, body}` envelope for Meta failures** — adapter `:112-120` non-2xx wraps `{status, body}`; `:122-128` missing-id wraps; `:141-144` + `:172-175` network errors wrap. Same envelope T06 uses (Sentry-friendly). ✓
+- **Signature-agnostic service** — `handleMetaStatusUpdate` receives already-verified payload (T04 HMAC + T12 router upstream). Structural zod re-parse via `TemplateStatusEventSchema.safeParse` at service `:129` = defense-in-depth. ✓
+
+**Tolerated deviations accepted** (pre-declared per ACK expectations):
+- Adapter re-exports blocked by `no-restricted-imports` — barrel discipline confirmed; adapter wired at entrypoint on Q-C-02 land.
+- HC callback adapter dropped to T16-followup per ACK modified-B — NOT a "primitive gap"; it's the ratified scope choice.
+- Prettier collapse `types.ts` + `service.ts` — semantic identical.
+- Q-A-03 test-env workaround NOT triggered in T16 tests (no crypto/env dep in primitive) — cross-slot pattern remains pending PM A resolution.
+
+**Follow-ups accepted** (files, do not action):
+- **T16-followup**: routes for HC-facing inbound RPC + Meta webhook branch handler + HC callback adapter (`http-hotel-core-callback.adapter.ts` + its test). Blocked on Q-B-01 + Q-B-02 + Q-B-03 (contracts) + Q-C-01 + Q-C-02 (foundation) + Q-A-04 (T12 signature verify).
+- **T16-INTEG**: cross-service integration test (mock Meta gateway + mock HC server + internal-RPC test harness). Blocked on T16-followup + Q-C-01/02.
+
+**Actions taken**:
+- → §1 task tracker row for T16 updated (`backlog` → `approved (primitive)` with `PM B (H17, a1)` verified-by).
+- → PARENT §1 row for T16 mirrored (same status + notes shape as T10).
+- → PARENT §2 short roll-up appended (1 line, format per `PM-AGENT.md §0.8`, append-at-bottom convention).
+
+**Next expected action**: Executor B open PR on `feat/wa-template-relay` for PO merge review; PM B re-verify on CI green post-PR before recommending merge (same discipline as T10 pre-merge). **Slot B progress: 2/7 (T10 + T16 primitives)** · T11-T15 backlog (T11 skeleton could go next if Q-C-02 wiring becomes available in parallel with T13 outbound dispatch which depends on T06 already-merged + T09 already-merged). T16-followup + T16-INTEG parked pending Q resolutions.
 
 <!--
 TEMPLATE — copy untuk task baru:
