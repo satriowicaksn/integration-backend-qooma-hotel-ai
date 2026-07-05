@@ -42,3 +42,15 @@ export type {
   WaTemplateComponentType,
   WaTemplateStatus,
 } from './whatsapp-template.types.js';
+
+export type { WebhookPingerPort } from './ports/webhook-pinger.port.js';
+export { WhatsappWebhookVerifyRepository } from './whatsapp-webhook-verify.repository.js';
+export { WhatsappVerifyWebhookResponseSchema } from './whatsapp-webhook-verify.schema.js';
+export type { WhatsappVerifyWebhookResponseDto } from './whatsapp-webhook-verify.schema.js';
+export { WhatsappWebhookVerifyService } from './whatsapp-webhook-verify.service.js';
+export type {
+  WebhookPingerInput,
+  WebhookPingerResult,
+  WebhookVerificationDomain,
+  WebhookVerificationOutcome,
+} from './whatsapp-webhook-verify.types.js';
