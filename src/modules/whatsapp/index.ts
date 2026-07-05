@@ -54,3 +54,26 @@ export type {
   WebhookVerificationDomain,
   WebhookVerificationOutcome,
 } from './whatsapp-webhook-verify.types.js';
+
+export type { AiInboundMessagePort } from './ports/ai-inbound-message.port.js';
+export type { HotelCoreGuestUpsertPort } from './ports/hotel-core-guest-upsert.port.js';
+export { WhatsappInboundIngestService } from './whatsapp-inbound-ingest.service.js';
+export { WhatsappWebhookEventsRepository } from './whatsapp-webhook-events.repository.js';
+export {
+  WhatsappInboundEnvelopeSchema,
+  WhatsappInboundIngestResponseSchema,
+  extractInboundMessages,
+} from './whatsapp-webhook-ingest.schema.js';
+export type {
+  WhatsappInboundEnvelopeDto,
+  WhatsappInboundIngestResponseDto,
+} from './whatsapp-webhook-ingest.schema.js';
+export type {
+  AiInboundInput,
+  GuestUpsertInput,
+  GuestUpsertResult,
+  IngestOutcome,
+  WebhookEventPersistenceInput,
+  WebhookEventProvider,
+  WhatsappInboundMessage,
+} from './whatsapp-webhook-ingest.types.js';
