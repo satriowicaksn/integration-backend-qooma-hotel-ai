@@ -92,3 +92,21 @@ export type {
   WhatsappDeliveryReceiptsIngestResult,
   WhatsappStatusEntry,
 } from './whatsapp-delivery-receipts.types.js';
+
+export type { HotelCoreDndPort } from './ports/hotel-core-dnd.port.js';
+export type { HotelCoreQuotaPort } from './ports/hotel-core-quota.port.js';
+export { WhatsappOutboundDispatchRepository } from './whatsapp-outbound-dispatch.repository.js';
+export { OutboundDispatchRequestSchema } from './whatsapp-outbound-dispatch.schema.js';
+export type { OutboundDispatchRequestDto } from './whatsapp-outbound-dispatch.schema.js';
+export { WhatsappOutboundDispatchService } from './whatsapp-outbound-dispatch.service.js';
+export type {
+  DndCheckResult,
+  OutboundDispatchConfig,
+  OutboundDispatchOutcome,
+  OutboundDispatchPersistenceInput,
+  OutboundDispatchProvider,
+  OutboundDispatchRequest,
+  OutboundDispatchStatus,
+  OutboundDispatchTemplate,
+  QuotaCheckResult,
+} from './whatsapp-outbound-dispatch.types.js';
