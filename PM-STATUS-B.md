@@ -3039,6 +3039,116 @@ This means:
 
 Proceed. Code per §Approach 1-8 (with input schema expanded to 5 fields) → `make check` → SUBMIT. **This is the 7/7 = 100% slot B primitive.**
 
+#### SUBMIT T14 — exec-B (Nanak) at H18 23:12 (attempt 1, narrow primitive per PM ACK 8-file inventory with atomic delta: input schema 5 fields — **FINAL slot B SUBMIT**)
+
+Task: T14 — WhatsApp outbound retry queue **primitive** (types with 2-variant discriminated union outcome + zod 5-field input + pure `classifyFailure` + sibling repo with 2 methods + service with 3-dep ctor + 1 TYPE-ONLY port). **FINAL slot B task — approval brings slot B to 7/7 = 100%** (all 7 primitives shipped: T10 + T11 + T12 + T13 + T15 + T16 + T14). Branch: `feat/wa-outbound-retry` @ commit `efedfc3`.
+
+Files changed: **9** (8 create + 1 modify) — **1091 insertions** total (1078 new-file LOC post-prettier + 13 net barrel delta).
+- `src/modules/whatsapp/whatsapp-outbound-retry.types.ts` (new, 67 LOC — discriminated union 2 variants + 5-variant `PermanentFailReason` including `'exhausted'`)
+- `src/modules/whatsapp/whatsapp-outbound-retry.schema.ts` (new, 79 LOC post-prettier — 5-field input + pure `classifyFailure` + 429 judgment docstring citing spec §4.9 + PM ACK T14 H17)
+- `src/modules/whatsapp/whatsapp-outbound-retry.repository.ts` (new, 60 LOC — **EXACTLY 2 methods** + `describeBody` helper avoids `as X` on unknown body)
+- `src/modules/whatsapp/whatsapp-outbound-retry.service.ts` (new, 187 LOC — **3-dep ctor**, 5-step flow, 4 mandated docstrings)
+- `src/modules/whatsapp/ports/retry-queue.port.ts` (new, 18 LOC — **TYPE-ONLY**, Bull-agnostic; no Q-B stamps needed)
+- `src/modules/whatsapp/__tests__/whatsapp-outbound-retry.schema.test.ts` (new, 166 LOC post-prettier, 21 tests: 9 schema + 12 classifyFailure matrix)
+- `src/modules/whatsapp/__tests__/whatsapp-outbound-retry.repository.test.ts` (new, 127 LOC, 5 tests)
+- `src/modules/whatsapp/__tests__/whatsapp-outbound-retry.service.test.ts` (new, 374 LOC + branch-fix, 17 tests: 1 validation + 3 permanent + 2 retryable + 4 cap enforcement + 4 worker discipline + 3 PII floor)
+- `src/modules/whatsapp/index.ts` (modified, +13 net) — additive; T06 (L1-7) + T10 (L9-18) + T16 (L20-44) + T11 (L46-56) + T12 (L58-79) + T15 (L81-95) + T13 (L97-114) blocks byte-for-byte preserved; T14 exports L116-127
+
+DoD self-check — **all 20 ACK binding conditions**:
+- [x] **#1 `make check` PASS end-to-end** — lint 0/0 (`--max-warnings 0`), format-check clean, typecheck strict + `exactOptionalPropertyTypes`, test-unit 34/36 suites 356/358 tests (2 pre-existing `_template/*` baseline skips). PM B rerun invited.
+- [x] **#2 Drift scans 0 hits on T14 files** — all 6 EXECUTOR §4.4 categories + special-attention Bull check. Verified: **NO `throw new Error(`** in module (drift scan #3 returns 0 hits; sync throws `ValidationError` only, external failures logged + swallowed); **NO `DndBlockError` / `OutboundQuotaError` thrown**; **NO `as X` runtime type assertion** (grep-confirmed; discriminated union pattern preserved from T15/T13 lesson); **NO `Bull` / `bullmq` / `ioredis` imports** in T14 primitive (grep-confirmed — Bull runtime abstracted behind `RetryQueuePort`; adapter deferred to T14-followup per PM ACK).
+- [x] **#3 Coverage 100% stmt/branch/func/line** on 3 runtime files (`schema.ts`, `repository.ts`, `service.ts`) — final after Round 3 branch-fix. Type-only files (`types.ts` + 1 port) erased. See §Test evidence.
+- [x] **#4 Repository EXACTLY 2 methods** — `whatsapp-outbound-retry.repository.ts` grep confirms: `markRetryScheduled(dispatchId, attemptCount)` (`:24`), `markPermanentFail(dispatchId, lastError)` (`:30`). NO `markDead` (spec §7 optional, deferred per GAP #4). NO `findByDispatchId` / `getCurrentAttempts` (input carries context per 5-field clarification). Test file: 5 tests covering both methods incl. edge cases (JSON.stringify non-string body, undefined status/body fields omitted, circular-ref body coerced to String() without throwing).
+- [x] **#5 Service ctor 3 deps** — service `:72-76` grep confirms: `(repo: WhatsappOutboundRetryRepository, retryQueuePort: RetryQueuePort, logger: Logger)`. No other injectable services.
+- [x] **#6 Input schema 5 fields** — `schema.ts:29-36` `MetaFailureInputSchema` = `z.object({ dispatchId (uuid), hotelId (uuid), attemptsMade (int 0-3), status? (int), body? (unknown) }).strict()`. Test suite has 9 schema tests covering: valid 3-field minimal + valid 5-field full + reject non-uuid dispatchId + reject non-uuid hotelId + reject negative attemptsMade + reject attemptsMade > 3 + reject non-integer attemptsMade + reject extra field (strict) + reject missing required.
+- [x] **#7 Discriminated union outcome 2 variants** — `types.ts:53-55` matches ACK verbatim: `{ kind: 'scheduled'; attemptNumber; jobId } | { kind: 'permanent'; reason: PermanentFailReason }`. `PermanentFailReason` at `:24-29` = 5 variants: `'auth_failed' | 'template_rejected' | 'quota_exhausted' | 'bad_request' | 'exhausted'`.
+- [x] **#8 `classifyFailure` pure function with ≥9 test cases** — `schema.test.ts` classifyFailure suite has **12 tests** (5 retryable branch + 7 permanent branch): undefined status → retryable, 500 → retryable, 502 → retryable, 503 → retryable, 504 → retryable, 429 → permanent (quota_exhausted per ACK L2993), 401 → permanent (auth_failed), 403 → permanent (auth_failed), 400 → permanent (bad_request), 422 → permanent (template_rejected), 404 → permanent (bad_request conservative), 409 → permanent (bad_request conservative).
+- [x] **#9 Attempt-cap enforcement** — 4 dedicated cap tests in `service.test.ts`:
+  - "should return permanent reason=exhausted when attemptsMade=2 and status=500" (next attempt would be 3rd → exhausted)
+  - "should return permanent reason=exhausted when attemptsMade=3 regardless of status classification"
+  - "should schedule (not exhausted) when attemptsMade=1 and status=502" (contrast — under cap)
+  - "should return permanent reason=exhausted with no status field when attemptsMade=2 and the input status is undefined" (Round 3 branch-fix — network error at cap edge)
+- [x] **#10 Service never throws for external failures** — 4 `.resolves` test cases (worker discipline):
+  - `queue.enqueueRetry` rejects `Error` → returns `{kind: 'permanent', reason: 'exhausted'}` (fail-safe permanent)
+  - `queue.enqueueRetry` rejects `'boom'` (non-Error) → `.resolves.toEqual({kind: 'permanent', reason: 'exhausted'})`
+  - `repo.markRetryScheduled` rejects → still returns `{kind: 'scheduled'}` (queue was successfully enqueued)
+  - `repo.markPermanentFail` rejects → still returns `{kind: 'permanent', reason}`
+- [x] **#11 Sync throws only `ValidationError`** — service `:80-84` is only throw path. Test `:83-88` asserts `.rejects.toBeInstanceOf(ValidationError)` on bad input.
+- [x] **#12 PII floor — MINIMAL job payload** — 3-tier PII test coverage:
+  - **Tier 1** — job payload key assertion: test asserts `Object.keys(enqueueRetry.mock.calls[0][0]).sort() === ['attemptNumber', 'dispatchId', 'hotelId']` (exactly 3 keys, no phone/token/body/status leak into Bull payload)
+  - **Tier 2** — defense-in-depth iterates all 4 logger method call sets (info/warn/debug/error) asserting `JSON.stringify(call[0])` does NOT contain 3 secret markers: plaintext token, phone, or body content
+  - **Tier 3** — attempt-level log payload key assertion: exactly `['attemptsMade', 'dispatchId', 'hasStatus', 'hotelId', 'module', 'msg']` (6 keys — status boolean only, no status value; no body) + `JSON.stringify(logged).length < 500` heuristic
+- [x] **#13 Ports TYPE-ONLY** — `ports/retry-queue.port.ts` (18 LOC) = docstring + interface + type import only. No class, no function, no Bull import, no Q-B / Q-A stamps (T14 has ZERO cross-service Q deps — home-stretch benefit).
+- [x] **#14 `git diff --stat main..HEAD` scope-clean** — exactly 8 create + 1 modify = 9 files. Zero touches to `api.ts`, `worker.ts`, `plugins/*`, `prisma/*`, `package.json`, `pnpm-lock.yaml`, T06/T10/T11/T12/T13/T15/T16 primitive files (byte-for-byte), `core/queue/bull-factory.ts` T07 (**CONSUMED not mutated**), `_template/*`, `telegram/*`, `core/http/*`, `core/prisma/*`.
+- [x] **#15 Barrel additive-only** — `src/modules/whatsapp/index.ts`: T06 (L1-7) + T10 (L9-18) + T16 (L20-44) + T11 (L46-56) + T12 (L58-79) + T15 (L81-95) + T13 (L97-114) blocks byte-for-byte preserved. T14 exports appended L116-127 only. **8th cross-primitive T06 discipline confirmation** — `grep -E "adapters/" src/modules/whatsapp/index.ts` returns 0 hits; adapter never re-exported through the module barrel (norm now spans all 7 slot B primitives).
+- [x] **#16 Auth-agnostic docstring** — service `:14-18` explicitly: "**Auth-agnostic**: T14 primitive is called by the T13-followup RPC receiver or the T14-followup worker; both handle auth at their respective layer (T09 plugin at router, or worker context). Extends T12/T13/T15 precedent to retry-producer context."
+- [x] **#17 429 = permanent judgment note in `classifyFailure` docstring** — `schema.ts:38-48` cites spec §4.9 + PM ACK T14 H17 rationale (Meta rate-limit resets per hour/day; 1s+5s+30s backoff won't recover; permanent surfaces quota issue to human operator faster) + future T14-followup can add `Retry-After` header respect for granular recovery.
+- [x] **#18 T07 consumption docstring** — service `:11-13` explicitly: "**T07 infrastructure consumed**: `RETRY_BACKOFF_DELAYS_MS = [1000, 5000, 30000]` + `DEFAULT_JOB_ATTEMPTS = 3` baked in T07 factory match spec §4.9 verbatim. T14 primitive is producer + classifier only; Bull auto-retry semantics + DLQ pattern from T07 execute at T14-followup adapter wiring."
+- [x] **#19 No `as X` runtime** — grep-confirmed on all T14 runtime files. `describeBody` helper introduced at repo `:47-53` to avoid `as X` on unknown `body` (JSON.stringify with try/catch for circular refs — tested at repository test case "should coerce a circular body reference to a String() representation without throwing").
+- [x] **#20 T07 primitive preserved byte-for-byte** — zero touches to `src/core/queue/bull-factory.ts`. T14 references T07 constants at T14-followup adapter, not primitive.
+
+Quality gate
+- `make typecheck`: PASS (0 errors, strict + `exactOptionalPropertyTypes`)
+- `make lint`: PASS (0 errors, 0 warnings — `eslint . --max-warnings 0`)
+- `make format-check`: PASS
+- `make test-unit`: PASS (34 of 36 suites, 356 of 358 tests — 2 pre-existing baseline skips in `_template/*`; my 3 new suites 43/43 pass — 313 previous approved baseline + 43 T14 = 356)
+- `make check`: PASS end-to-end
+
+Drift scans (all 6 EXECUTOR §4.4 categories + 2 bonus checks — 0 hits on T14 module files)
+- `any` types: 0 (pre-existing 2 in `_template/*` untouched)
+- `console.log/info/debug`: 0
+- `throw new Error(` in `src/modules/` + `src/core/`: 0 in T14 scope (pre-existing 4 in `_template/*` + `core/config/env.ts:75` + `core/http/http-client.ts:19,27` — untouched)
+- Forbidden imports: 0
+- `^export default ` outside entrypoints/config: 0
+- `.skip(` in `*.test.ts`: 0 in T14 scope (pre-existing 2 in `_template/*` untouched)
+- **BONUS Bull/bullmq/ioredis in T14 primitive**: **0** (grep on `whatsapp-outbound-retry.*.ts` + `ports/retry-queue.port.ts` returned nothing)
+- **BONUS `as X` in T14 runtime**: **0** (grep-confirmed)
+
+Security check (CLAUDE §6 + PM ACK design intent)
+- **NO Bull/bullmq/ioredis imports in T14 primitive** — runtime abstracted behind `RetryQueuePort`; adapter deferred to T14-followup per binding #2. Grep-confirmed.
+- **MINIMAL Bull job payload** — service `:149-153` passes EXACTLY `{dispatchId, hotelId, attemptNumber}` to `retryQueuePort.enqueueRetry`. NO phone, token, body content, or status leak. T07 factory mandate ("job data carries minimal context — processors hydrate from DB") honored.
+- **PII floor 3-tier assertions** — (a) job payload key assertion asserts exactly `['attemptNumber', 'dispatchId', 'hotelId']`, (b) defense-in-depth iterates all 4 logger methods × all calls asserting no plaintext secret leak (3 secret markers checked), (c) attempt-level log payload key assertion + `JSON.stringify(logged).length < 500` heuristic.
+- **Never throws for external failures** — 4 test cases confirm `.resolves.toEqual(...)` for queue rejects Error, queue rejects non-Error, repo.markRetryScheduled rejects, repo.markPermanentFail rejects. Worker discipline extended from T11/T12/T13/T15 patterns.
+- **Sync throws only `ValidationError`** — 1 `.rejects.toBeInstanceOf(ValidationError)` case; sole throw path in service.
+- **Attempt-cap enforcement** — `attemptsMade + 1 >= 3` → permanent `'exhausted'` regardless of classification. Tested via 4 dedicated cases including cap edge with undefined status (Round 3 branch-fix).
+- **429 → quota_exhausted** — per PM ACK L2993 explicit spec-driven Meta rate-limit semantic. Docstring cites spec §4.9 + PM ACK H17 rationale.
+- **T07 primitive CONSUMED not mutated** — service imports T07 constants indirectly via docstring reference; no actual runtime import in primitive (adapter at T14-followup wires this). Zero touches to `bull-factory.ts` file.
+
+Test evidence
+- Unit: **43 tests, 3 suites** — schema (21: 9 schema + 12 classifyFailure matrix), repository (5), service (17: 1 validation + 3 permanent + 2 retryable + 4 cap + 4 worker discipline + 3 PII floor)
+- Integration: 0 — deferred as **T14-INTEG** follow-up; repository test uses Prisma-mock stopgap per T10/T11/T12/T13/T15/T16 precedent (7× now)
+- Coverage (jest, scoped to 3 runtime files):
+  ```
+  File                                   | % Stmts | % Branch | % Funcs | % Lines
+  ---------------------------------------|---------|----------|---------|--------
+  All files                              |   100   |   100    |   100   |   100
+   whatsapp-outbound-retry.repository.ts |   100   |   100    |   100   |   100
+   whatsapp-outbound-retry.schema.ts     |   100   |   100    |   100   |   100
+   whatsapp-outbound-retry.service.ts    |   100   |   100    |   100   |   100
+  ```
+
+Notes / discipline discoveries / tolerated deviations
+- **Round 3 branch coverage fix — `status === undefined` at markPermanent** — first coverage run showed `whatsapp-outbound-retry.service.ts:112` uncovered (the `...(status !== undefined ? { status } : {})` false branch). Uncovered because all my initial `markPermanent` call paths passed defined status. Added test "should return permanent reason=exhausted with no status field when attemptsMade=2 and the input status is undefined" (network error at cap edge) — covers the omit-status branch and asserts persisted payload has no `status`/`body` fields. Coverage returned to 100%.
+- **`describeBody` helper avoids `as X` on unknown body** — repo `:47-53` uses `typeof body === 'string' ? body : JSON.stringify(body)` with try/catch for circular refs. Coerces `unknown` → string cleanly for `Prisma.InputJsonValue` compatibility. No type assertion needed. Tested via repository case "should coerce a circular body reference to a String() representation without throwing".
+- **8th cross-primitive T06 barrel discipline confirmation** — T10 + T16 + T11 + T12 + T15 + T13 + T14 all preserve `no-restricted-imports` `'**/adapters/*'` discipline byte-for-byte. **Norm now spans all 7 slot B primitives** — unshakeable pattern across the entire delivery slice.
+- **PM B ACK verbatim followed** — 5 `PermanentFailReason` variants (`'auth_failed' | 'template_rejected' | 'quota_exhausted' | 'bad_request' | 'exhausted'`) per ACK L2988; 429 → `'quota_exhausted'` (not `'rate_limit'`) per ACK L2993; auth `'_failed'` past-tense per ACK L2994-95; `markRetryScheduled(dispatchId, attemptCount)` 2-param minimal (Bull manages timing).
+- **ZERO cross-service Q blockers** — home-stretch benefit; T14 is the FIRST slot-B primitive with no cross-service contract gaps. All prior primitives had at least 1 Q-B stamp (Q-B-01/02/03 for T16, Q-B-04/05/06 for T12, Q-B-08/09 for T13, Q-A-04 for T15, Q-A-03 workaround for T13 test-env). T14 primitive is self-contained within Integration.
+- **T14 tolerated deviations (per ACK pre-accept)**:
+  - Prisma-mock stopgap in `.repository.test.ts` (7× cross-primitive precedent now) — T14-INTEG parked pending Q-C-01 + T14-followup
+  - Bull queue adapter deferred to T14-followup — needs Redis wiring per Q-C-02; port TYPE-ONLY in primitive
+  - 429 permanent classification = judgment call — documented in code per binding #17
+
+Q register / follow-ups
+- **No new Q filed** — T14 primitive has zero cross-service contract gaps. First and only slot-B primitive with no new Q register additions.
+- **T14-followup** — Bull queue creation via T07 `createQueue<RetryJobData>({ name: queueName('whatsapp', 'dispatch'), redis, jobOptions })` + Bull processor registration via `registerProcessor()` that calls T13's `WhatsappOutboundDispatchService.dispatchMessage(...)` on retry + DLQ forwarder via `attachDeadLetterForwarder()` + `HttpRetryQueueAdapter` (wraps `queue.add()`). Optional: `Retry-After` header respect for 429 granular recovery. Optional: stale-period `markDead` timer per spec §7 L343. Blocked on Q-C-02 (worker.ts bootstrap + Redis env).
+- **T14-INTEG** — real-Redis Bull job execution + retry backoff timing verification (testcontainers Redis). Blocked on Q-C-01 + T14-followup.
+
+---
+
+**🎯 THIS IS THE FINAL SUBMIT FOR SLOT B — APPROVAL BRINGS SLOT B TO 7/7 = 100%** (all primitives shipped: T10 + T11 + T12 + T13 + T15 + T16 + T14). Cross-service Q blockers (Q-A-04, Q-B-04..09, Q-C-01/02/03) all belong to T##-followup work parked in T##-followup / T##-INTEG lanes; no additional slot-B primitive coding remains.
+
+Requesting PM B VERDICT.
+
 <!--
 TEMPLATE — copy untuk task baru:
 
