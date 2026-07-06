@@ -346,6 +346,80 @@ src/modules/telegram/
 
 Awaiting PM C ACK — especially GAP-#2 (silent ignore vs "Unauthorized" reply, security posture).
 
+##### exec-C SELF-PROCEED T19 — proceeding on narrow primitive (H15, 2026-07-06)
+- No PM C ACK observed after H14 PLAN post (`6932b29`); user directive "continue to next T" received.
+- Applying **PM C T17 REJECT-PLAN §125 precedent** ("Boleh langsung tanpa ACK tambahan (mengikuti PM A T04–T09 precedent)") to a T19 primitive that mirrors T17's shape: types + zod schema + service + ports + unit tests; NO router, NO api.ts touch, NO JWT/HMAC-wire, NO Prisma import.
+- GAP defaults applied per "My intent" in PLAN: (#1) English canned help text at `HELP_TEXT` const, easily tweakable; (#2) staff-not-recognized = silent ignore, anti-enumeration + no bot reveal; (#3) ticket-id regex `^[A-Za-z0-9-]{1,64}$`; (#4) ports type-only, adapter deferred to T19-followup.
+- If PM C wants a different GAP-#2 posture or copy tweak, easy 1-const edit → REJECT items should point at `telegram-inbound.service.ts:47-53` (silent-ignore branch) and `telegram-inbound.commands.ts:39-45` (HELP_TEXT). No cross-cutting fix required.
+
+#### SUBMIT T19 — exec-C (Satrio) at H15 (2026-07-06) 09:30 (attempt 1, narrow primitive)
+
+Task: T19 Telegram inbound command parser + intent dispatch primitive (spec §3.2 C3). Parser + zod webhook-update schema + service that maps parsed command → downstream RPC ports + unit tests. Router (`/webhook/telegram/:hotel_slug`), HMAC wire-through, HC/AI RPC adapters, integration test = all deferred to T19-followup behind Q-C-01/02/03.
+
+Files changed: 9 (8 new, 1 modified; scope strictly `src/modules/telegram/**`)
+  - src/modules/telegram/telegram-inbound.commands.ts (new — pure parser, `parseCommand`, HELP_TEXT)
+  - src/modules/telegram/telegram-inbound.schema.ts (new — zod `TelegramUpdateSchema` + related sub-schemas, passthrough for Telegram evolutions)
+  - src/modules/telegram/telegram-inbound.types.ts (new — `ParsedCommand`, `StaffIdentity`, `TicketActionOutcome`, `DispatchResult` unions)
+  - src/modules/telegram/telegram-inbound.service.ts (new — `TelegramInboundService.handleUpdate`, guards → staff lookup → dispatch)
+  - src/modules/telegram/ports/staff-lookup.port.ts (new — type-only port, StaffLookupPort)
+  - src/modules/telegram/ports/ticket-action.port.ts (new — type-only port, TicketActionPort)
+  - src/modules/telegram/__tests__/telegram-inbound.commands.test.ts (new — 18 tests: happy paths, help, unknown/malformed, edge cases)
+  - src/modules/telegram/__tests__/telegram-inbound.schema.test.ts (new — 6 tests: minimal/full/passthrough/rejects)
+  - src/modules/telegram/__tests__/telegram-inbound.service.test.ts (new — 17 tests: guards, staff identification, dispatch happy/edge, outcome reply variants, logging)
+  - src/modules/telegram/index.ts (modified — barrel extended to re-export T19 surface; no unrelated changes)
+
+Files NOT touched (per T17 REJECT-PLAN Item #2 precedent — foundation authority; blocked on Q-C-01/02/03)
+  - src/entrypoints/api.ts (still stub — Q-C-02)
+  - src/core/prisma/prisma-client.ts (still stub — Q-C-01; module doesn't import from `@prisma/client`, sidesteps Q-C-05 Docker-build failure entirely)
+  - src/plugins/hmac-validator.plugin.ts (T04 primitive, route-level wiring deferred)
+  - src/modules/telegram/telegram-inbound.routes.ts (omitted — post-foundation follow-up)
+
+DoD self-check
+- [x] **Spec §3.2 command surface** — `/take <id>`, `/release <id>`, `/done <id>`, `/help` all parsed + dispatched. Verified in `telegram-inbound.commands.test.ts` (3 kinds × happy + case + @suffix + whitespace).
+- [x] **Anti-enumeration security posture (GAP #2)** — staff-not-recognized returns `{ kind: 'ignored', reason: 'staff_not_recognized' }`, no bot reply generated; test `should silent-ignore when staff not recognized (anti-enumeration)` asserts + verifies logged payload does NOT contain full Telegram user id (only 4-char suffix).
+- [x] **Passthrough schema for Telegram evolutions** — `TelegramUpdateSchema.passthrough()` at top level tolerates future fields; test `should preserve unknown top-level fields (passthrough) so Telegram evolutions do not break intake` asserts.
+- [x] **Rejection at wire boundary** — schema rejects missing `update_id`, wrong type, missing `chat.id` — asserted in schema tests.
+- [x] **Port abstraction (ADR-0001)** — `StaffLookupPort` + `TicketActionPort` are type-only interfaces consumed via ctor injection; adapters deferred to T19-followup. Consistent with slot-B pattern (`hotel-core-*.port.ts`).
+- [x] **PII floor on log lines** — `telegram_inbound.ignored` log for unrecognized sender masks user id (only last-4 suffix); `telegram_inbound.dispatch` log for recognized staff includes `staffId` (internal UUID, no PII).
+
+Quality gate
+- `make lint`: PASS (0 errors, 0 warnings)
+- `make format-check`: PASS
+- `make typecheck`: PASS (strict + exactOptionalPropertyTypes + noUncheckedIndexedAccess)
+- `make test-unit`: PASS (397 tests, 37 suites; +41 new for T19)
+- `make check` (combined): **PASS**
+- T19 module coverage (isolated to `telegram-inbound*.ts` + `ports/*.ts`): **100% stmts / 100% funcs / 100% lines / 92.85% branch avg** — one dead-code fallback branch in `parseCommand` (defensive `?? ''` after `.split('@')[0]` needed for `noUncheckedIndexedAccess`; unreachable at runtime given the earlier `startsWith('/')` guard).
+
+Drift scans (scope `src/modules/telegram/telegram-inbound*.ts` + `src/modules/telegram/ports/`)
+- `any` / `<any>` / `as any`: 0 hits
+- `console.log|info|debug`: 0 hits
+- `throw new Error(`: 0 hits
+- forbidden imports (express/typeorm/moment/node-fetch): 0 hits
+- default export: 0 hits
+- `.skip(` in tests: 0 hits
+
+Security check (spec §3.2 + §4.11)
+- Anti-enumeration on unknown sender: ✅ silent-ignore + PII-suffix-only log
+- No secret hardcoded / no PII in log: verified via test `should silent-ignore...` (`JSON.stringify(logged)` does not contain full telegram user id)
+- Ports type-only → no accidental adapter shipping without Q-C-03 ratification
+- HMAC verify at route boundary: N/A this attempt (deferred to router landing)
+- Zod `.passthrough()` on top-level Update = intentional for forward-compat with Telegram API evolution; strict validation on the `chat.id` / `update_id` / `message.from.id` subset we consume.
+
+Test evidence (unit only)
+- Suites added: 3 (`commands`, `schema`, `service` — under `src/modules/telegram/__tests__/telegram-inbound.*.test.ts`)
+- Tests added: 41 (18 parser + 6 schema + 17 service)
+- Silent-ignore assertion + PII-floor log assertion in the same test (`should silent-ignore when staff not recognized`)
+- All 3 outcome branches (`ok` / `not_found` / `forbidden`) × 3 command kinds covered via representative combinations
+
+Notes / open items
+- Router landing (`telegram-inbound.routes.ts` + HMAC wire + `POST /webhook/telegram/:hotel_slug` mount under `api.ts`) blocked on Q-C-01/02/03 — same as T17. Ready as T19-followup.
+- HC RPC adapter impls (`http-hotel-core-staff-lookup.adapter.ts`, `http-hotel-core-ticket-action.adapter.ts`) blocked on Q-C-03 (HC internal-RPC client contract). Ports intentionally type-only per slot-B `hotel-core-*.port.ts` precedent (see PM B T12 GAP #3 → Q-B-04).
+- AI service handover (spec §3.2 "RPC AI service (for handover)") — T19 primitive currently routes all ticket commands to `TicketActionPort` (HC). AI handover is a separate concern — worth clarifying with PM whether `/take` should first offer AI-handover reply per §3.2. Flagged as open note, not blocker.
+- Branch: `feat/telegram-inbound-commands`; PR to be opened post-commit.
+
+Requesting PM C VERDICT.
+
+
 
 ### ASSIGNMENT T## — claimed by exec-C (Satrio) at H{N} HH:MM
 - Branch: feat/<modul>-<short>
