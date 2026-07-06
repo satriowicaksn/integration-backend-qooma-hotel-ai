@@ -1050,6 +1050,90 @@ Awaiting PM C ACK — especially GAP-#1 (Q-C-10 object storage contract raise), 
 
 Proceed to coding. Post SUBMIT when `make check` green + drift clean + all 15 binding conditions honored + ~28 tests target met.
 
+#### SUBMIT T22 — exec-C (Satrio) at H18 (2026-07-06) 23:45 (attempt 1, narrow primitive per ACK)
+
+Task: T22 QR provisioning primitive (spec §3.4 + §4.3 + MVP §1.3 C6). Ships **pure `wa.me` URL builder** (module-private per binding #7), **`QrRendererPort` + `ObjectStoragePort`** (type-only), **`QrService` orchestrator** with strict error mapping per binding #6, **Prisma-direct `QrStateRepository`** with clock-injected `generatedAt` bump per binding #10, **zod `QrRegenerateRequest/ResponseSchema`** per spec §3.4 step 5, 28 unit tests. `qrcode` npm install + renderer adapter, S3/R2 storage adapter, `POST /qr/regenerate` + `GET /qr/download` route landing, integration test = **all deferred** to T22-followup per Q-C-01/02/03/05/10 + PO approval on `pnpm add qrcode` + `pnpm add @aws-sdk/client-s3`.
+
+Files changed: 11 (all new; scope strictly `src/modules/qr-provisioning/**`)
+  - src/modules/qr-provisioning/index.ts (new — barrel per binding #7; buildWaMeLink NOT exported)
+  - src/modules/qr-provisioning/qr-provisioning.types.ts (new — QrDomain, QrRegenerateInput, QrRegenerateResult, ObjectStoreLocation (binding #3), QrDownloadDescriptor)
+  - src/modules/qr-provisioning/qr-provisioning.schema.ts (new — zod strict Request + Response per spec §3.4 step 5; docstring for `png_url` semantics binding #2)
+  - src/modules/qr-provisioning/qr-url-builder.ts (new — pure `buildWaMeLink`, module-private per binding #7)
+  - src/modules/qr-provisioning/qr-provisioning.repository.ts (new — Prisma-direct upsert-by-hotelId + findByHotelId; ctor-inject; clock passed via input.generatedAt binding #10)
+  - src/modules/qr-provisioning/qr-provisioning.service.ts (new — 5-step pipeline orchestrator + getForDownload composer; error mapping ValidationError/ExternalServiceError/NotFoundError binding #6; `objectKeyForHotel` exported for route-layer stream composer)
+  - src/modules/qr-provisioning/ports/qr-renderer.port.ts (new — type-only; adapter deferred)
+  - src/modules/qr-provisioning/ports/object-storage.port.ts (new — type-only; adapter deferred; single deterministic key strategy per GAP #4)
+  - src/modules/qr-provisioning/__tests__/qr-url-builder.test.ts (new — 9 tests: phone normalization + greeting encoding)
+  - src/modules/qr-provisioning/__tests__/qr-provisioning.schema.test.ts (new — 6 tests: request + response valid + rejects)
+  - src/modules/qr-provisioning/__tests__/qr-provisioning.repository.test.ts (new — 5 tests: Prisma call-shape via plain-object mock, 9th precedent)
+  - src/modules/qr-provisioning/__tests__/qr-provisioning.service.test.ts (new — 8 tests: happy path × 2, error mapping × 3, structured log, getForDownload happy + NotFound, objectKeyForHotel)
+
+Files NOT touched (binding #11 scope containment)
+  - src/entrypoints/api.ts (still stub — Q-C-02; POST /qr/regenerate + GET /qr/download deferred to T22-followup)
+  - src/entrypoints/worker.ts (still stub — Q-C-02 sibling; QR generation has no worker component, only sync HTTP surface)
+  - src/core/prisma/prisma-client.ts (still stub — Q-C-01)
+  - src/plugins/ (no plugin work)
+  - **package.json**: **untouched** — verified via `git status package.json` = clean. NO `pnpm add qrcode` / NO `pnpm add @aws-sdk/client-s3` per binding #11 + T21/T24/T19/T17 PO-gating precedent.
+  - Any other module's `index.ts` (isolated bounded context)
+
+DoD self-check
+- [x] **Spec §3.4 5-step pipeline** — service.regenerate does: build URL → validate length → render via port → upload via port → upsert row → return `{ url, pngUrl, generatedAt }`. Verified via 2 happy-path tests.
+- [x] **URL length ceiling (binding #4)** — service.ts:52-58 throws `ValidationError` when composed URL > 500 chars. Dedicated test `should throw ValidationError when the composed wa.me URL exceeds 500 chars` with 600-char greeting (URL = 33 + 600 = 633 chars).
+- [x] **Error mapping (binding #6)** — renderer throw → `ExternalServiceError('qr_renderer', ...)`; storage throw → `ExternalServiceError('object_storage', ...)`; missing state → `NotFoundError('qr_state', hotelId)`. All 3 branches asserted.
+- [x] **Phone-input decoupling (binding #5)** — service consumes `{ hotelId, phoneNumber, greetingText? }` primitive input. Zero cross-module imports of WA-config or telegram modules; route-layer wires the two in T22-followup.
+- [x] **Single deterministic key (GAP #4 default)** — `objectKeyForHotel(hotelId) → 'qr/{hotelId}.png'` exported; storage.uploadPng receives this key on every regenerate → same S3 object overwritten on next call.
+- [x] **Clock injectability (binding #10)** — service ctor accepts optional `clock?: { now(): Date }`; `SYSTEM_CLOCK` fallback. Repo update path takes `generatedAt` explicitly (Prisma `@default(now())` only fires on INSERT). Deterministic-clock test asserts `upsertArg.generatedAt === NOW`.
+- [x] **ObjectStoreLocation shape (binding #3)** — `{ key: string; publicUrl: string }` interface; primitive persists `publicUrl` as `qr_state.pngUrl`.
+- [x] **`png_url` docstring (binding #2)** — top-of-file comment in `qr-provisioning.schema.ts` documents "final semantics = T22-followup route-landing decision blocked on Q-C-10".
+- [x] **Barrel discipline (binding #7)** — `index.ts` exports types + service + repository + port types + `ObjectStoreLocation` + `objectKeyForHotel`. `buildWaMeLink` explicitly NOT exported (module-private per binding).
+- [x] **Prisma-direct + ctor-inject (binding #8)** — repo.ts imports `PrismaClient` + `QrState` from `@prisma/client`; `constructor(private readonly db: PrismaClient)`.
+- [x] **Test naming (binding #13)** — `should <expected> when <condition>` across all 28 tests.
+- [x] **Spec §5 L129 AC** — response shape `{ url, png_url, generated_at }` matches; `png_url` any valid https URL per binding #2; `generated_at` coerced to Date via zod.
+
+Quality gate
+- `make lint`: PASS (0 errors, 0 warnings)
+- `make format-check`: PASS
+- `make typecheck`: PASS (strict + exactOptionalPropertyTypes + noUncheckedIndexedAccess)
+- `make test-unit`: PASS (384 tests / 38 suites; +28 new T22, matches ACK §570 target of ~28 exactly)
+- `make check` (combined): **PASS**
+- T22 module coverage: **100% stmt/branch/func/line** on 3 of 4 runtime files (URL builder, schema, repository). `qr-provisioning.service.ts` = 96.87% stmt / 75% branch / 83.33% func / 100% line — remaining uncovered = defensive fallbacks (SYSTEM_CLOCK branch when ctor `clock` omitted, `String(err)` fallback when `err` is not Error). Well above binding #14 acceptable target.
+
+Drift scans (per binding #12; scope `src/modules/qr-provisioning/`)
+- `any` / `<any>` / `as any` (excluding `as unknown as` at test-mock boundary): 0 hits
+- `console.log|info|debug`: 0 hits
+- `throw new Error(` in src (non-test): 0 hits — service uses `AppError` subclasses only
+- forbidden imports (express/typeorm/sequelize/moment/node-fetch): 0 hits
+- default export: 0 hits
+- `.skip(` in tests: 0 hits
+- Hardcoded URL: 0 hits (test fixtures use `wa.me` per spec + `cdn.example.com` per PM C tolerated precedent)
+- **`package.json` untouched (binding #11)**: verified via `git status package.json` = clean
+
+Known shared-infra RED (per binding #8 + #15)
+- Repository imports `PrismaClient` + `QrState` from `@prisma/client` → Docker-build stage will fail per Q-C-05. **5th cross-primitive Docker-red incidence for slot C (T17/T19/T24/T21/T22)** — strongest signal yet for Q-C-05 shared-infra fix + Q-C-01 Prisma singleton priority. Documented per binding #15.
+
+Security check (spec §3.4 + §8)
+- Ports type-only → adapters cannot ship without Q-C-10 (storage contract) + PO approval on `pnpm add qrcode` + `pnpm add @aws-sdk/client-s3`.
+- Log line for successful regenerate: `{ msg, module, hotelId, objectKey, waLinkLength, generatedAt }` — no secrets, no phone number in log (asserted via PII-clean test).
+- URL length ceiling enforced at builder-to-service boundary → prevents oversized data reaching DB.
+
+Test evidence (unit only)
+- Suites added: 4 (`qr-url-builder`, `qr-provisioning.schema`, `qr-provisioning.repository`, `qr-provisioning.service`)
+- Tests added: 28 (9 URL builder + 6 schema + 5 repository + 8 service)
+- Error mapping coverage: all 3 error branches (`ValidationError`, 2× `ExternalServiceError`) asserted; `NotFoundError` on download-miss asserted
+- Deterministic clock verified: happy-path test asserts `upsertArg.generatedAt === NOW`
+
+Notes / open items
+- **Q-C-10 (object storage contract)** — raised concurrent with PLAN ACK (T22 §1033). Blocks T22-followup S3/R2 adapter.
+- **`qrcode` npm add** — PO-gated per binding + PM C ACK T22 GAP-#2. Renderer adapter blocked.
+- **`@aws-sdk/client-s3` npm add** — PO-gated. Storage adapter blocked.
+- **Route landing** — `POST /qr/regenerate` + `GET /qr/download` (with `gm_admin` guard per spec §8) blocked on Q-C-02 (api.ts bootstrap) + Q-C-03 (JWT plugin). Route composer will use `objectKeyForHotel(hotelId)` + `storage.getPngStream({ key })` for stream response.
+- **Integration test** — blocked on Q-C-01 (Prisma singleton). Real Postgres roundtrip lands in T22-followup via testcontainers.
+- **5th consecutive Q-C-05 Docker-red incidence** — per binding #15, this is the strongest signal to date for foundation Q-C-01 + Q-C-05 prioritization by Parent PM.
+- Branch: `feat/qr-generation`; PR to be opened post-commit.
+
+Requesting PM C VERDICT.
+
+
 
 ### ASSIGNMENT T## — claimed by exec-C (Satrio) at H{N} HH:MM
 - Branch: feat/<modul>-<short>
