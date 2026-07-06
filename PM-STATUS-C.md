@@ -577,6 +577,86 @@ CI (identical pattern to T17 PR #11 — no surprises):
 
 Proceed to coding. Post SUBMIT when `make check` green + drift clean + coverage target met.
 
+#### SUBMIT T24 — exec-C (Satrio) at H16 (2026-07-06) 16:20 (attempt 1, narrow primitive per ACK)
+
+Task: T24 channel-health probes primitive (spec §7 + §4.7 + §4.8 + §2.2 payload). Ships 2-poll debounce state-machine + 3 provider probe ports (WA / Telegram / Claude — type-only per binding #2) + Prisma-direct repository (ctor-injected) + orchestrator service returning `HealthChangedEvent[]` for T25/C9 socket emit + zod `HealthResponseSchema` + 29 unit tests. Router (`GET /api/integrations/health`), Bull cron worker (`worker.ts` registration), probe adapters, integration test = **all deferred** to T24-followup pending Q-C-01/02/03/05.
+
+Files changed: 13 (all new; scope strictly `src/modules/channel-health/**`)
+  - src/modules/channel-health/index.ts (new — barrel per binding #7: types + service + repository + port types; debounce internals module-private)
+  - src/modules/channel-health/channel-health.types.ts (new — HealthProvider/Status enums, ProbeResult, ChannelHealthDomain, DebouncedTransition, HealthChangedEvent)
+  - src/modules/channel-health/channel-health.schema.ts (new — zod HealthResponseSchema per spec §2.2; docstring for `last_message_at` per binding #1)
+  - src/modules/channel-health/channel-health.debounce.ts (new — pure state machine; PM C GAP-#2 default: 1st fail→degraded, 2nd→down, ok→healthy)
+  - src/modules/channel-health/channel-health.repository.ts (new — Prisma-direct, `findLatestByHotelProvider` + `insertSnapshot`)
+  - src/modules/channel-health/channel-health.service.ts (new — orchestrator + PROVIDER_ORDER + currentStatusOr helper)
+  - src/modules/channel-health/ports/whatsapp-health-probe.port.ts (new — type-only)
+  - src/modules/channel-health/ports/telegram-health-probe.port.ts (new — type-only)
+  - src/modules/channel-health/ports/claude-api-health-probe.port.ts (new — type-only)
+  - src/modules/channel-health/__tests__/channel-health.debounce.test.ts (new — 11 tests: success/failure/flap-protection sequences)
+  - src/modules/channel-health/__tests__/channel-health.schema.test.ts (new — 5 tests: full/minimal/rejects)
+  - src/modules/channel-health/__tests__/channel-health.repository.test.ts (new — 4 tests: findFirst/create call-shape via plain-object PrismaClient mock, tolerated per binding #6)
+  - src/modules/channel-health/__tests__/channel-health.service.test.ts (new — 9 tests: orchestration + HealthChangedEvent emission-on-transition-only)
+
+Files NOT touched (per binding #9 scope containment + T17/T19 REJECT-PLAN precedent)
+  - src/entrypoints/api.ts (still stub — Q-C-02; `GET /api/integrations/health` route deferred)
+  - src/entrypoints/worker.ts (still stub — Bull cron registration deferred)
+  - src/core/prisma/prisma-client.ts (still stub — Q-C-01)
+  - src/plugins/ (no JWT plugin work — Q-C-03)
+  - src/modules/channel-health/channel-health.routes.ts (omitted — T24-followup)
+  - src/modules/channel-health/channel-health.jobs.ts (omitted — T24-followup)
+  - Any other module's `index.ts` (isolated bounded context)
+
+DoD self-check
+- [x] **2-poll debounce (spec §4.8)** — `channel-health.debounce.ts` implements literal spec: healthy→degraded on 1st consec fail; degraded→down on 2nd consec fail; any ok→immediate healthy recovery. Verified via `should follow healthy → degraded → down → healthy on the "recover after outage" sequence` + `should NOT flap to down on a single flap between healthy pings`.
+- [x] **Transition-only event emission (spec §4.8)** — service returns `HealthChangedEvent` only when `didTransition === true`. Verified via `should NOT emit an event when status is unchanged (healthy → healthy)` (empty array) + `should emit exactly one event per provider that transitions` (2 of 3 emit).
+- [x] **Per-poll snapshot insert (PM C ACK §558 GAP-#1)** — service `insertSnapshot` fires every poll regardless of transition. Verified via `should insert one snapshot per provider (per-poll insert per GAP-#1)`.
+- [x] **All 3 providers probed in deterministic order** — `PROVIDER_ORDER` const drives iteration; test asserts order + each probe called with `{ hotelId }`.
+- [x] **Latency captured on success / null on failure** — verified via `should persist latencyMs on success and null on failure`.
+- [x] **Wire-shape zod schema (spec §2.2)** — `HealthResponseSchema.parse` accepts full + minimal payloads, rejects invalid status enum, out-of-range uptime, negative avg_response_ms.
+- [x] **Docstring for `last_message_at` composed-at-route (binding #1)** — present in `channel-health.schema.ts` header comment.
+- [x] **Port ADR-0001 (bindings #2 + T19 pattern)** — all 3 ports type-only interfaces (no runtime); mirrors slot-B `hotel-core-*.port.ts` + T19 `staff-lookup.port.ts` exactly.
+- [x] **Barrel per binding #7** — exports types + service class + repository class + port types; `applyDebounce` NOT exported (module-private).
+- [x] **PII floor** — logger info per probe includes only `hotelId`, `provider`, `status`, `latencyMs`, `transitioned`. No secrets. No user-identifiers.
+
+Quality gate
+- `make lint`: PASS (0 errors, 0 warnings, --max-warnings 0)
+- `make format-check`: PASS
+- `make typecheck`: PASS (strict + exactOptionalPropertyTypes + noUncheckedIndexedAccess)
+- `make test-unit`: PASS (385 tests / 38 suites; +29 new T24, matches ACK §570 target of ~28)
+- `make check` (combined): **PASS**
+- T24 module coverage (isolated to `src/modules/channel-health/**/*.ts`): **100% stmts / 100% branch / 100% funcs / 100% lines** across all 4 runtime files (debounce, repository, schema, service). Ports = type-only, no runtime. types.ts = type-only after removing unused `HEALTH_PROVIDERS` const in favor of `PROVIDER_ORDER` in service (single source of truth).
+
+Drift scans (per binding #8; scope `src/modules/channel-health/`)
+- `any` / `<any>` / `as any`: 0 hits
+- `console.log|info|debug`: 0 hits
+- `throw new Error(`: 0 hits (service returns `DebouncedTransition` union, no throws)
+- forbidden imports (express/typeorm/sequelize/moment/node-fetch): 0 hits
+- default export: 0 hits
+- `.skip(` in tests: 0 hits
+
+Known shared-infra RED (per binding #3)
+- Repository imports `PrismaClient` + `ChannelHealthSnapshot` types from `@prisma/client` at `channel-health.repository.ts:6`. Q-C-05 will cause Docker-build stage to fail (same as T17 PR #11 pattern). Local `make check` + CI lint/typecheck/unit/integration will pass — those steps run `pnpm prisma:generate` before `tsc`. Documented here for PM verification.
+
+Security check (spec §7 + §8)
+- Ports type-only → no accidental adapter shipping without Q-C-03 ratification + PO approval on `@anthropic-ai/sdk` package add (per PM C ACK §560 GAP-#3).
+- No probe implementation shipped → cannot leak Claude/WA/Telegram tokens.
+- Log line schema: `{ msg, module, hotelId, provider, status, latencyMs, transitioned }` — no secrets, no PII.
+
+Test evidence (unit only)
+- Suites added: 4 (`debounce`, `schema`, `repository`, `service`)
+- Tests added: 29 (11 debounce + 5 schema + 4 repository + 9 service)
+- Full state-machine coverage: `healthy↔healthy`, `healthy→degraded`, `degraded→down`, `down→down` (steady down; no re-emit), `down→healthy`, `degraded→healthy`, `null→healthy`, `null→degraded` — all 8 valid transitions verified.
+- Emission-on-transition-only invariant asserted via 4 distinct test cases.
+
+Notes / open items
+- Router landing (`channel-health.routes.ts` + `GET /api/integrations/health` mount under `api.ts`) blocked on Q-C-02 (`api.ts` bootstrap) + Q-C-03 (JWT `gm_admin` guard per spec §8) — same as T17. Ready as T24-followup.
+- Bull cron worker registration (`worker.ts` — poll every 60s per hotel) blocked on Q-C-01 (Prisma singleton for real hotel enumeration) + worker.ts bootstrap. Ready as T24-followup.
+- Probe adapter impls (`http-whatsapp-health-probe.adapter.ts`, `http-telegram-health-probe.adapter.ts`, `http-claude-api-health-probe.adapter.ts`) blocked on: (a) Q-C-03 for cross-service auth patterns, (b) PO approval on `@anthropic-ai/sdk` `pnpm add`. Ports intentionally type-only per binding #2 + slot-B precedent.
+- **T25/C9 (`integration:health_changed` socket emit)** consumes `HealthChangedEvent[]` returned by `runProbesForHotel`. Shape confirmed default per PM C ACK §562 (`{ hotelId, provider, previousStatus, newStatus, checkedAt }`); T25 may adjust when it lands.
+- **Q-C-08 (`degraded` semantics)** open with PO/FE — currently ships MVP default (1st-fail → degraded, 2nd → down). Refactor to latency-based degraded is a 1-file non-breaking change to `channel-health.debounce.ts`.
+- Branch: `feat/channel-health-probes`; PR to be opened post-commit.
+
+Requesting PM C VERDICT.
+
 
 ### ASSIGNMENT T## — claimed by exec-C (Satrio) at H{N} HH:MM
 - Branch: feat/<modul>-<short>
