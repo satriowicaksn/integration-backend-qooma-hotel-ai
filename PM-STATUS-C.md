@@ -810,6 +810,94 @@ Awaiting PM C ACK — especially GAP-#3 (HC RPC contract, will need Q-C-09 raise
 
 Proceed to coding. Post SUBMIT when `make check` green + drift clean + ~40 tests target met + all 13 binding conditions honored.
 
+#### SUBMIT T21 — exec-C (Satrio) at H17 (2026-07-06) 20:15 (attempt 1, narrow primitive per ACK)
+
+Task: T21 OTA email poller primitive (spec §3.3 + §4.8 + MVP §1.3 C5). Ships **pure per-OTA parsers** (Booking.com + Agoda), **parser dispatcher** (unrecognized fallback per §3.3), **`OtaPollService` orchestrator** with strict UID-advance discipline (binding #4/#5), **Prisma-direct `OtaMailboxRepository`** for `ota_mailbox_state` (no `decrypt(...)` invocation — binding #10), **type-only `ImapFetcherPort` + `HotelCorePendingVisitPort`**, zod `ParsedVisitSchema` + `PollErrorSchema` (binding #2), 51 unit tests. IMAP adapter, HC adapter, Bull cron worker, integration test = **all deferred** to T21-followup per Q-C-01/02/03/05/09 + PO approval on `pnpm add imap-simple` + Q-OPS-05 (raw email blob).
+
+Files changed: 14 (all new; scope strictly `src/modules/ota-mailbox/**`)
+  - src/modules/ota-mailbox/index.ts (new — barrel per binding #9; parsers + dispatcher stay module-private)
+  - src/modules/ota-mailbox/ota-mailbox.types.ts (new — BookingSource enum, ParsedVisit, EmailMessage, MailboxState, PollError, DispatchOutcome, PollSummary)
+  - src/modules/ota-mailbox/ota-mailbox.schema.ts (new — zod ParsedVisitSchema strict + PollErrorSchema per binding #2)
+  - src/modules/ota-mailbox/ota-parser.ts (new — parseEmail dispatcher; module-private)
+  - src/modules/ota-mailbox/parsers/booking-com.parser.ts (new — pure parser; null on missing required field)
+  - src/modules/ota-mailbox/parsers/agoda.parser.ts (new — pure parser)
+  - src/modules/ota-mailbox/ota-mailbox.repository.ts (new — Prisma-direct; ctor-inject; NO decrypt invocation; safe-parses pollError JSONB)
+  - src/modules/ota-mailbox/ota-poll.service.ts (new — orchestrator w/ UID discipline; exported computeAdvanceableUid helper)
+  - src/modules/ota-mailbox/ports/imap-fetcher.port.ts (new — type-only)
+  - src/modules/ota-mailbox/ports/hotel-core-pending-visit.port.ts (new — type-only + CreatePendingVisit input/result types)
+  - src/modules/ota-mailbox/__tests__/parsers/booking-com.parser.test.ts (new — 12 tests: happy + reject + malformed)
+  - src/modules/ota-mailbox/__tests__/parsers/agoda.parser.test.ts (new — 6 tests)
+  - src/modules/ota-mailbox/__tests__/ota-parser.test.ts (new — 4 tests: dispatcher routing + unrecognized fallback)
+  - src/modules/ota-mailbox/__tests__/ota-mailbox.schema.test.ts (new — 10 tests: ParsedVisit + PollError valid/reject)
+  - src/modules/ota-mailbox/__tests__/ota-mailbox.repository.test.ts (new — 7 tests: listActive, updateAfterPoll, recordPollError, malformed JSONB coerce)
+  - src/modules/ota-mailbox/__tests__/ota-poll.service.test.ts (new — 12 tests: happy + 3 dedicated UID discipline (ok/conflict/unrecognized advance; error freeze) + max-UID computation + resilience + parser-exception + record-error defensive path)
+
+Files NOT touched (binding #12 scope containment)
+  - src/entrypoints/worker.ts (still stub — Q-C-02 sibling; cron reg deferred)
+  - src/entrypoints/api.ts (T21 has no HTTP surface anyway)
+  - src/core/prisma/prisma-client.ts (still stub — Q-C-01)
+  - src/plugins/ (no plugin work)
+  - Any other module's `index.ts` (isolated bounded context)
+
+DoD self-check
+- [x] **Spec §3.3 pipeline** — `pollAllMailboxes` implements 6-step pipeline literally: fetch active mailboxes → per mailbox fetchUnread via port → dispatch each message via parseEmail → recognized → RPC HC create_pending_visit → advance UID / record error. Verified via 12 service tests.
+- [x] **Failure mode "log + skip, don't crash poll loop" (spec §3.3)** — per-mailbox try/catch (`pollOneMailbox` IMAP fetch), per-message try/catch (`dispatchMessage` parser exception). Verified via `should continue polling remaining mailboxes when one mailbox fails` + `should record poll error and continue when the IMAP fetch itself throws` + `should tag parser exceptions as parser_exception`.
+- [x] **Extracted fields per spec §3.3 line 141** — guestName, checkInDate, checkOutDate, roomNumber, bookingSource all in ParsedVisit + zod schema.
+- [x] **UID discipline (binding #4)** — 2 dedicated tests: `should advance lastUidSeen on conflict outcome` + `should NOT advance lastUidSeen on error outcome`. Plus `should advance lastUidSeen for unrecognized-and-logged emails`.
+- [x] **Max-UID computation (binding #5)** — `computeAdvanceableUid` exported + tested with dedicated `should compute max advanceable UID across a mixed batch` + 4 helper-fn direct tests.
+- [x] **Password never decrypted (binding #10)** — verified via `grep -rn 'decrypt' src/modules/ota-mailbox/`: 0 invocations, only a docstring reference. Repository test `should NOT decrypt imapPasswordEnc` asserts.
+- [x] **PollError JSONB shape standardized (binding #2)** — `PollErrorSchema` with `{ timestamp, code enum, message, mailboxUid?, stack? }`. All 4 code enum values enforced.
+- [x] **`booking_source` snake_case enum (binding #3)** — `'booking_com' | 'agoda'` in TypeScript union + `BookingSourceEnum` zod.
+- [x] **Ports type-only (binding #6)** — `imap-fetcher.port.ts` (12 LOC interface only) + `hotel-core-pending-visit.port.ts` (10 LOC + input/result types only). Zero runtime.
+- [x] **Prisma-direct repo (binding #7)** — `constructor(private readonly db: PrismaClient)`; imports `Prisma`, `OtaMailboxState`, `PrismaClient` from `@prisma/client`. `Prisma.JsonNull` used for clearing pollError.
+- [x] **Prisma-mock unit test (binding #8)** — plain-object PrismaClient mock, 8th precedent (T17/T19/T24/T21). Integration test to be added when Q-C-01 lands.
+- [x] **Barrel discipline (binding #9)** — `index.ts` exports orchestrator-side public surface only. `parseEmail` dispatcher + individual parsers NOT exported. Verified via file inspection.
+- [x] **Test naming (binding #11)** — `should <expected> when <condition>` pattern honored across all 51 tests.
+
+Quality gate
+- `make lint`: PASS (0 errors, 0 warnings)
+- `make format-check`: PASS
+- `make typecheck`: PASS (strict + exactOptionalPropertyTypes + noUncheckedIndexedAccess)
+- `make test-unit`: PASS (407 tests / 40 suites; +51 new T21, exceeds ACK §570 target of ~40)
+- `make check` (combined): **PASS**
+- T21 module coverage: **100%** across 5 of 6 files (schema, parsers, dispatcher, repository — all 4 stmt/branch/func/line at 100%). `ota-poll.service.ts` = 98.64% stmt / 76.92% branch / 91.66% func / 100% line — remaining uncovered = defensive fallback branches (`SYSTEM_CLOCK` when ctor `clock` omitted, `String(err)` when `err` is not Error instance in defensive log). Well above 80% target per binding #5.
+
+Drift scans (per binding #13; scope `src/modules/ota-mailbox/`)
+- `any` / `<any>` / `as any` (excluding `as unknown as` cast at test-mock boundary — T17 pattern): 0 hits
+- `console.log|info|debug`: 0 hits
+- `throw new Error(` in src (non-test): 0 hits (only in test file as intentional Proxy-exception fixture)
+- forbidden imports (express/typeorm/moment/node-fetch): 0 hits
+- default export: 0 hits
+- `.skip(` in tests: 0 hits
+- Hardcoded URL: 0 hits (test fixtures use `example.com` per PM C precedent tolerated)
+- **`decrypt` in module code (binding #10 enforcement)**: 0 invocations (only 1 hit in a docstring at `ota-mailbox.types.ts:37` referencing the rule itself)
+
+Known shared-infra RED (per binding #7)
+- Repository imports `Prisma`, `OtaMailboxState`, `PrismaClient` from `@prisma/client` → Docker-build stage will fail per Q-C-05 (same precedent as T17 PR #11 + T24 PR #19). Documented.
+
+Security check (spec §4.1 + §7)
+- IMAP password stays encrypted throughout primitive (`imapPasswordEnc` field surfaced verbatim on the domain object). Decrypt is IMAP fetcher adapter's concern in T21-followup.
+- Ports type-only → adapters cannot ship without Q-C-03 ratification + PO approval on `imap-simple` add.
+- Log line schema per event: `{ msg, module, hotelId, ... }`. `parser_exception` includes `mailboxUid`. No secrets, no plaintext passwords.
+
+Test evidence (unit only)
+- Suites added: 6 (`booking-com.parser`, `agoda.parser`, `ota-parser`, `ota-mailbox.schema`, `ota-mailbox.repository`, `ota-poll.service`)
+- Tests added: 51 (12 + 6 + 4 + 10 + 8 + 12 — 51 total from `pnpm jest --testPathPattern='modules/ota-mailbox/'` verified)
+- UID discipline coverage: all 4 outcome kinds × advance/freeze behavior verified
+- Max-UID computation: dedicated helper-fn tests + integration test through pollOneMailbox
+
+Notes / open items
+- **HC adapter contract (Q-C-09)** — raised concurrent with PLAN ACK (T21 §789). Sibling to Q-C-06/07/Q-B-04. Non-blocking primitive.
+- **IMAP library** — `pnpm add imap-simple` (or `imapflow`) is PO-gated per binding #2 + PM C ACK GAP #2. Adapter lands in T21-followup.
+- **Bull cron registration** — worker cron `pollAllMailboxes` per hotel per N-min blocked on `worker.ts` bootstrap (Q-C-02 sibling). Ready as T21-followup.
+- **Raw email blob retention (Q-OPS-05)** — deferred per PM C ACK GAP #4. Object storage port + adapter = separate future task if PO ratifies Q-OPS-05.
+- **Real-fixture parser hardening** — parser regexes are best-effort from public formats. Real production hardening (multi-locale, HTML variants, encoding, PDF attachments) = T21-followup once ops team supplies real fixtures. Flagged in PM C ACK §787 as tolerated deviation.
+- **Prisma-mock precedent (T17/T19/T24/T21 = 8th)** — this is the 4th consecutive slot-C task where the integration test is deferred behind Q-C-01. Pattern is now well-established; strong signal for foundation prioritization.
+- Branch: `feat/ota-email-poller`; PR to be opened post-commit.
+
+Requesting PM C VERDICT.
+
+
 
 ### ASSIGNMENT T## — claimed by exec-C (Satrio) at H{N} HH:MM
 - Branch: feat/<modul>-<short>
