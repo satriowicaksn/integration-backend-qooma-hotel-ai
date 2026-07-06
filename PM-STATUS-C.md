@@ -1178,9 +1178,71 @@ Requesting PM C VERDICT.
 - PM C: standby for PR CI + next PLAN.
 
 
-### ASSIGNMENT T## — claimed by exec-C (Satrio) at H{N} HH:MM
-- Branch: feat/<modul>-<short>
-- Routed from: PM-STATUS-PARENT.md §1 T## (Parent PM assigned)
+### ASSIGNMENT T23 — claimed by exec-C (Satrio) at H19 (2026-07-07) 09:30
+- Branch: `feat/integration-overview`
+- Routed from: PM-STATUS-C.md §1 T23 (backlog → self-select per PM C VERDICT T22 §1177 recommendation: "T23 — safest self-contained aggregator; sets slot C at 6/9 with zero new Q-blockers")
+- Dependency check per §1: T10 ✓ (WA config CRUD merged PR #10), T17 ✓ (Telegram config CRUD merged PR #11), T22 ✓ (QR state approved PR #21), T24 ✓ (channel health approved PR #19). All 4 data sources primitive-approved/merged.
+- **Post-VERDICT compliance**: PM C VERDICT T19 §442 procedural note → posting PLAN + waiting for ACK. **Not self-proceeding**.
+
+#### PLAN T23 — exec-C (Satrio) at H19 (2026-07-07) 09:30
+
+**Scope recap**
+Deliver C7 primitive per `docs/spec/04-integration-channels.md §2.1 (row `/api/integrations` = "Full integration overview (whatsapp + telegram + qr + health)")` + `MVP-INTEGRATION-FIRST.md §1.3 (C7)`. Ship pure **intra-service aggregator service** that composes 4 subsystem read-views (WA config, Telegram config, QR state, channel health) into a single response — via **4 narrow reader-port interfaces** (not direct repository imports) so the aggregator stays decoupled from other modules' internal changes. Types + zod `IntegrationOverviewResponseSchema` for wire payload, unit tests. Router (`GET /api/integrations`) + `gm_admin` JWT guard + reader-port adapters that wire to real Telegram/WA/QR/Health repositories = **all deferred** to T23-followup pending Q-C-02 (api.ts) + Q-C-03 (JWT).
+
+**Session-start gate** (EXECUTOR-PROTOCOL §2)
+- Identity confirmed: Executor, Slot C (Satrio) ✓
+- CLAUDE.md loaded ✓ (esp. §3 rule: "Modul tidak boleh import internal modul lain (adapters/, *.service.ts internal). Public API lewat barrel index.ts." → reader ports honor this by keeping the aggregator independent from T10/T17/T22/T24 module structure changes.)
+- Task spec read: `04-integration-channels.md §2.1 (row `/api/integrations`), §6 spec §6 note "FE MSW handlers are the authoritative shape reference"` (unavailable in this repo — best-effort primitive shape derived from subsystem views), `MVP-INTEGRATION-FIRST.md §1.3 (C7), §5 handoff mentions overview as gm_admin surface`
+- Parent docs spot-read: `CLAUDE.md §3 module isolation`, T17/T24 view types, `docs/MODULE_TEMPLATE.md` for cross-module composition guidance
+- Dependencies: T10 ✓, T17 ✓ (primitive), T22 ✓ (primitive), T24 ✓ (primitive) — all data sources are primitive-approved
+- `make typecheck` clean ✓ / `make lint` clean ✓ / `make test-unit` PASS on `main @ 215c16c` (post-T22-approve). Will re-verify on branch cut.
+- Scaffolder risk: none — new module `src/modules/integration-overview/` (bounded context = aggregation over the 4 subsystems)
+- **Zero `@prisma/client` import risk (sidesteps Q-C-05)**: aggregator consumes reader-port interfaces only; no repository, no Prisma types. **Docker-build should be GREEN for the first time in slot-C primitive series** — worth noting as a milestone.
+
+**Files to create**
+```
+src/modules/integration-overview/
+├── index.ts                                      (barrel — types + service + port types)
+├── integration-overview.types.ts                 (IntegrationOverview aggregate + per-subsystem view aliases)
+├── integration-overview.schema.ts                (zod IntegrationOverviewResponseSchema — wire shape)
+├── integration-overview.service.ts               (aggregator: parallel Promise.all over 4 read ports + compose)
+├── ports/
+│   ├── whatsapp-config-read.port.ts              (getForHotel → WaOverviewView | null)
+│   ├── telegram-config-read.port.ts              (getForHotel → TelegramOverviewView | null)
+│   ├── qr-state-read.port.ts                     (getForHotel → QrOverviewView | null)
+│   └── channel-health-read.port.ts               (getSnapshot → HealthOverviewView; overall response never null — spec §2.2 always returns snapshot)
+└── __tests__/
+    ├── integration-overview.schema.test.ts        (valid + rejects unknown fields + null-nullable per subsystem)
+    └── integration-overview.service.test.ts      (aggregator: happy w/ all 4 present, per-subsystem null handling, parallel-fetch behavior, one-port-throws-does-not-crash others)
+```
+
+**Files to modify**
+- (none) — new bounded context. Reader-port adapters (wiring to real T17/T22/T24 repos + WA config from slot B) land in T23-followup at route boundary.
+
+**Files NOT touched** (binding-consistency + foundation authority)
+- `src/entrypoints/api.ts` (still stub — Q-C-02; `GET /api/integrations` route landing deferred)
+- `src/core/prisma/prisma-client.ts` (still stub — Q-C-01; N/A anyway since primitive has no `@prisma/client` import)
+- `src/plugins/` (no plugin work — `gm_admin` guard at Q-C-03 landing)
+- `src/modules/telegram/**`, `src/modules/whatsapp/**`, `src/modules/qr-provisioning/**`, `src/modules/channel-health/**` — **zero cross-module imports** (per CLAUDE.md §3 module isolation rule)
+- `package.json` (no new deps needed)
+
+**Approach**
+1. **Reader ports** — 4 narrow interfaces. Each takes `{ hotelId }` and returns a small overview view or `null`. Views intentionally narrower than the full domain type of each subsystem — only the fields the FE overview widget needs (status + a few identifying attributes). Adapters (T23-followup) map from full domain → view.
+2. **Aggregator service** — `IntegrationOverviewService.getForHotel(hotelId): Promise<IntegrationOverview>`. Fires all 4 reads in parallel via `Promise.all` for latency; each subsystem read wraps in try/catch → on individual failure returns `null` (or a partial error sentinel for health), so ONE misbehaving subsystem doesn't crash the whole page.
+3. **Response schema** — `IntegrationOverviewResponseSchema` per spec-implied shape: `{ whatsapp: {...} | null, telegram: {...} | null, qr: {...} | null, health: {...} }` (health non-null per spec §2.2). Field names snake_case per convention (`png_url`, `generated_at`, `last_message_at`).
+4. **Unit tests**:
+   - Service: happy path with all 4 present, per-subsystem null (4 cases), one-port-throws → captured as null-with-log, parallel fire-and-await ordering, aggregate output shape.
+   - Schema: valid full, valid all-null except health, rejects unknown top-level fields.
+
+**GAPs / questions**
+- **GAP T23-#1 — Exact response shape.** Spec §2.1 says only "Full integration overview (whatsapp + telegram + qr + health)" — no field-level shape defined; FE MSW handlers are authoritative per spec §6 note but not in this repo. **My intent**: derive narrow overview views (`{ status, verifiedAt? }` for WA, `{ botUsername, hasBotToken }` for Telegram, `{ url, pngUrl, generatedAt }` for QR, `HealthResponseDto` reuse for health). Composition-time refinement in T23-followup once FE shape available.
+- **GAP T23-#2 — Per-subsystem view granularity.** Should overview surface FULL config views (masked token etc.) OR minimal status pills? **My intent**: minimal status-oriented views (avoid duplicating `/api/integrations/whatsapp` GET). Overview = "what's configured + healthy at a glance". Confirm posture.
+- **GAP T23-#3 — Health always present.** Spec §2.2 `/api/integrations/health` returns full snapshot always (spec §7 "optimistic default until first probe"). For overview I include health as non-nullable. Confirm.
+- **GAP T23-#4 — One-port-fails posture.** If a subsystem read throws, should overview: (A) return null for that subsystem + log; (B) throw ExternalServiceError; (C) return partial with error sentinel? **My intent**: A (silent-null + structured log line) — matches "don't crash the loop/page" precedent from T21 §3.3 + T24 debounce. FE can show "unavailable" pill.
+- **GAP T23-#5 — Cross-module barrel imports.** CLAUDE.md §3 forbids importing module internals; reader-port pattern respects this. Adapters (T23-followup) import from `@modules/telegram` etc. barrels only. Confirm the reader-port pattern is preferred over "aggregator imports 4 repositories directly" (the latter would work per barrel-import rule but tightly couples).
+
+Awaiting PM C ACK — especially GAP-#1/#2 (response shape granularity) + GAP-#5 (reader-port confirmation).
+
 
 #### PLAN T## — exec-C (Satrio) at H{N} HH:MM
 
