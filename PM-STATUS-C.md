@@ -695,6 +695,83 @@ Requesting PM C VERDICT.
 - PM C: standby for PR CI + next PLAN.
 
 
+### ASSIGNMENT T21 — claimed by exec-C (Satrio) at H17 (2026-07-06) 18:15
+- Branch: `feat/ota-email-poller`
+- Routed from: PM-STATUS-C.md §1 T21 (backlog → self-select per PM C VERDICT T24 §694 recommendation: "Recommend T21 as most self-contained (pure worker, no HTTP surface, mirrors T24 shape)")
+- Dependency check per §1: T07 ✓ (Bull queue infra merged), T02 ✓ (schema `OtaMailboxState` at `prisma/schema.prisma:135-146`), T03 ✓ (encryption helper for `imap_password_enc`). All primitive-scope deps met.
+- **Post-VERDICT compliance**: PM C VERDICT T19 §442 procedural note → posting PLAN + waiting for ACK. **Not self-proceeding**.
+
+#### PLAN T21 — exec-C (Satrio) at H17 (2026-07-06) 18:15
+
+**Scope recap**
+Deliver C5 primitive per `docs/spec/04-integration-channels.md §3.3 (OTA email parser)` + `§4.8 (ota_mailbox_state DDL)` + `MVP-INTEGRATION-FIRST.md §1.3 (C5), §5 L128 AC`. Ship **pure per-OTA parsers** (Booking.com format + Agoda format; extractors for `guest_name`, `check_in_date`, `check_out_date`, `room_number`, `booking_source`), **parser dispatcher** that routes raw email to the right OTA parser or returns `unrecognized` (spec §3.3 failure mode: "log + skip, don't crash poll loop"), **poll orchestrator service** that pulls new mailbox messages via port → parses → dispatches to HC `create_pending_visit` RPC via port → updates `ota_mailbox_state` (last_poll_at, last_uid_seen, poll_error), **Prisma-direct repository** for `ota_mailbox_state` (ctor-injected `PrismaClient`), **types + zod schema** for ParsedVisit + PollResult, unit tests. **All external IO deferred** to T21-followup: IMAP fetcher adapter, HC pending-visit RPC adapter, Bull cron worker registration in `worker.ts`, integration test. Blockers: Q-C-01 (Prisma singleton for real DB), Q-C-02 (worker.ts bootstrap), Q-C-03 (HC internal-RPC client contract — sibling to Q-C-06/07), Q-C-05 (Docker × prisma-custom-output), Q-OPS-05 (raw email blob retention — deferred to T21-followup), and a new HC pending-visit RPC contract Q that this PLAN will raise as GAP T21-#4.
+
+**Session-start gate** (EXECUTOR-PROTOCOL §2)
+- Identity confirmed: Executor, Slot C (Satrio) ✓
+- CLAUDE.md loaded ✓
+- Task spec read: `04-integration-channels.md §3.3 (parser pipeline), §4.8 (DDL)`, `MVP-INTEGRATION-FIRST.md §1.3 (C5), §5 L128 AC, §4.1 (imap_password encryption)`
+- Parent docs spot-read: `docs/MODULE_TEMPLATE.md §1 (external IO ports)`, T24 pattern anchor at `src/modules/channel-health/**`, T19 port pattern at `src/modules/telegram/ports/*`, slot-B `hotel-core-*.port.ts` for HC-RPC port precedent
+- Dependencies: T07 ✓ (queue infra — cron worker registration deferred anyway), T02 ✓ (`OtaMailboxState` at `prisma/schema.prisma:135-146` — `hotelId`, `imapHost`, `imapUsername`, `imapPasswordEnc`, `lastPollAt?`, `lastUidSeen?`, `pollError?`, `isActive`), T03 ✓ (`encrypt()` / `decrypt()` at `src/shared/utils/crypto.ts`)
+- `make typecheck` clean ✓ / `make lint` clean ✓ / `make test-unit` PASS on `main @ 5038fbe` (post-T24-approve). Will re-verify on branch cut.
+- Scaffolder risk: none — new module `src/modules/ota-mailbox/` (bounded context = OTA email intake; separate from Telegram / channel-health)
+- Known shared-infra RED: Q-C-05 will trip if repository imports `@prisma/client` types (same as T17 + T24 pattern). CI lint/typecheck/unit/integration green; Docker-build red. Documented in SUBMIT.
+
+**Files to create**
+```
+src/modules/ota-mailbox/
+├── index.ts                                    (barrel — types + service + repository + port types)
+├── ota-mailbox.types.ts                        (ParsedVisit, EmailMessage, PollResult, MailboxState domain)
+├── ota-mailbox.schema.ts                       (zod ParsedVisitSchema; PollErrorSchema for JSONB serialization)
+├── ota-parser.ts                               (dispatcher: parseEmail(msg) → { source, parsed } | { unrecognized })
+├── parsers/
+│   ├── booking-com.parser.ts                   (pure regex-based extractor for Booking.com confirmation subject/body)
+│   └── agoda.parser.ts                         (pure regex-based extractor for Agoda confirmation)
+├── ota-poll.service.ts                         (orchestrator: fetch via port → dispatch → RPC HC → update state)
+├── ota-mailbox.repository.ts                   (Prisma-direct; getActiveMailboxes, updateAfterPoll, recordPollError)
+├── ports/
+│   ├── imap-fetcher.port.ts                    (external IO: fetch unread emails after last_uid_seen)
+│   └── hotel-core-pending-visit.port.ts        (external IO: RPC HC create_pending_visit)
+└── __tests__/
+    ├── ota-parser.test.ts                      (dispatcher: routes to right parser, unrecognized fallback)
+    ├── parsers/booking-com.parser.test.ts      (Booking.com fixtures: happy path + edge cases + malformed)
+    ├── parsers/agoda.parser.test.ts            (Agoda fixtures)
+    ├── ota-mailbox.schema.test.ts              (zod: valid + rejects)
+    ├── ota-poll.service.test.ts                (orchestrator: fetch → parse → RPC → state update; unrecognized skip; RPC error → recordPollError)
+    └── ota-mailbox.repository.test.ts          (Prisma call-shape via plain-object mock per T17/T24 tolerated deviation)
+```
+
+**Files to modify**
+- (none) — new bounded context.
+
+**Files NOT touched** (Q-C-01/02/03 authority + T17/T19/T24 REJECT-PLAN precedent)
+- `src/entrypoints/worker.ts` (still stub — Q-C-02 sibling; Bull cron registration deferred)
+- `src/entrypoints/api.ts` (T21 has no HTTP surface anyway)
+- `src/core/prisma/prisma-client.ts` (still stub — Q-C-01)
+- `src/plugins/` (no plugin work)
+- `src/modules/ota-mailbox/ota-mailbox.jobs.ts` (omitted — Bull processor registration in T21-followup)
+
+**Approach**
+1. **`parsers/booking-com.parser.ts`** — pure `parseBookingComEmail(msg: EmailMessage): ParsedVisit | null`. Regex-based extraction from subject + body. Booking.com confirmation subject usually contains `"New booking"` + booking ref, body has structured fields (guest name, dates, room). Returns `null` on any missing required field (spec §3.3 failure = log + skip).
+2. **`parsers/agoda.parser.ts`** — analogous to Booking.com but Agoda format. Same signature.
+3. **`ota-parser.ts`** — dispatcher `parseEmail(msg): { source: 'booking_com' | 'agoda', visit: ParsedVisit } | { source: 'unrecognized' }`. Uses subject/from-address heuristics to route. Failure mode compliant with §3.3.
+4. **`ota-mailbox.repository.ts`** — Prisma-direct: `getActiveMailboxes(): Promise<MailboxDomain[]>` (WHERE `is_active = true`), `updateAfterPoll(hotelId, { lastUidSeen, lastPollAt }): Promise<void>`, `recordPollError(hotelId, error: PollError): Promise<void>`. Password is `imapPasswordEnc` (already encrypted per T03); decrypt happens ONLY at IMAP fetcher adapter boundary in T21-followup (primitive never decrypts).
+5. **Ports**:
+   - `ImapFetcherPort.fetchUnread({ mailboxState, sinceUid }): Promise<EmailMessage[]>` — type-only; adapter uses IMAP lib in T21-followup (needs `pnpm add imap-simple` or similar → PO approval).
+   - `HotelCorePendingVisitPort.createPendingVisit(input): Promise<{ visitId } | { conflict } | { error }>` — type-only; adapter deferred to T21-followup (Q-C-03 dep + new HC-RPC contract Q).
+6. **`ota-poll.service.ts`** — `pollAllMailboxes(): Promise<PollSummary>`. For each active mailbox: fetch unread via port → for each message: dispatch via parser → if recognized, RPC HC pending-visit; if unrecognized, log + skip; if RPC error, record in `pollError` JSONB. Update `lastPollAt` + max `lastUidSeen` at end. Wraps each mailbox in try/catch — one bad mailbox doesn't crash the loop (spec §3.3 "don't crash poll loop"). Returns `PollSummary = { hotelsPolled: number; emailsSeen: number; visitsCreated: number; unrecognized: number; errors: PollError[] }` for logging + cron-side observability.
+7. **Zod `ParsedVisitSchema`** — validates extracted fields at parser output boundary (defence in depth: parsers regex-extract, schema enforces types). Fields per spec §3.3 line 141: `guest_name`, `check_in_date` (ISO date), `check_out_date` (ISO date), `room_number?`, `booking_source: 'booking_com' | 'agoda'`.
+8. **Unit tests**: parsers (fixture-based happy + edge + malformed per OTA, ~10 each), dispatcher (~5), service (~10 covering happy path, unrecognized skip, RPC error → pollError, one-mailbox-fail-others-continue), repository (~4), schema (~4). Target ~40 tests.
+
+**GAPs / questions**
+- **GAP T21-#1 — OTA email fixtures.** Real Booking.com / Agoda confirmation email templates aren't in the repo. Parsers need concrete regexes; without real fixtures I have to derive from public examples of Booking.com's confirmation format ("Confirmation number: XXXXXXXXXX. Guest: <name>. Check-in: <date>. Check-out: <date>...") and Agoda's ("Booking Confirmation - <hotel>. Guest name: <name>..."). **My intent**: ship parsers based on public documented format samples + strict fallback-to-`null` on any missing field. Real production hardening (multi-locale, HTML vs text, encoding) = T21-followup after ops team supplies real fixtures.
+- **GAP T21-#2 — `imap-simple` / IMAP library.** No IMAP lib in package.json. `imap-simple` (or `imapflow`) needed for the adapter (T21-followup). **My intent**: port type-only; adapter blocked on PO approval for `pnpm add`. Mirrors PM C ACK T24 §560 (Anthropic SDK deferral pattern).
+- **GAP T21-#3 — `HotelCorePendingVisitPort` contract.** Spec §3.3 says "RPC HC to create `Visit { status: 'pending_verification' }`" — no URL, no path, no payload shape, no error catalog. Sibling to Q-C-06/07 + Q-B-04/05. **My intent**: port type-only; will raise as **Q-C-09** on SUBMIT (or PM C may raise concurrent with ACK per T24 §576 precedent).
+- **GAP T21-#4 — Q-OPS-05 raw email blob retention.** Spec §7 "Failure mode: log + skip; optionally surface in admin queue"; open question `Q-OPS-05` per line 391 asks "store raw email blob for re-parse if format drifts?". **My intent**: NOT in T21 primitive. If PO wants blob storage for re-parse, that's T21-followup + object-storage port + Q-C-XX for storage adapter. Flag in SUBMIT notes.
+- **GAP T21-#5 — Idempotency across polls.** `lastUidSeen` is the primary dedup key (IMAP UID monotonic). If HC pending-visit RPC fails after IMAP UID advance, we lose the message. **My intent**: advance `lastUidSeen` only for messages where dispatch fully succeeds (either created OR unrecognized-and-logged). RPC errors → record error, DO NOT advance UID → next poll retries. Confirm this idempotency semantic.
+
+Awaiting PM C ACK — especially GAP-#3 (HC RPC contract, will need Q-C-09 raise) + GAP-#5 (idempotency semantic).
+
+
 ### ASSIGNMENT T## — claimed by exec-C (Satrio) at H{N} HH:MM
 - Branch: feat/<modul>-<short>
 - Routed from: PM-STATUS-PARENT.md §1 T## (Parent PM assigned)
