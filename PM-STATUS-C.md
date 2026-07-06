@@ -936,6 +936,81 @@ Requesting PM C VERDICT.
 - PM C: standby for PR CI + next PLAN.
 
 
+### ASSIGNMENT T22 — claimed by exec-C (Satrio) at H18 (2026-07-06) 22:10
+- Branch: `feat/qr-generation`
+- Routed from: PM-STATUS-C.md §1 T22 (backlog → self-select per PM C VERDICT T21 §935 recommendation: "Recommend T22 as next self-contained pick — QR generation is worker-side/util-side; parallels T24 shape")
+- Dependency check per §1: T02 ✓ (schema `QrState` at `prisma/schema.prisma:63-70`), T10 ✓ (WA config CRUD merged PR #10 — provides `wa_configs.phoneNumber` needed for `wa.me/<phone>?text=...` URL construction). All primitive-scope deps met.
+- **Post-VERDICT compliance**: PM C VERDICT T19 §442 procedural note → posting PLAN + waiting for ACK. **Not self-proceeding**.
+
+#### PLAN T22 — exec-C (Satrio) at H18 (2026-07-06) 22:10
+
+**Scope recap**
+Deliver C6 primitive per `docs/spec/04-integration-channels.md §3.4 (QR generation), §4.3 (qr_state DDL)` + `MVP-INTEGRATION-FIRST.md §1.3 (C6), §5 L129 AC`. Ship **pure `wa.me` URL builder** (step 1 of §3.4), **`QrRendererPort`** for PNG rendering (step 2 — `qrcode` lib deferred to adapter), **`ObjectStoragePort`** for PNG upload + download stream (step 3 — S3/R2 SDK deferred to adapter), **`QrService` orchestrator** that builds URL → renders via port → uploads via port → persists `qr_state` row + `getLatestForHotel` for `/qr/download` composition, **Prisma-direct `QrStateRepository`** (upsert-by-hotelId; ctor-injected `PrismaClient` per T17 precedent), **types + zod `QrRegenerateResponseSchema`** per spec §3.4 step 5 payload (`{ url, png_url, generated_at }`), unit tests targeting ~35. Router (`POST /qr/regenerate` + `GET /qr/download`), `qrcode` package install + renderer adapter, S3/R2 storage adapter, integration test = **all deferred** to T22-followup per Q-C-01/02/03/05 + PO approval on `pnpm add qrcode` + new Q-C-10 (object storage contract).
+
+**Session-start gate** (EXECUTOR-PROTOCOL §2)
+- Identity confirmed: Executor, Slot C (Satrio) ✓
+- CLAUDE.md loaded ✓
+- Task spec read: `04-integration-channels.md §3.4 (5-step pipeline), §4.3 (qr_state DDL), §8 (RBAC: gm_admin)`, `MVP-INTEGRATION-FIRST.md §1.3 (C6), §5 L129 AC (returns `{ url, png_url, generated_at }`; download streams 1024×1024 PNG)`
+- Parent docs spot-read: `docs/MODULE_TEMPLATE.md §1 (external IO ports subshape)`, T24 pattern anchor (worker-side service + ports), T21 pattern anchor (port + adapter deferral for `pnpm add` + Prisma-direct repo)
+- Dependencies: T02 ✓ (`QrState` at `prisma/schema.prisma:63-70` w/ `hotelId PK`, `waLink`, `pngUrl`, `generatedAt`), T10 ✓ (WA config exists — adapter reads `phoneNumber` at T22-followup route boundary; primitive input is just `{ hotelId, phoneNumber, greetingText? }`)
+- `make typecheck` clean ✓ / `make lint` clean ✓ / `make test-unit` PASS on `main @ bfee6b3` (post-T21-approve). Will re-verify on branch cut.
+- Scaffolder risk: none — new module `src/modules/qr-provisioning/` (bounded context = QR PNG lifecycle; separate from WA outbound, channel-health, ota-mailbox)
+- Known shared-infra RED: Q-C-05 will trip if repository imports `@prisma/client` types (5th precedent after T17/T19/T24/T21). Documented in SUBMIT.
+
+**Files to create**
+```
+src/modules/qr-provisioning/
+├── index.ts                                      (barrel — types + service + repository + port types; url builder module-private per T21 binding #9 precedent)
+├── qr-provisioning.types.ts                      (QrDomain, QrRegenerateInput, QrRegenerateResult, ObjectStoreLocation)
+├── qr-provisioning.schema.ts                     (zod QrRegenerateRequestSchema + QrRegenerateResponseSchema per spec §3.4 step 5)
+├── qr-url-builder.ts                             (pure `buildWaMeLink({ phoneNumber, greetingText? })`; module-private)
+├── qr-provisioning.repository.ts                 (Prisma-direct upsert by hotelId; findByHotelId for download composition)
+├── qr-provisioning.service.ts                    (orchestrator: build URL → render → upload → upsert; getForDownload for /qr/download)
+├── ports/
+│   ├── qr-renderer.port.ts                       (external IO: PNG bytes at 1024×1024 — `qrcode` lib impl deferred)
+│   └── object-storage.port.ts                    (external IO: upload/download PNG stream — S3/R2 SDK deferred)
+└── __tests__/
+    ├── qr-url-builder.test.ts                    (URL construction: E.164 stripping, greeting encoding, edge cases)
+    ├── qr-provisioning.schema.test.ts            (zod valid + rejects)
+    ├── qr-provisioning.repository.test.ts        (Prisma call-shape via plain-object mock — 9th precedent)
+    └── qr-provisioning.service.test.ts           (orchestrator: regenerate happy path, renderer failure → error, storage upload failure → error, existing QR overwrite, getForDownload happy + NotFound)
+```
+
+**Files to modify**
+- (none) — new bounded context.
+
+**Files NOT touched** (binding #12 scope containment; foundation authority)
+- `src/entrypoints/api.ts` (still stub — Q-C-02; `POST /qr/regenerate` + `GET /qr/download` deferred to T22-followup)
+- `src/core/prisma/prisma-client.ts` (still stub — Q-C-01)
+- `src/plugins/` (no plugin work — `gm_admin` guard at Q-C-03 landing)
+- `package.json` (NO `pnpm add qrcode` — PO-gated per PM C ACK T21 GAP-#2 precedent; adapter defers)
+- Any other module's `index.ts` (isolated bounded context)
+
+**Approach**
+1. **`qr-url-builder.ts`** — pure `buildWaMeLink({ phoneNumber, greetingText? })`. Strips `+` and spaces from E.164 phone; URL-encodes greeting; produces `https://wa.me/<phone>?text=<encoded>` per spec §3.4 step 1. Enforced max URL length ≤ 500 chars (matches `wa_link VARCHAR(500)` per DDL §4.3).
+2. **`ports/qr-renderer.port.ts`** — `QrRendererPort.render({ payload: string; size: 1024 }): Promise<Buffer>`. Type-only. Adapter (T22-followup) invokes `qrcode` npm package (`QRCode.toBuffer(payload, { width: 1024, errorCorrectionLevel: 'M' })` or equivalent) — needs `pnpm add qrcode` PO approval.
+3. **`ports/object-storage.port.ts`** — `ObjectStoragePort.uploadPng({ key: string; bytes: Buffer }): Promise<ObjectStoreLocation>` + `ObjectStoragePort.getPngStream({ key: string }): Promise<Readable | null>`. Type-only. Adapter (T22-followup) is S3-compatible (R2 in prod per Qooma infra convention) — needs `pnpm add @aws-sdk/client-s3` PO approval + Q-C-10 (object storage endpoint + bucket naming + retention).
+4. **`qr-provisioning.repository.ts`** — Prisma-direct: `upsert({ hotelId, waLink, pngUrl }): Promise<QrDomain>` + `findByHotelId(hotelId): Promise<QrDomain | null>`. Uses `qrState.upsert({ where: { hotelId }, create: {...}, update: {...} })`. `generated_at` is `@default(now())` in schema → Prisma sets on create; on update service explicitly bumps to `new Date()` (clock-injectable for tests).
+5. **`qr-provisioning.service.ts`**:
+   - `regenerate(input: { hotelId, phoneNumber, greetingText? })`: build URL via `buildWaMeLink` → validate URL length → call `renderer.render` → call `storage.uploadPng` w/ key `qr/{hotelId}.png` → call `repository.upsert` w/ waLink + pngUrl → return `{ url: waLink, pngUrl, generatedAt }`. On renderer/storage failure → throw `ExternalServiceError` (from `@core/errors/app-errors`) so route layer maps to 502/503 (spec §9). URL too long → `ValidationError`.
+   - `getForDownload(hotelId)`: `repository.findByHotelId` → if null → `NotFoundError('qr_state', hotelId)`; else return `{ pngUrl, generatedAt }` for route layer to stream via `storage.getPngStream`. Service does NOT stream the bytes itself — route layer composes (per binding: no HTTP surface in primitive).
+6. **`qr-provisioning.schema.ts`** — `QrRegenerateRequestSchema` (`{ greetingText?: string min 0 max 400 }` — phoneNumber comes from session/hotel config, not request body); `QrRegenerateResponseSchema` per spec §3.4 step 5: `{ url: z.string().url(), png_url: z.string().url(), generated_at: z.coerce.date() }` — snake_case wire fields per API-contract convention (see spec §2).
+7. **Unit tests**:
+   - URL builder: E.164 with `+`, without `+`, greeting URL-encoding (spaces, unicode), greeting omitted, long greeting → truncated URL rejection (~8 tests)
+   - Schema: valid + minimal + rejects overlong greeting + rejects non-URL (~6 tests)
+   - Repository: upsert create branch, upsert update branch, findByHotelId hit/miss, toDomain mapping (~5 tests, plain-object PrismaClient mock)
+   - Service: happy regenerate w/ storage location, renderer throws → ExternalServiceError, storage upload throws → ExternalServiceError, existing QR overwrite (upsert update path), getForDownload happy path, getForDownload NotFoundError, URL-too-long → ValidationError (~9 tests)
+
+**GAPs / questions**
+- **GAP T22-#1 — Object storage adapter contract (new Q).** Spec §3.4 step 3 says "upload to object storage" — no bucket/region/retention convention documented. Sibling to Q-B-04/05/08/09/Q-C-06/07/09 pattern. **My intent**: raise as **Q-C-10** on SUBMIT (or PM C may raise concurrent with ACK per T24/T21 precedent). Adapter type-only; storage impl blocked on Q-C-10 resolution + PO approval on `pnpm add @aws-sdk/client-s3`.
+- **GAP T22-#2 — `qrcode` npm package add.** PO-gated per PM C ACK T21 GAP-#2 pattern (sibling to `imap-simple`, `@anthropic-ai/sdk`). **My intent**: renderer port type-only; adapter defers pending PO approval.
+- **GAP T22-#3 — PNG size + error-correction level.** Spec §3.4 step 2 says "1024×1024 PNG" — no error-correction level. `qrcode` lib default = 'M'. **My intent**: port carries `size: 1024` in signature; error-correction level = adapter concern (M is fine for wa.me links). Non-blocker.
+- **GAP T22-#4 — Overwrite semantics.** Spec §3.4 uses "regenerate" — implies replacement. Repository is upsert-by-hotelId (1 row per hotel). Old PNG in storage: overwrite same key (`qr/{hotelId}.png`) so no orphan. **My intent**: single deterministic key per hotel. Confirm this is desired vs versioned keys (spec doesn't require history).
+- **GAP T22-#5 — Greeting text default.** Spec §3.4 step 1 shows `wa.me/<phone>?text=<greeting>` — no default provided. **My intent**: if `greetingText` omitted from request, default to empty text query param (URL becomes `wa.me/<phone>?text=` — WhatsApp accepts); OR omit `?text=` entirely (`wa.me/<phone>`). Preferred: omit entirely when no greeting (cleaner URL). Confirm.
+
+Awaiting PM C ACK — especially GAP-#1 (Q-C-10 object storage contract raise), GAP-#4 (single-key overwrite vs versioned).
+
+
 ### ASSIGNMENT T## — claimed by exec-C (Satrio) at H{N} HH:MM
 - Branch: feat/<modul>-<short>
 - Routed from: PM-STATUS-PARENT.md §1 T## (Parent PM assigned)
