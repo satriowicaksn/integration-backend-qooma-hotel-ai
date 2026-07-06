@@ -37,7 +37,7 @@
 | T21 | OTA email IMAP poller + parser pipeline + HC pending-visit RPC                   | backlog  | —              | After T07 (Nathan); HC internal RPC for pending-visit insert       |
 | T22 | QR generation + download (1024×1024 PNG, object storage)                         | backlog  | —              | After T02 + T10 (Nanak)                                            |
 | T23 | Integration overview endpoint (`GET /api/integrations`)                          | backlog  | —              | After T10 (Nanak) + T17                                            |
-| T24 | Channel health probes + snapshots + 2-poll debounce                              | backlog  | —              | After T07 (Nathan) + T10 (Nanak) + T17                             |
+| T24 | Channel health probes + snapshots + 2-poll debounce                              | wip (PLAN ACK'd) | PM C (H16, a1) | New module `src/modules/channel-health/`. PLAN ACK'd H16: state-machine debounce + 3 provider ports (WA/Telegram/Claude) + Prisma-direct repo + service (probes → debounce → persist → return HealthChangedEvent[]). Router+worker cron+socket emit (T25) deferred. Q-C-08 raised (degraded semantics for PO ratify). Q-C-05 Docker-red will apply (module imports `@prisma/client` types). Coding proceeding |
 | T25 | `integration:health_changed` socket emits                                        | backlog  | —              | After T24                                                          |
 
 ---
@@ -535,6 +535,48 @@ src/modules/channel-health/
 
 Awaiting PM C ACK — especially GAP-#1 (per-poll vs transition-only insert) + GAP-#2 (degraded semantics).
 
+##### PM C PR REVIEW T19 — PR #18 CI verdict (H16, 2026-07-06)
+
+**PR**: [#18 `feat(telegram): T19 inbound command parser primitive (C3)`](https://github.com/satriowicaksn/integration-backend-qooma-hotel-ai/pull/18) opened by executor post-VERDICT.
+
+CI (identical pattern to T17 PR #11 — no surprises):
+- ✅ Lint + Typecheck (44s) · ✅ Unit tests (36s) · ✅ Integration tests (43s) · ❌ Docker-build (39s) — `TS2305: TelegramConfig / WaConfig / DeliveryReceipt / OutboundDispatch not exported from '@prisma/client'` = **Q-C-05 unchanged**, pre-existing shared-infra bug (main is red on same failure since T10 merged red on 2026-07-04). **NOT a T19 defect** — T19 module doesn't import `@prisma/client`; the Docker failure comes from the `whole-src/` tsc pass hitting existing T17/T10-T16 repositories that DO import Prisma types. Every PR since T10 has the same red — precedent honored 5 consecutive PRs (T10, T15, T13, T14, T17).
+
+**Merge readiness**: identical to T17 PR #11 — code-approved on merit; merge policy = follow red-docker precedent (waived pending Q-C-05 shared-infra fix). PM C doesn't unilaterally merge; awaiting the same author-driven merge pattern PM B executed for PRs #14-17.
+
+##### PM C ACK T24 — PLAN APPROVED, proceed to coding (H16, 2026-07-06)
+
+**Spec-alignment verified**:
+- ✅ §2.2 response shape (`{ claude_api, whatsapp, telegram }` per provider `{ status, last_check_at, ... }`) — exec plan matches.
+- ✅ §4.7 DDL — `ChannelHealthSnapshot` model exists at `prisma/schema.prisma:123-133` with `id UUID PK`, `hotelId`, `provider`, `status`, `latencyMs?`, `checkedAt`. Matches exec plan repo fields.
+- ✅ §7 policy — "Poll every 60s per hotel" + "2 consecutive failures to mark `down`" + "Emit `integration:health_changed` on transition only" — exec's debounce state-machine matches literally.
+- ✅ §9 mentions `503 CHANNEL_DEGRADED` — confirms `degraded` is a first-class ops state (validates exec's GAP #2 default).
+- ✅ Status enum `'healthy' | 'degraded' | 'down'` matches DDL CHECK constraint and exec's discriminated union.
+
+**GAP defaults ratified**:
+
+- **GAP #1 (per-poll insert vs transition-only)** — **APPROVED default A (per-poll insert)**. Reason: spec §7 phrasing "poll every 60s" + §4.7 DDL explicitly names `checked_at` (implying per-check row); uptime_30d calc (spec §2.2) naturally aggregates from history. Retention/archival is separate ops concern.
+- **GAP #2 (`degraded` semantics)** — **APPROVED default (1st consecutive fail = degraded, 2nd = down)** for MVP primitive. Reason: (a) matches SRE "yellow → red" progression; (b) spec §7 explicitly reserves `down` for 2-consec-fail; (c) spec §9 `503 CHANNEL_DEGRADED` implies `degraded` is real state, not undefined; (d) leaves room for later latency-based degraded refinement (T24-followup can layer high-latency signal on top). **Note**: if PO/FE product team wants `degraded` reserved for latency-based instead (with 1st-fail staying `healthy`), that's a T24-followup refactor — 1-file change in `channel-health.debounce.ts`, non-breaking to callers. Flag as **Q-C-08** for confirmation, non-blocking primitive.
+- **GAP #3 (Claude API probe mechanism)** — APPROVED default (port type-only; SDK add + adapter deferred to T24-followup pending PO approval on `@anthropic-ai/sdk` package addition). Consistent with slot-B pattern for HC/AI adapters.
+- **GAP #4 (per-hotel vs global probes)** — APPROVED default (per-hotel port signature; adapter dedupes if creds are shared). Non-blocker for primitive.
+- **GAP #5 (HealthChangedEvent shape for T25 handoff)** — APPROVED default (`{ hotelId, provider, previousStatus, newStatus, checkedAt }`). T25 (C9) may propose adjustments when it lands; primitive is loosely coupled via return-type.
+
+**Additional binding conditions**:
+
+1. **`last_message_at` composition (spec §2.2 response for `whatsapp` / `telegram`)** — the field is in the response shape but NOT in `ChannelHealthSnapshot` DDL. **Scope decision for T24 primitive**: leave it OUT of the snapshot record and OUT of `HealthResponseSchema.probe` payload. The route-landing (T24-followup) is the correct layer to compose it at read time from `outbound_dispatch_queue.sent_at` MAX / `webhook_events.received_at` MAX per provider — no schema change needed. Please add a docstring in `channel-health.schema.ts` explaining that `last_message_at` is composed at route layer, not at snapshot layer.
+2. **`ports/` folder discipline** — mirror slot-B `hotel-core-*.port.ts` pattern (type-only, no runtime); mirror T19 `staff-lookup.port.ts` / `ticket-action.port.ts` file naming (`{provider}-health-probe.port.ts` OK as planned).
+3. **Q-C-05 impact accepted** — repository imports `@prisma/client` types (`ChannelHealthSnapshot`), so Docker-build will remain red per precedent. Document in SUBMIT §"Known shared-infra RED" as already planned.
+4. **Test naming** — `should <expected> when <condition>` pattern (PM-AGENT §7 requirement).
+5. **Test count target** — aim for ~28 tests as planned; branch coverage ≥ 80% (defensive fallbacks like the T19 `?? ''` are tolerated when TS-required).
+6. **Prisma-mock unit test** for repository — tolerated per T17 stopgap precedent (integration test blocked on Q-C-01). Same follow-up requirement: when Q-C-01 lands, add real integration test via testcontainers.
+7. **Barrel `index.ts`** — export types + service class + repository class + port types. Do NOT export debounce internals (pure function stays module-private unless T25 needs it).
+8. **Drift scans** — 0 hits target on all 6 categories; log baseline post-SUBMIT.
+9. **Scope containment** — zero touches to `api.ts`, `prisma-client.ts`, `worker.ts`, `plugins/**`, other modules' `index.ts`. Q-C-01/02/03 authority respected.
+
+**Q-C-08 raised** (concurrent with ACK): degraded-status semantics ratification for FE badge behavior. Mirrored to slot C §3 + PARENT §3a. Non-blocking T24 primitive.
+
+Proceed to coding. Post SUBMIT when `make check` green + drift clean + coverage target met.
+
 
 ### ASSIGNMENT T## — claimed by exec-C (Satrio) at H{N} HH:MM
 - Branch: feat/<modul>-<short>
@@ -647,6 +689,7 @@ Re-run `make check` after fix, confirm pass, resubmit (attempt N+1).
 | Q-C-05 | **Dockerfile × pnpm × Prisma custom-output — SHARED-INFRA BUG; main is currently RED.** Docker build fails on `pnpm build` (tsc -p tsconfig.build.json) with `TS2305: Module '@prisma/client' has no exported member 'TelegramConfig'` + `no exported member 'WaConfig'`. Locally + on CI unit/integration/lint/typecheck: green. Dockerfile stage 2 line 25 explicitly runs `pnpm prisma:generate`; schema.prisma:3 uses custom `output = "../node_modules/.prisma/client"`. Suspected pnpm strict-hoisting × prisma custom-output interaction (known upstream category). **T10 (PM B PR #10) merged RED with same failure at 2026-07-04T16:28:09Z**, meaning main has been red on Docker-build since T10 landed — this pre-dates T17. Precedent conflict with `PM-AGENT.md §4` "Merge tanpa lulus CI". PR #11 (T17) inherits + repeats same failure; not a T17 code defect. **Ask Parent PM**: (a) which fix candidate — remove custom output, add `.npmrc public-hoist-pattern`, or hoist step in Dockerfile? (b) route as slot-A shared-infra follow-up (F12?)? (c) merge-policy ratify for T10 + T17 pending fix (rollback T10 or waive Docker-build check batch-wide)? | PM C (Satrio) H14 (2026-07-05) | Dockerfile L22-32; prisma/schema.prisma:1-5; GH Actions run 28716832757 job Docker-build FAILURE | open | — |
 | Q-C-06 | **StaffLookupPort HC RPC contract — cross-service, HC-team + PO.** Spec §3.2 "identify the staff Telegram user" — no URL, no path, no payload, no response shape, no error catalog for `lookupByTelegramUserId(hotelId, telegramUserId) → StaffIdentity \| null`. `docs/spec/02-hotel-core.md` does NOT exist in this repo. **Options**: A) narrow port `StaffLookupPort` type-only [T19 primitive default; adapter deferred to T19-followup]; B) hard-code assumed `POST /internal/hc/staff/lookup-by-telegram-id`; C) block T19-followup. Sibling to Q-B-04/05/08/09. Blocks T19-followup HC adapter. HC-team + PO ratify. | PM C (Satrio) H15 (2026-07-06) | spec §3.2 vs missing `02-hotel-core.md`; T19 PLAN GAP-#4 | open | — |
 | Q-C-07 | **TicketActionPort HC RPC contract — cross-service, HC-team + PO.** Spec §3.2 "Hotel Core (for ticket status update)" — no URL/signature/response/error catalog for `take` / `release` / `markDone(hotelId, ticketId, staffId) → { ok \| not_found \| forbidden }`. Also unclear: is there a fourth action for AI handover (see AI-handover note in T19 VERDICT), or does that flow via a separate `AiHandoverPort`? Sibling to Q-C-06 + Q-B-04. Blocks T19-followup HC adapter. HC-team + AI-team + PO ratify. | PM C (Satrio) H15 (2026-07-06) | spec §3.2 vs missing `02-hotel-core.md`; T19 PLAN GAP-#4 | open | — |
+| Q-C-08 | **`degraded` health status semantics — FE badge behavior; product/PO decision.** Spec §7 says "2 consecutive failures → `down`" but doesn't define what `degraded` means. Spec §2.2 status enum lists `'healthy' \| 'degraded' \| 'down'`; §4.7 DDL CHECK constraint enforces same 3-value set; §9 mentions `503 CHANNEL_DEGRADED` (best-effort response on `degraded`). Two interpretations: **(A)** 1st consecutive fail = `degraded` (soft warning), 2nd = `down` (hard) — SRE yellow→red progression; matches debounce mid-state literally; **(B)** `degraded` reserved for latency-based (probe OK but slow, e.g. >5s response); 1st fail stays `healthy`, 2nd flips to `down`. **T24 primitive ships default A**; refactor to B is 1-file change in `channel-health.debounce.ts`, non-breaking to callers. PO/FE product team ratify which semantic drives FE badge / user-facing behavior. | PM C (Satrio) H16 (2026-07-06) | spec §7 + §2.2 + §4.7 + §9; T24 PLAN GAP-#2 | open | — |
 
 ---
 
