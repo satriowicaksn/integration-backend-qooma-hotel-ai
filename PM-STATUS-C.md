@@ -461,6 +461,81 @@ Requesting PM C VERDICT.
 - PM C: register Q-C-06 + Q-C-07 in §3 + mirror to PARENT §3a; update §1 T17→merged + T19→approved status; post PARENT §2 roll-up.
 
 
+### ASSIGNMENT T24 — claimed by exec-C (Satrio) at H16 (2026-07-06) 14:30
+- Branch: `feat/channel-health-probes`
+- Routed from: PM-STATUS-C.md §1 T24 (backlog → self-select per PM C VERDICT T19 §460 recommendation: "recommend T24 (health probes, worker-side, zero HTTP surface, deps all merged)")
+- Dependency check per §1: T07 ✓ (Bull queue infra merged, foundation), T10 ✓ (WA config CRUD primitive merged PR #10), T17 ✓ (Telegram config CRUD primitive merged PR #11). All primitive-scope deps met.
+- **Post-VERDICT compliance**: PM C VERDICT T19 §442 procedural note explicitly requested that new tasks post PLAN + wait for PM C ACK. This PLAN is posted for ACK — **not self-proceeding** until PM C ACK arrives.
+
+#### PLAN T24 — exec-C (Satrio) at H16 (2026-07-06) 14:30
+
+**Scope recap**
+Deliver C8 primitive per `docs/spec/04-integration-channels.md §2.2 (GET /api/integrations/health), §4.7 (channel_health_snapshots DDL), §7 (Health probes)` + `MVP-INTEGRATION-FIRST.md §1.3 (C8), §4.8 (2-poll debounce), §5 L130 AC`. Ship pure state-machine for **2-poll debounce transition logic**, provider probe **port** interfaces (WA / Telegram / Claude), overall health **service** that composes probes → apply debounce → emit `HealthChangedEvent` (returned, not published — publishing = T25/C9), types + zod for snapshot, Prisma-direct repository for `channel_health_snapshots` (ctor-injected `PrismaClient` per T17 precedent). Router (`GET /api/integrations/health`), Bull cron worker registration, socket emit (`integration:health_changed` — that's T25), integration test — **all deferred** to T24-followup pending Q-C-01 (Prisma singleton), Q-C-02 (`api.ts` bootstrap), Q-C-03 (JWT), Q-C-05 (Docker × prisma-custom-output — affects any `@prisma/client` type import).
+
+**Session-start gate** (EXECUTOR-PROTOCOL §2)
+- Identity confirmed: Executor, Slot C (Satrio) ✓
+- CLAUDE.md loaded ✓
+- Task spec read: `04-integration-channels.md §2.2 (health endpoint), §4.7 (DDL), §7 (probes)`, `MVP-INTEGRATION-FIRST.md §1.3 (C8/C9), §4.8 (debounce), §5 L130`
+- Parent docs spot-read: `docs/MODULE_TEMPLATE.md §1 (external IO ports subshape)`, `src/modules/telegram/*` (T17 pattern anchor), `src/modules/whatsapp/ports/*` (slot-B port precedent)
+- Dependencies: T07 ✓ (queue infra), T10 ✓ (WA), T17 ✓ (Telegram) — at primitive scope
+- `make typecheck` clean ✓ / `make lint` clean ✓ / `make test-unit` PASS (verified locally on `main @ f56c2b1` before T19 approval → 397 tests; will re-verify on latest post-approve main before branch cut)
+- Scaffolder risk: none — all new files under new module `src/modules/channel-health/` (bounded context is per-hotel channel status across providers; not Telegram-specific so not co-located with `src/modules/telegram/`)
+- Known shared-infra RED: Q-C-05 will affect Docker-build stage since T24 repository imports `PrismaClient` + `ChannelHealthSnapshot` types. Same pattern as T17 — CI unit/integration/lint/typecheck green; Docker-build red pending Q-C-05 fix. Documented in SUBMIT.
+
+**Files to create**
+```
+src/modules/channel-health/
+├── index.ts                              (barrel — types + service + repository + ports)
+├── channel-health.types.ts               (HealthStatus, ProbeResult, ChannelHealthDomain, HealthChangedEvent)
+├── channel-health.schema.ts              (zod HealthResponseSchema per spec §2.2 payload; internal probe input/output schemas)
+├── channel-health.debounce.ts            (pure state-machine: apply 2-poll debounce; transition detection)
+├── channel-health.repository.ts          (Prisma-direct, ctor-inject; latest snapshot per hotel+provider; insert new snapshot)
+├── channel-health.service.ts             (orchestrator: run probes via ports → apply debounce → persist → return HealthChangedEvent[])
+├── ports/
+│   ├── whatsapp-health-probe.port.ts     (probe WA Cloud API — external IO, ADR-0001 port; adapter deferred)
+│   ├── telegram-health-probe.port.ts     (probe Telegram getMe — external IO port)
+│   └── claude-api-health-probe.port.ts   (probe Claude API — external IO port)
+└── __tests__/
+    ├── channel-health.debounce.test.ts   (pure state-machine: 1 fail = degraded, 2 fail = down, transitions, recovery)
+    ├── channel-health.service.test.ts    (orchestrator: probes → debounce → repo write, event emission on transition only)
+    ├── channel-health.repository.test.ts (Prisma call-shape via plain-object mock, per T17 tolerated-deviation precedent)
+    └── channel-health.schema.test.ts     (zod HealthResponse: valid + rejects)
+```
+
+**Files to modify**
+- (none) — module is new bounded context. No index.ts of another module needs re-exports.
+
+**Files NOT touched** (Q-C-01/02/03 authority; T17/T19 REJECT-PLAN precedent)
+- `src/entrypoints/api.ts` (still stub — Q-C-02; T24 endpoint `GET /api/integrations/health` deferred)
+- `src/entrypoints/worker.ts` (still stub — Bull cron registration deferred to worker bootstrap)
+- `src/core/prisma/prisma-client.ts` (still stub — Q-C-01)
+- `src/plugins/` (no JWT plugin work — Q-C-03)
+- `src/modules/channel-health/channel-health.routes.ts` (omitted — router landing in T24-followup)
+- `src/modules/channel-health/channel-health.jobs.ts` (omitted — Bull cron in T24-followup)
+- socket emit for `integration:health_changed` = **T25/C9** separate task; T24 service RETURNS `HealthChangedEvent[]` for the caller (T25) to publish
+
+**Approach**
+1. **`channel-health.debounce.ts`** — pure function `applyDebounce(previous: ChannelHealthDomain | null, latestProbe: ProbeResult): ChannelHealthDomain`. State machine per spec §4.8: `healthy` (probe ok), `degraded` (1st consecutive fail — soft signal), `down` (2nd consecutive fail — confirmed). Recovery: any `ok` probe → immediate `healthy`. State stored as `{ status: 'healthy'|'degraded'|'down'; consecutiveFailures: number }` — `consecutiveFailures` derived from history of last N snapshots. Also returns `didTransition: boolean` (previous.status !== new.status) so caller knows when to emit `HealthChangedEvent`.
+2. **`channel-health.repository.ts`** — `getLatestByHotelProvider(hotelId, provider): Promise<ChannelHealthDomain | null>` + `insertSnapshot(input): Promise<ChannelHealthDomain>`. Uses `channelHealthSnapshot.findFirst({ where: { hotelId, provider }, orderBy: { checkedAt: 'desc' } })` + `.create({...})`. NO wrap-interface, matches ADR-0001.
+3. **Ports** — one per provider so mocks are trivial. Interface: `probe(input: { hotelId: string }): Promise<ProbeResult>`. `ProbeResult = { ok: true; latencyMs: number } | { ok: false; error: string }`.
+4. **`channel-health.service.ts`** — `runProbesForHotel(hotelId): Promise<HealthChangedEvent[]>`. For each provider (`whatsapp`, `telegram`, `claude_api`): fetch latest snapshot from repo → run probe via port → apply debounce → insert new snapshot → if transition, push `HealthChangedEvent`. Returns list of transitions for caller to publish (T25). Logger info line per probe with `{ hotelId, provider, status, latencyMs }`.
+5. **`channel-health.schema.ts`** — `HealthResponseSchema` per spec §2.2: `{ claude_api: { status, last_check_at, uptime_30d?, avg_response_ms? }, whatsapp: { status, last_message_at? }, telegram: { status, last_message_at? } }`. Uptime + avg response are optional in MVP primitive (compute from snapshot history — T24-followup can enrich).
+6. **Unit tests**:
+   - Debounce: healthy → 1 fail → degraded (no transition emit); degraded → 2nd fail → down (transition emit); down → ok → healthy (transition emit); healthy → ok → healthy (no transition); first ever probe (previous=null): ok → healthy (transition), fail → degraded (transition); ~12 cases
+   - Service: runs all 3 provider probes, calls repo per provider, applies debounce, emits events only on transition; ~8 cases
+   - Repository: findFirst call shape, create call shape, toDomain mapping; ~4 cases (mirrors T17 tolerated-deviation with plain-object PrismaClient mock)
+   - Schema: valid full response, valid minimal, rejects wrong status enum; ~4 cases
+
+**GAPs / questions**
+- **GAP T24-#1 — Snapshot cardinality per poll cycle.** Spec §7 "poll every 60s per hotel" + §4.7 stores each snapshot as a row → high row count (60/hr × 3 providers × H hotels). Options: (A) insert on **every** poll (simple, exact history for uptime calc); (B) insert only on **transition** (compact, but loses per-poll latency data). Spec ambiguous. **My intent**: A (per-poll insert, simple, matches spec §7 phrasing "poll every 60s"). Retention/archival = separate ops concern. Note: uptime_30d calc later just aggregates last 30 days.
+- **GAP T24-#2 — "degraded" trigger semantics.** Spec §4.8 says "2 consecutive failures = down" but doesn't define `degraded`. Spec §2.2 lists `healthy | degraded | down` in status enum. **My intent**: 1st consecutive fail = `degraded` (soft warning surfaced to FE badge), 2nd = `down` (hard). Alternative: `degraded` reserved for high-latency-but-alive (e.g. probe ok but >5s response). Confirm which semantic.
+- **GAP T24-#3 — Claude API probe mechanism.** Spec §7 says "poll Claude API" — presumably a lightweight endpoint like `GET /v1/models` or health check. Anthropic SDK not yet added to package.json (would need `pnpm add @anthropic-ai/sdk` → PO approval). **My intent**: port abstracts the mechanism; adapter deferred to T24-followup along with SDK add + PO ratification. Primitive is unblocked because port is type-only.
+- **GAP T24-#4 — Per-hotel vs global probes.** Spec §7 "per hotel" suggests each hotel triggers its own probe (uses hotel's own token). But Claude API + shared BSP may not be per-hotel — could be one global probe. **My intent**: model as per-hotel in port signature (`probe({ hotelId })`); if hotels share creds, adapter dedupes. Non-blocker for primitive.
+- **GAP T24-#5 — HealthChangedEvent return shape (C9 handoff).** T25 (C9) wires the socket emit. T24 service returns `HealthChangedEvent[]`; T25 caller publishes. Event shape: `{ hotelId, provider, previousStatus, newStatus, checkedAt }`. Confirm shape is what T25 expects (T25 not yet planned; may need adjustment when T25 lands).
+
+Awaiting PM C ACK — especially GAP-#1 (per-poll vs transition-only insert) + GAP-#2 (degraded semantics).
+
+
 ### ASSIGNMENT T## — claimed by exec-C (Satrio) at H{N} HH:MM
 - Branch: feat/<modul>-<short>
 - Routed from: PM-STATUS-PARENT.md §1 T## (Parent PM assigned)
