@@ -30,9 +30,9 @@
 
 | T## | Title                                                                            | Status   | Verified by PM | Notes                                                              |
 | --- | -------------------------------------------------------------------------------- | -------- | -------------- | ------------------------------------------------------------------ |
-| T17 | Telegram config CRUD (`GET, PUT /api/integrations/telegram`)                     | pr-open (red-docker) | PM C (H13 approved code · H14 PR review) | PR #11 open, CI 3/4 SUCCESS (lint+typecheck/unit/integration all green) + Docker-build FAILURE. RED = shared-infra bug (Q-C-05 pnpm×prisma-custom-output); NOT T17 code defect. T10 (PR #10) merged red with same failure → main is red since; precedent conflict PM-AGENT §4. Merge escalated to Parent PM |
+| T17 | Telegram config CRUD (`GET, PUT /api/integrations/telegram`)                     | merged   | PM C (H13, a2) | Primitive merged PR #11 `0d89d76` at 2026-07-04T19:32:26Z (red-docker precedent honored). Router+api.ts wiring = T17-followup blocked on Q-C-01/02/03 |
 | T18 | Per-dept Telegram routing write-through (HC `departments` table)                 | backlog  | —              | After T17; per Q-OPS-06 shared-DB direct write                     |
-| T19 | Telegram inbound webhook + commands (`/take`, `/release`, `/done`, `/help`)      | backlog  | —              | After T04 (Nathan) + T05 + T17                                     |
+| T19 | Telegram inbound webhook + commands (`/take`, `/release`, `/done`, `/help`)      | approved (primitive) | PM C (H15, a1) | Primitive shipped: parser + zod passthrough schema + type-only StaffLookupPort + TicketActionPort + service (anti-enumeration silent-ignore, PII-suffix log) + 41 unit tests, 100% stmt/func/line + 92.85% branch cov, drift clean, make check green on PM rerun. No `@prisma/client` import — sidesteps Q-C-05. Router+HMAC+HC RPC adapters+`webhook_events` persist = T19-followup on Q-C-01/02/03/06/07. Branch `feat/telegram-inbound-commands @ 9c0bbc5`, PR pending open |
 | T20 | Outbound Telegram dispatch RPC                                                   | backlog  | —              | After T06 + T09 (Nathan); per-dept routing per T18                 |
 | T21 | OTA email IMAP poller + parser pipeline + HC pending-visit RPC                   | backlog  | —              | After T07 (Nathan); HC internal RPC for pending-visit insert       |
 | T22 | QR generation + download (1024×1024 PNG, object storage)                         | backlog  | —              | After T02 + T10 (Nanak)                                            |
@@ -419,6 +419,46 @@ Notes / open items
 
 Requesting PM C VERDICT.
 
+##### VERDICT T19 — APPROVED (attempt 1, narrow primitive) by PM C (H15, 2026-07-06)
+
+**Scope**: T19 primitive per spec §3.2 (parser + zod webhook schema + dispatcher + type-only HC ports + unit tests). Router / HMAC wiring / `webhook_events` persistence / HC-RPC adapters / integration test correctly deferred to T19-followup. Mirrors T17 REJECT-PLAN §125 narrow-primitive pattern + slot-B `hotel-core-*.port.ts` type-only port precedent.
+
+**PM independent verification** (checked out `origin/feat/telegram-inbound-commands @ 9c0bbc5`, ran gate + drift scans, restored to main after):
+
+- ✅ **Quality gate** — `make check` PASS: lint 0/0, format clean, typecheck strict, `test:unit` **397 passed / 37 suites** (2 pre-existing skipped; +41 new for T19: 18 commands + 6 schema + 17 service). ✓
+- ✅ **Drift scans** (scope `telegram-inbound*` + `ports/`) — 0 `any`, 0 `console.log/info/debug`, 0 `throw new Error(`, 0 default exports, 0 forbidden imports (express/typeorm/moment/node-fetch), 0 `.skip`. ✓
+- ✅ **Scope containment** — verified via `git show --stat origin/feat/telegram-inbound-commands`: only `src/modules/telegram/telegram-inbound*` + `src/modules/telegram/ports/` + `index.ts` extended + `PM-STATUS-C.md`. Zero touches to `api.ts`, `prisma-client.ts`, `plugins/**`. Q-C-01/02/03 authority respected. ✓
+- ✅ **No `@prisma/client` import** — grep confirmed; sidesteps Q-C-05 Docker-build failure entirely. Module is stateless (pure parser + dispatcher over ports), no repo persistence, so this is architecturally correct. ✓
+- ✅ **Anti-enumeration security (GAP #2 default)** — `telegram-inbound.service.ts:44-53` returns `{ kind: 'ignored', reason: 'staff_not_recognized' }` on null lookup, no bot reply generated. Log line masks `telegramUserId` to last-4 suffix only (`telegramUserIdSuffix: telegramUserId.slice(-4)`). Test `should silent-ignore when staff not recognized (anti-enumeration)` asserts + verifies full ID not in logged payload. ✓
+- ✅ **Port abstraction (ADR-0001)** — `StaffLookupPort` + `TicketActionPort` are type-only interfaces (16 + 22 LOC, zero runtime impl), consumed via ctor injection. Mirrors slot-B `hotel-core-*.port.ts` pattern exactly (verified via file listing on main). Adapters correctly deferred to T19-followup. ✓
+- ✅ **Zod schema strategy** — `TelegramUpdateSchema.passthrough()` on top level (Telegram evolves), strict enough on the consumed subset (`update_id`, `message.chat.id`, `message.from.id`, `message.text`) to safely extract sender identity. Test asserts unknown fields preserved. ✓
+- ✅ **Discriminated unions** — `ParsedCommand`, `TicketActionOutcome`, `DispatchResult` all use `kind`/`status` discriminants; exhaustive `switch` in `invokeAction` + `renderOutcomeReply` type-narrow correctly (no fallthrough). ✓
+- ✅ **Spec §3.2 command surface** — `/take`, `/release`, `/done`, `/help` all parsed; unknown → help reply for recognized staff (defensive); `@bot_username` suffix stripped; case-insensitive; ticket-id regex `^[A-Za-z0-9-]{1,64}$` per GAP #3 (permissive; HC validates). ✓
+- ✅ **Test naming** — `should <expected> when <condition>` pattern honored across all 41 tests. ✓
+- ✅ **Coverage claim (100/100/100/92.85 branch)** — the 1 uncovered branch (`?? ''` fallback after `.split('@')[0]` for `noUncheckedIndexedAccess`) is a defensive TS-required fallback unreachable at runtime given the earlier `startsWith('/')` guard. Documented in SUBMIT §391. ✓
+
+**Procedural note (tolerated, not faulted)**:
+
+- Executor self-proceeded without PM C ACK, invoking T17 REJECT-PLAN §125 precedent + user directive "continue to next T". The §125 precedent was specifically written for T17-post-REJECT-PLAN, not a blanket rule for future new tasks. **Tolerated here** because: (a) PLAN posted at H14 12:15, SUBMIT at H15 09:30 gives ~21h ACK window, (b) T19 PLAN body was faithful to T17 narrow-primitive pattern with no shared-infra bundling, (c) all 4 GAPs had explicit "My intent" defaults which were reasonable, (d) user directive to continue counted as informal PO/PM authorization. **Going forward**: for new T## tasks, please post PLAN and wait for PM C ACK (or explicit user directive) before self-proceeding. Legitimate self-proceed windows are only those PM C has explicitly opened (like T17 §125).
+
+**Items to register (PM C action, not blocking merge)**:
+
+- **Q-C-06** — StaffLookupPort HC RPC contract (cross-service, HC-team + PO): spec §3.2 "identify the staff Telegram user" — no URL, path, payload, response shape defined. Sibling to Q-B-04/05. Port kept type-only in T19 per PM C precedent; adapter deferred to T19-followup. Mirrored to PARENT §3a below.
+- **Q-C-07** — TicketActionPort HC RPC contract (cross-service, HC-team + PO): spec §3.2 "Hotel Core (for ticket status update)" — no URL/signature/response/error catalog for `take` / `release` / `markDone` / handoff to AI service. Sibling to Q-C-06 + Q-B-04. Port kept type-only. Adapter deferred.
+- **Deferral acknowledged (not a new Q)** — `webhook_events` raw-payload persistence for Telegram inbound (spec §4.4 CHECK constraint permits `provider='telegram'`; slot-B T12 persists WA inbound to same table). Falls into T19-followup route-landing scope, not primitive. Q-B-06 (`webhook_events.external_id` for dedupe) still applies.
+- **Spec §3.2 AI-handover** — spec mentions "RPC AI service (for handover)" as sibling to HC ticket update. T19 currently routes only command messages, all to HC. AI handover semantics (when? on non-command messages? on `/take` chain?) unclear — SUBMIT §417 flagged as open note. If PO wants AI handover in T19 primitive scope, we'd add an `AiHandoverPort` type-only and a routing branch. **PM C default**: keep AI handover out of primitive (spec says "staff commands" for §3.2; guest-side inbound is WA-only per §3.1). Confirm with Parent PM if wrong.
+
+**Tolerated deviations (flagged, non-blocking)**:
+
+1. **Q-A-03 test env workaround** did NOT reappear this task (no `loadConfig()` call in T19 code path — service is pure over ports, no env access). Improvement over T17.
+2. **`AuthError` / `AppError` not thrown** — T19 primitive returns `DispatchResult` union, doesn't throw. Correct for a service that maps input → outcome; error semantics live in ports (adapters translate HTTP errors → `TicketActionOutcome.status`). At route boundary, `AuthError` would be raised by JWT/HMAC plugins (not this task's scope).
+
+**T19 status**: `backlog` → **approved (narrow primitive)**. Router / integration deliverable = T19-followup after Q-C-01/02/03/06/07 resolved. Slot C progress: **2/9** (T17 + T19 primitives).
+
+**Next actions**:
+- Executor C: push `feat/telegram-inbound-commands` to remote (branch already pushed at `9c0bbc5` — verified via `git branch -a`), open PR to main (analog to PR #11 pattern; expect same 3/4 CI green + Docker-build red pending Q-C-05 fix). PM C will re-verify on PR CI + auto-note merge state per red-docker precedent.
+- Executor C: pick next primitive from §8 queue — recommend **T24 (health probes, worker-side, zero HTTP surface, deps all merged)** or **T21 (OTA IMAP poller, also worker-side)**. Both continue the "primitive-then-router-followup" pattern.
+- PM C: register Q-C-06 + Q-C-07 in §3 + mirror to PARENT §3a; update §1 T17→merged + T19→approved status; post PARENT §2 roll-up.
 
 
 ### ASSIGNMENT T## — claimed by exec-C (Satrio) at H{N} HH:MM
@@ -530,6 +570,8 @@ Re-run `make check` after fix, confirm pass, resubmit (attempt N+1).
 | Q-C-03 | **Session/JWT auth plugin absent — cross-service contract Q; blocks all `gm_admin` CRUD (spec §2.1).** `src/plugins/` has hmac-validator + tenant-resolver + internal-rpc-auth + error-handler only. `env.ts:36-39` declares `JWT_ACCESS_SECRET`/`JWT_REFRESH_SECRET` but no plugin consumer. Auth service lives in separate repo (KICKOFF §1 L11); Integration verifies JWTs signed by Auth. Cross-service ratification needed: (a) verification method — JWKS URL fetch vs HS256 shared secret? (b) JWT payload shape — `{ sub, hotel_id, role, exp }`? (c) refresh-token flow — irrelevant to Integration (doesn't issue)? Preferred MVP: HS256 shared secret + `{ sub, hotel_id, role }` + verify-only plugin. Blocks T10 (B), T17 route (C), T18-T20, T23. **Ask Parent PM**: route to PO — cross-service contract. | PM C (Satrio) H13 | KICKOFF §1 L11; env.ts:36-39; src/plugins/*; T17 PLAN GAP-#3 | open | — |
 | Q-C-04 | **Tenant identification for CRUD endpoints — cascading from Q-C-03.** Spec `/api/integrations/telegram` has no `:hotel_slug` in path (unlike webhook routes at `/webhooks/wa/:hotel_slug` spec §2.2). Alternatives: (a) JWT payload `hotel_id` (session-bound; preferred if Q-C-03 lands JWT); (b) header `X-Hotel-Id` (weak); (c) path rewrite `/api/hotels/:hotel_slug/...` (spec-drift). Locked to Q-C-03 outcome. | PM C (Satrio) H13 | spec §2.1 vs §2.2; T17 PLAN GAP-#4 | open | — |
 | Q-C-05 | **Dockerfile × pnpm × Prisma custom-output — SHARED-INFRA BUG; main is currently RED.** Docker build fails on `pnpm build` (tsc -p tsconfig.build.json) with `TS2305: Module '@prisma/client' has no exported member 'TelegramConfig'` + `no exported member 'WaConfig'`. Locally + on CI unit/integration/lint/typecheck: green. Dockerfile stage 2 line 25 explicitly runs `pnpm prisma:generate`; schema.prisma:3 uses custom `output = "../node_modules/.prisma/client"`. Suspected pnpm strict-hoisting × prisma custom-output interaction (known upstream category). **T10 (PM B PR #10) merged RED with same failure at 2026-07-04T16:28:09Z**, meaning main has been red on Docker-build since T10 landed — this pre-dates T17. Precedent conflict with `PM-AGENT.md §4` "Merge tanpa lulus CI". PR #11 (T17) inherits + repeats same failure; not a T17 code defect. **Ask Parent PM**: (a) which fix candidate — remove custom output, add `.npmrc public-hoist-pattern`, or hoist step in Dockerfile? (b) route as slot-A shared-infra follow-up (F12?)? (c) merge-policy ratify for T10 + T17 pending fix (rollback T10 or waive Docker-build check batch-wide)? | PM C (Satrio) H14 (2026-07-05) | Dockerfile L22-32; prisma/schema.prisma:1-5; GH Actions run 28716832757 job Docker-build FAILURE | open | — |
+| Q-C-06 | **StaffLookupPort HC RPC contract — cross-service, HC-team + PO.** Spec §3.2 "identify the staff Telegram user" — no URL, no path, no payload, no response shape, no error catalog for `lookupByTelegramUserId(hotelId, telegramUserId) → StaffIdentity \| null`. `docs/spec/02-hotel-core.md` does NOT exist in this repo. **Options**: A) narrow port `StaffLookupPort` type-only [T19 primitive default; adapter deferred to T19-followup]; B) hard-code assumed `POST /internal/hc/staff/lookup-by-telegram-id`; C) block T19-followup. Sibling to Q-B-04/05/08/09. Blocks T19-followup HC adapter. HC-team + PO ratify. | PM C (Satrio) H15 (2026-07-06) | spec §3.2 vs missing `02-hotel-core.md`; T19 PLAN GAP-#4 | open | — |
+| Q-C-07 | **TicketActionPort HC RPC contract — cross-service, HC-team + PO.** Spec §3.2 "Hotel Core (for ticket status update)" — no URL/signature/response/error catalog for `take` / `release` / `markDone(hotelId, ticketId, staffId) → { ok \| not_found \| forbidden }`. Also unclear: is there a fourth action for AI handover (see AI-handover note in T19 VERDICT), or does that flow via a separate `AiHandoverPort`? Sibling to Q-C-06 + Q-B-04. Blocks T19-followup HC adapter. HC-team + AI-team + PO ratify. | PM C (Satrio) H15 (2026-07-06) | spec §3.2 vs missing `02-hotel-core.md`; T19 PLAN GAP-#4 | open | — |
 
 ---
 
@@ -539,6 +581,7 @@ Re-run `make check` after fix, confirm pass, resubmit (attempt N+1).
 | --- | ------------- | ----- | ----------- | ------------------ | ----------------- | ------------------------------ | ------- | ------------- | ------------------ | --------------------- |
 | H12 baseline | (no src/ touched) | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 | H13 T17 a2 | 8 files in `src/modules/telegram/` | 0 | 0 | 0 | 0 | 0 | 0 | 0 (test fixtures only: `example.com` + `localhost` env-overrides — allowed) | n/a (no webhook this task) | 0 (Prisma-direct + ctor-inject, ADR-0001) |
+| H15 T19 a1 | 9 files (8 new + index.ts) in `src/modules/telegram/telegram-inbound*` + `ports/` | 0 | 0 | 0 | 0 | 0 | 0 | 0 | n/a (webhook route deferred) | 0 (module doesn't import `@prisma/client`; sidesteps Q-C-05) |
 
 > PM C jalankan drift scan per `PM-AGENT.md §3 Step 2` setiap SUBMIT + end-of-day full scan untuk slot C's touched files.
 
