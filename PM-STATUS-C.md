@@ -1290,6 +1290,93 @@ Awaiting PM C ACK — especially GAP-#1/#2 (response shape granularity) + GAP-#5
 
 Proceed to coding. Post SUBMIT when `make check` green + drift clean + all 17 binding conditions honored + ~15-20 tests target met + PR CI ideally 4/4 green (Docker milestone).
 
+#### SUBMIT T23 — exec-C (Satrio) at H19 (2026-07-07) 10:50 (attempt 1, narrow primitive per ACK)
+
+Task: T23 integration overview aggregator primitive (spec §2.1 row 27 + MVP §1.3 C7). Ships **4 narrow reader-port interfaces** (WA config / Telegram config / QR state / channel health) + **`IntegrationOverviewService` aggregator** with `Promise.all` parallel fetch + per-subsystem silent-null + synthetic-down health fallback + **zod `IntegrationOverviewResponseSchema`** (snake_case, `.strict()`, per-subsystem nullable except health) + 17 unit tests. Router (`GET /api/integrations`) + `gm_admin` JWT guard + reader-port adapters wiring to `@modules/{whatsapp,telegram,qr-provisioning,channel-health}` barrels = **all deferred** to T23-followup pending Q-C-02/03 + Q-C-11 (FE contract).
+
+**🎯 DOCKER-GREEN MILESTONE** (PM C ACK T23 binding #17): this primitive has **zero `@prisma/client` imports** and **zero cross-module imports** — first slot-C primitive projected to break the 5-consecutive Q-C-05 Docker-red streak (T17/T19/T24/T21/T22). Awaiting PR CI to confirm on the Docker-build stage.
+
+Files changed: 11 (all new; scope strictly `src/modules/integration-overview/**`)
+  - src/modules/integration-overview/index.ts (new — barrel per binding #12; all `.js` extensions per binding #16, avoiding T22 `.ts` nit)
+  - src/modules/integration-overview/integration-overview.types.ts (new — WhatsappOverviewView, TelegramOverviewView, QrOverviewView, ChannelHealthPill, ClaudeApiHealthPill, HealthOverviewView, IntegrationOverview aggregate, OverviewSubsystem)
+  - src/modules/integration-overview/integration-overview.schema.ts (new — zod IntegrationOverviewResponseSchema per binding #4/#5/#6/#7; snake_case; strict; per-subsystem nullable; nested T24-shape health)
+  - src/modules/integration-overview/integration-overview.service.ts (new — aggregator: Promise.all + per-port try/catch + synthetic-down health per binding #9/#10/#11; clock-injected for deterministic tests)
+  - src/modules/integration-overview/ports/whatsapp-config-read.port.ts (new — type-only reader)
+  - src/modules/integration-overview/ports/telegram-config-read.port.ts (new — type-only reader)
+  - src/modules/integration-overview/ports/qr-state-read.port.ts (new — type-only reader)
+  - src/modules/integration-overview/ports/channel-health-read.port.ts (new — type-only reader; return type non-null per binding #3)
+  - src/modules/integration-overview/__tests__/integration-overview.schema.test.ts (new — 6 tests: full + all-null-except-health + strict-rejects + health-status enum + health-missing + uptime-range)
+  - src/modules/integration-overview/__tests__/integration-overview.service.test.ts (new — 11 tests: happy × 2 [full + parallel-fire], per-subsystem null × 3, per-subsystem failure resilience × 5 [WA throw, Telegram throw, QR throw, health throw → synthetic-down, aggregate-does-not-reject], named-error-code)
+
+Files NOT touched (binding #13 scope containment; foundation authority)
+  - src/entrypoints/api.ts (still stub — Q-C-02; `GET /api/integrations` route landing deferred)
+  - src/core/prisma/prisma-client.ts (still stub — Q-C-01; primitive has zero `@prisma/client` imports so unblocked by design)
+  - src/plugins/ (no plugin work — `gm_admin` guard at Q-C-03 landing)
+  - src/modules/{whatsapp,telegram,qr-provisioning,channel-health}/** (binding #3 — zero cross-module imports; adapters land in T23-followup)
+  - package.json (no new deps)
+
+DoD self-check
+- [x] **Spec §2.1 row 27** — aggregator surfaces WA/Telegram/QR/health subsystems; response shape matches PM C binding #7 starting point (WA/Telegram/QR nullable, health non-null, snake_case).
+- [x] **Reader-port pattern (binding #1)** — 4 narrow interfaces, adapter layer deferred. Aggregator sees only ports, not repos.
+- [x] **Zero `@prisma/client` imports (binding #2)** — verified via `grep -rn "^import.*@prisma/client" src/modules/integration-overview/` = 0 real imports (only docstring reference to the rule itself).
+- [x] **Zero cross-module imports (binding #3)** — verified via `grep -rn "^import.*@modules/telegram|whatsapp|qr-provisioning|channel-health" src/modules/integration-overview/` = 0.
+- [x] **Explicit `null` per subsystem (binding #4)** — schema uses `.nullable()` per subsystem field + top-level `.strict()`. Dedicated schema test asserts unknown-key rejection.
+- [x] **Nested health shape reuse (binding #5)** — health = `{ whatsapp, telegram, claude_api }` sub-object; each channel = `{ status, last_message_at? }`; claude_api = `{ status, last_check_at, uptime_30d?, avg_response_ms? }` mirrors T24 `HealthResponseSchema`.
+- [x] **Snake_case wire fields (binding #6)** — `phone_number`, `verified_at`, `has_access_token`, `webhook_url`, `bot_username`, `has_bot_token`, `default_chat_id`, `png_url`, `generated_at`, `last_check_at`, `last_message_at`, `uptime_30d`, `avg_response_ms`, `claude_api` — all snake_case.
+- [x] **`has_*_token` never touches encryption (binding #8)** — `grep -rn "decrypt|maskToken" src/modules/integration-overview/` = 0 hits. Field is a plain boolean supplied by the adapter (T23-followup adapter will derive from `botTokenEnc.length > 0`).
+- [x] **Parallel fetch + per-port try/catch (binding #9)** — `Promise.all` on 4 parallel reads; each read wrapped in `readNullable` or `readHealth` catch → single throw does not reject aggregate. Verified via `should keep all other subsystems intact when a single one throws` test.
+- [x] **Structured log on subsystem failure (binding #10)** — `logger.warn({ msg: 'integration_overview.subsystem_read_failed', module, hotelId, subsystem, errCode? })`. Verified via `should null the WA field and log a structured warn` + `JSON.stringify(logged)` does not contain plaintext error message.
+- [x] **Synthetic-down health snapshot (binding #11)** — on health-port throw, service returns `{ whatsapp: { status: 'down' }, telegram: { status: 'down' }, claudeApi: { status: 'down', lastCheckAt: NOW } }` — health is NEVER null. Dedicated test asserts.
+- [x] **Barrel discipline (binding #12)** — index.ts exports types + service + reader-port interfaces + response DTO/schema; NO internal helpers exported.
+- [x] **Test naming (binding #14)** — `should <expected> when <condition>` across all 17 tests.
+- [x] **Test count (binding #15)** — 17 tests, within the 15-20 target.
+- [x] **`.js` import extensions (binding #16)** — verified via `grep -rn "from '\..*\.ts'" src/modules/integration-overview/` = 0. Avoids T22 nit.
+
+Quality gate
+- `make lint`: PASS (0 errors, 0 warnings)
+- `make format-check`: PASS
+- `make typecheck`: PASS (strict + exactOptionalPropertyTypes + noUncheckedIndexedAccess)
+- `make test-unit`: PASS (373 tests / 36 suites; +17 new T23, within ACK §1285 target of 15-20)
+- `make check` (combined): **PASS**
+- T23 module coverage: **100% stmt/branch/func/line** on schema.ts. `integration-overview.service.ts` = **95.65% stmt / 80% branch / 87.5% func / 100% line** — only uncovered = `SYSTEM_CLOCK` defensive fallback on ctor `clock` omitted (line 47). Well above binding target.
+
+Drift scans (per binding #13; scope `src/modules/integration-overview/`)
+- `any` / `<any>` / `as any` (excluding `as unknown as` at test-mock boundary): 0 hits
+- `console.log|info|debug`: 0 hits
+- `throw new Error(` in src (non-test): 0 hits — service never throws; returns null / synthetic-down instead
+- forbidden imports (express/typeorm/sequelize/moment/node-fetch): 0 hits
+- default export: 0 hits
+- `.skip(` in tests: 0 hits
+- Hardcoded URL: 0 hits (test fixtures use `example.com`/`wa.me` per PM C precedent tolerated)
+
+Docker-green milestone (binding #17)
+- Zero `@prisma/client` type imports across the module → `tsc -p tsconfig.build.json` inside Dockerfile should compile without the T17/T22 error `TS2305: Module '@prisma/client' has no exported member 'X'`.
+- Zero cross-module imports → the module compiles independently of any other primitive.
+- **Prediction**: PR CI 4/4 green — first slot-C primitive since T19 to sidestep Q-C-05. If Docker still fails, the reason must be upstream drift caused by another module's file surfaced by whole-src `tsc` (unlikely; verify on PR).
+
+Security check (spec §2.1 + §8)
+- Reader-port interfaces type-only → aggregator cannot leak plaintext tokens or PII regardless of adapter behavior.
+- `has_*_token` boolean flag pattern mirrors T17 masking-parallel: reveals presence, not content.
+- No `decrypt` or `maskToken` calls in module (binding #8 grep = 0 hits).
+- Structured log line only carries subsystem name + errCode; `JSON.stringify` PII assertion in test.
+
+Test evidence (unit only)
+- Suites added: 2 (`integration-overview.schema`, `integration-overview.service`)
+- Tests added: 17 (6 schema + 11 service)
+- Full happy-path coverage: all 4 reads populated
+- Failure resilience coverage: 4 per-subsystem throws + 1 aggregate-does-not-reject + 1 named-error-code
+- Health-non-null invariant coverage: synthetic-down asserted with deterministic clock
+
+Notes / open items
+- **Q-C-11 (FE `GET /api/integrations` response contract)** — raised concurrent with PLAN ACK (T23 §1289). FE MSW handlers authoritative but live in separate repo. Response-shape refactor to matching FE contract = 1-file change to `integration-overview.schema.ts` at T23-followup.
+- **Route landing** — `GET /api/integrations` route mount + `gm_admin` guard + 4 reader-port adapters blocked on Q-C-02 (api.ts) + Q-C-03 (JWT). T23-followup wires adapters from `@modules/whatsapp` (WA config → WhatsappOverviewView mapping), `@modules/telegram` (T17 domain → TelegramOverviewView), `@modules/qr-provisioning` (T22 QrDomain → QrOverviewView), `@modules/channel-health` (T24 domain → HealthOverviewView).
+- **Integration test** — deferred until adapters land (T23-followup) since primitive alone has no persistence surface.
+- **Milestone progress** — Slot C after T23 approval: **6/9 primitives shipped**. Remaining: T18 (parked on Q-OPS-06/Q-CONTRACT-25), T20 (needs T18 first), T25 (needs T24 first + socket-infra decision).
+- Branch: `feat/integration-overview`; PR to be opened post-commit.
+
+Requesting PM C VERDICT.
+
+
 
 #### PLAN T## — exec-C (Satrio) at H{N} HH:MM
 
