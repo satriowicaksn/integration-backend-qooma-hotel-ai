@@ -37,7 +37,7 @@
 | T21 | OTA email IMAP poller + parser pipeline + HC pending-visit RPC                   | backlog  | —              | After T07 (Nathan); HC internal RPC for pending-visit insert       |
 | T22 | QR generation + download (1024×1024 PNG, object storage)                         | backlog  | —              | After T02 + T10 (Nanak)                                            |
 | T23 | Integration overview endpoint (`GET /api/integrations`)                          | backlog  | —              | After T10 (Nanak) + T17                                            |
-| T24 | Channel health probes + snapshots + 2-poll debounce                              | wip (PLAN ACK'd) | PM C (H16, a1) | New module `src/modules/channel-health/`. PLAN ACK'd H16: state-machine debounce + 3 provider ports (WA/Telegram/Claude) + Prisma-direct repo + service (probes → debounce → persist → return HealthChangedEvent[]). Router+worker cron+socket emit (T25) deferred. Q-C-08 raised (degraded semantics for PO ratify). Q-C-05 Docker-red will apply (module imports `@prisma/client` types). Coding proceeding |
+| T24 | Channel health probes + snapshots + 2-poll debounce                              | approved (primitive) | PM C (H16, a1) | Primitive shipped: pure 2-poll debounce state-machine + 3 type-only provider ports + Prisma-direct repo + service (probes → debounce → per-poll persist → transition-gated HealthChangedEvent[]) + 29 unit tests, 100% cov all 4 runtime files, drift clean, make check green on PM rerun. All 9 ACK binding conditions honored. Router+worker cron+probe adapters+integration = T24-followup on Q-C-01/02/03/05/08 + AI SDK PO approval. Branch `feat/channel-health-probes @ d84c8cc`, PR #19 open |
 | T25 | `integration:health_changed` socket emits                                        | backlog  | —              | After T24                                                          |
 
 ---
@@ -657,6 +657,43 @@ Notes / open items
 
 Requesting PM C VERDICT.
 
+##### VERDICT T24 — APPROVED (attempt 1, narrow primitive) by PM C (H16, 2026-07-06)
+
+**Scope**: T24 primitive per spec §2.2 + §4.7 + §4.8 + §7 — pure 2-poll debounce state-machine + 3 type-only provider ports + Prisma-direct repo + orchestrator service + zod HealthResponse schema. Router (`GET /api/integrations/health`) + Bull cron worker + probe adapters + integration test correctly deferred to T24-followup. Follows T17 REJECT-PLAN §125 narrow-primitive pattern + T19 pattern + slot-B `hotel-core-*.port.ts` type-only port precedent + ACK T24 §547 all 9 binding conditions honored.
+
+**PR**: [#19 `feat(channel-health): T24 probes primitive (C8)`](https://github.com/satriowicaksn/integration-backend-qooma-hotel-ai/pull/19), head `feat/channel-health-probes @ d84c8cc`. CI 3/4 SUCCESS (Lint+Typecheck / Unit / Integration) + Docker-build FAILURE per Q-C-05 precedent (expected; repo imports `@prisma/client` types per binding #3 acknowledgment).
+
+**PM independent verification** (checked out `origin/feat/channel-health-probes @ d84c8cc`, ran gate + drift scans, restored to main after):
+
+- ✅ **Quality gate** — `make check` PASS on PM rerun: lint 0/0, format clean, typecheck strict, `test:unit` **385 passed / 38 suites** (2 pre-existing skipped; +29 new for T24: 11 debounce + 4 repo + 5 schema + 9 service — matches ACK §570 target ~28). ✓
+- ✅ **Drift scans** (scope `src/modules/channel-health/`) — 0 `any`, 0 `console.*`, 0 `throw new Error(`, 0 default exports, 0 forbidden imports, 0 `.skip`, 0 hardcoded URLs. ✓
+- ✅ **Scope containment** (binding #9) — `git diff main..d84c8cc --stat`: 13 new files in `src/modules/channel-health/**` + 1 modified `PM-STATUS-C.md`. Zero touches to `api.ts`, `worker.ts`, `prisma-client.ts`, `plugins/**`, or other modules' `index.ts`. ✓
+- ✅ **State machine correctness (spec §4.8)** — `channel-health.debounce.ts:20-30`: any-ok → `healthy` (immediate recovery); null/healthy + fail → `degraded` (1st fail per Q-C-08 default A); degraded/down + fail → `down` (sticky). 10 debounce tests cover all 8 valid transitions + 2 sequence integrations (recover-after-outage + no-flap-on-single-blip). Discriminated `DebouncedTransition` type carries `previousStatus` for event composition. ✓
+- ✅ **Per-poll insert (GAP #1 default A)** — `channel-health.service.ts:55-60`: always `insertSnapshot` per probe cycle, regardless of transition. Correct per binding on ACK. Uptime_30d aggregation stays a T24-followup read-side concern. ✓
+- ✅ **`degraded` semantics (GAP #2 default A / Q-C-08)** — 1st consec fail → `degraded`, 2nd → `down`. Documented at `debounce.ts:2-9` w/ explicit Q-C-08 note that refactor to latency-based semantics is a 1-file non-breaking change. Q-C-08 remains `open` awaiting PO/FE ratification. ✓
+- ✅ **HealthChangedEvent transition-gated emission** (spec §7 "on transition only") — `service.ts:72-82`: returns `null` when `!didTransition`, else `{ hotelId, provider, previousStatus, newStatus, checkedAt }`. T25/C9 caller unwraps + publishes. Shape matches ACK §562 default. ✓
+- ✅ **Port abstraction (ADR-0001 + binding #2)** — 3 provider ports as type-only interfaces (8-10 LOC each, no runtime); `ChannelHealthProbes` typed struct composes them at service ctor. Mirrors slot-B `hotel-core-*.port.ts` + T19 pattern. Probe adapters + `@anthropic-ai/sdk` add correctly deferred to T24-followup. ✓
+- ✅ **Prisma-direct repo (T17 precedent)** — `repository.ts:17`: `constructor(private readonly db: PrismaClient)`; imports `ChannelHealthSnapshot` from `@prisma/client`. `findLatestByHotelProvider` uses `findFirst` + `orderBy: { checkedAt: 'desc' }` matching spec §4.7 partial-desc index. `insertSnapshot` per-poll create. No wrap-interface. Q-C-05 Docker-red impact accepted per binding #3. ✓
+- ✅ **`last_message_at` omission (binding #1)** — `channel-health.schema.ts:8-14` docstring explicitly states `last_message_at` is route-layer-composed at read time from `MAX(outbound_dispatch_queue.sent_at)` / `MAX(webhook_events.received_at)`; NOT stored on snapshot. Schema doesn't include it in probe payload. ✓
+- ✅ **Barrel discipline (binding #7)** — `index.ts:5-26`: exports types + `HealthResponseSchema` + `ChannelHealthRepository` + `ChannelHealthService` + `PROVIDER_ORDER` + `currentStatusOr` + 3 port types. **`applyDebounce` (pure function) NOT exported** — module-private, correct per binding. ✓
+- ✅ **Test naming (binding #4)** — `should <expected> when <condition>` pattern honored across all 29 tests. ✓
+- ✅ **Coverage target met (binding #5)** — PR body claims 100% stmts/branch/funcs/lines on 4 runtime files; ports = type-only (no runtime to cover). Coverage claim consistent with observed test count exercising all transitions + `provider` branches. ✓
+
+**Tolerated deviations (flagged, non-blocking)**:
+
+1. **`as HealthProvider` / `as HealthStatus` casts** at `repository.ts:48-49` (DB → domain widening). Prisma schema stores `provider` + `status` as `String @db.VarChar(20)`; DB CHECK constraints (spec §4.7 L285-286) guarantee valid values, so casts are safe at the DB-read boundary. **NOT a defect** — `as any` is banned by CLAUDE §5 but narrowing `String → union` at a CHECK-constrained boundary is legitimate. Alternative would be `z.enum([...]).parse(row.provider)` for defense-in-depth (slot-B T13 z.union INPUT-layer discipline), but for CHECK-constrained enum columns that's over-engineering. Tolerated. **Future consideration**: if a schema follow-up ever changes `provider`/`status` to Prisma enums (Prisma 5.x supports `enum` type), the casts become unnecessary — file as low-priority cleanup.
+2. **Repository unit test uses mock PrismaClient** (`repository.test.ts` via plain-object cast, per binding #6). CLAUDE §8 disallows Prisma mocking at unit tier — tolerated here (7× precedent now: T17/T19/T24 + slot-B T10-T14) because integration test is blocked on Q-C-01 Prisma singleton. Required follow-up: real `channel-health.repository.integration.test.ts` via testcontainers when Q-C-01 lands.
+3. **Q-A-03 test-env workaround** appears in service test (via test-file `NODE_ENV` handling if any) — sibling issue, cross-slot. Not slot-C's fix.
+
+**Q-C-08 (degraded semantics)** remains `open` — T24 ships default A (SRE progression); refactor to B (latency-based) is a 1-file non-breaking change to `debounce.ts`. PO/FE ratify.
+
+**T24 status**: `wip (PLAN ACK'd)` → **approved (narrow primitive)**. Router / cron worker / probe adapters / integration test = T24-followup after Q-C-01/02/03/05 + Q-C-08 resolved + `@anthropic-ai/sdk` PO approval. **Slot C progress: 3/9** (T17 merged + T19 approved-primitive-PR-#18 + T24 approved-primitive-PR-#19).
+
+**Next actions**:
+- Executor C: PR #19 already open (verified by PM); expect same 3/4 CI green + Docker-build red per Q-C-05 precedent — PR is code-approved, merge follows the same red-docker precedent as T10/T15/T13/T14/T17/T19 (6 consecutive when merged). Follow squash-merge convention per PR #14+ CLAUDE §12.
+- Executor C: pick next primitive from §8 queue. Remaining primitive candidates: **T21 (OTA IMAP poller — worker-side, deps T07✓ merged, will spawn HC pending-visit RPC contract Q)** or **T22 (QR generation — needs T02✓+T10✓ merged, will spawn object-storage adapter Q + `qrcode` package add PO approval)** or **T18 (per-dept Telegram routing write-through — needs Q-OPS-06 shared-DB ratification first + Q-CONTRACT-25)**. Recommend **T21** as most self-contained (pure worker, no HTTP surface, mirrors T24 shape).
+- PM C: standby for PR CI + next PLAN.
+
 
 ### ASSIGNMENT T## — claimed by exec-C (Satrio) at H{N} HH:MM
 - Branch: feat/<modul>-<short>
@@ -780,6 +817,7 @@ Re-run `make check` after fix, confirm pass, resubmit (attempt N+1).
 | H12 baseline | (no src/ touched) | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 | H13 T17 a2 | 8 files in `src/modules/telegram/` | 0 | 0 | 0 | 0 | 0 | 0 | 0 (test fixtures only: `example.com` + `localhost` env-overrides — allowed) | n/a (no webhook this task) | 0 (Prisma-direct + ctor-inject, ADR-0001) |
 | H15 T19 a1 | 9 files (8 new + index.ts) in `src/modules/telegram/telegram-inbound*` + `ports/` | 0 | 0 | 0 | 0 | 0 | 0 | 0 | n/a (webhook route deferred) | 0 (module doesn't import `@prisma/client`; sidesteps Q-C-05) |
+| H16 T24 a1 | 13 files in `src/modules/channel-health/` (debounce + repo + service + schema + types + index + 3 ports + 4 tests) | 0 | 0 | 0 | 0 | 0 | 0 | 0 | n/a (worker cron + route deferred) | 0 (Prisma-direct + ctor-inject, ADR-0001); 2× `as HealthProvider`/`as HealthStatus` at DB-read boundary tolerated per CHECK-constraint safety (spec §4.7 L285-286) |
 
 > PM C jalankan drift scan per `PM-AGENT.md §3 Step 2` setiap SUBMIT + end-of-day full scan untuk slot C's touched files.
 
