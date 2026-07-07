@@ -38,7 +38,7 @@
 | T22 | QR generation + download (1024×1024 PNG, object storage)                         | approved (primitive) | PM C (H18, a1) | Primitive shipped: `wa.me` URL builder (module-private, digit-strip + URL-encode + omit `?text=` when empty) + 2 type-only ports (QR renderer + object storage) + Prisma-direct repo (`QrState` upsert; clock-injectable `generatedAt` bump on update) + service orchestrator (build URL → validate ≤500 → render → upload → upsert → return `{url, pngUrl, generatedAt}`; error mapping to ExternalServiceError/ValidationError/NotFoundError) + zod schemas + 28 unit tests (matches ACK target). All 15 ACK binding conditions honored. Router + `pnpm add qrcode` + `pnpm add @aws-sdk/client-s3` + adapters + integration = T22-followup on Q-C-01/02/03/10 + PO package approvals. Branch `feat/qr-generation`, PR #21 open |
 | T23 | Integration overview endpoint (`GET /api/integrations`)                          | approved (primitive) | PM C (H19, a1) | Primitive shipped: 4 reader-port interfaces + aggregator service (parallel Promise.all + per-subsystem silent-null-on-throw + synthetic-down health on read-fail, clock-injectable) + zod IntegrationOverviewResponseSchema (`.strict()` + snake_case + per-subsystem-nullable-except-health) + 17 unit tests (matches ACK ~15-20 target). **All 17 ACK binding conditions honored — cleanest slot-C primitive to date** (zero `@prisma/client`, zero cross-module imports, zero decrypt/maskToken, zero `.ts`-extension nit, zero deviations flagged). Reader-port pattern executes as designed. Router + `gm_admin` + reader-port adapters + integration = T23-followup on Q-C-02/03/11. Branch `feat/integration-overview`, PR #22 open |
 | T24 | Channel health probes + snapshots + 2-poll debounce                              | approved (primitive) | PM C (H16, a1) | Primitive shipped: pure 2-poll debounce state-machine + 3 type-only provider ports + Prisma-direct repo + service (probes → debounce → per-poll persist → transition-gated HealthChangedEvent[]) + 29 unit tests, 100% cov all 4 runtime files, drift clean, make check green on PM rerun. All 9 ACK binding conditions honored. Router+worker cron+probe adapters+integration = T24-followup on Q-C-01/02/03/05/08 + AI SDK PO approval. Branch `feat/channel-health-probes @ d84c8cc`, PR #19 open |
-| T25 | `integration:health_changed` socket emits                                        | wip (PLAN ACK'd) | PM C (H20, a1) | New module `src/modules/integration-health-socket-emit/`. PLAN ACK'd H20: 1 type-only SocketPublisherPort + `HealthChangedPublisherService.publishAll` (per-event try/catch, aggregate never throws) + local type mirror (no cross-module runtime import) + zod IntegrationHealthChangedEventSchema (snake_case wire) + `HEALTH_CHANGED_EVENT_NAME` constant + tests. **Zero `@prisma/client` + zero cross-module runtime imports** = 2nd consecutive Docker-green candidate at module level. Adapter (socket transport TBD) + worker cron composition = T25-followup on Q-C-02/12 + PO socket-lib approval. 17 binding conditions; Q-C-12 raised (socket-infra decision). Coding proceeding |
+| T25 | `integration:health_changed` socket emits                                        | approved (primitive) | PM C (H20, a1) | Primitive shipped: type-only SocketPublisherPort + `HealthChangedPublisherService.publishAll` (per-event try/catch, aggregate never throws) + `toWirePayload` camelCase→snake_case conversion + local type mirror + zod schema + `HEALTH_CHANGED_EVENT_NAME` constant + 17 unit tests (exceeds ACK ~13 target). **All 17 ACK binding conditions honored — 2nd consecutive slot-C primitive with ZERO deviations** (after T23). PublishSummary extended to `{ published, failures, errorCodes }` for cron alerting. Adapter + worker cron composition = T25-followup on Q-C-02/12. Branch `feat/integration-health-socket-emit`, PR #23 open |
 
 ---
 
@@ -1614,6 +1614,49 @@ Notes / open items
 
 Requesting PM C VERDICT.
 
+##### VERDICT T25 — APPROVED (attempt 1, narrow primitive) by PM C (H20, 2026-07-07)
+
+**Scope**: T25 primitive per spec §5 row 321 + §7 emit-on-transition-only + MVP §1.3 (C9). Consumes camelCase `HealthChangedEventPayload[]` (T24 shape), converts to snake_case wire via `toWirePayload`, publishes each via type-only `SocketPublisherPort` with per-event try/catch resilience. All 17 ACK binding conditions honored. **2nd consecutive slot-C primitive with zero deviations flagged.**
+
+**PR**: [#23 `feat(integration-health-socket-emit): T25 socket emit primitive (C9)`](https://github.com/satriowicaksn/integration-backend-qooma-hotel-ai/pull/23). CI 3/4 SUCCESS + Docker-build FAILURE per Q-C-05 unchanged (upstream pre-existing modules).
+
+**PM independent verification** (checked out `origin/feat/integration-health-socket-emit`, ran gate + drift scans, restored to main after):
+
+- ✅ **Quality gate** — `make check` PASS on PM rerun: lint 0/0, format clean, typecheck strict, `test:unit` **373 passed / 36 suites** (2 pre-existing skipped; +17 new T25: 6 schema + 11 service — **exceeds ACK ~13 target**). ✓
+- ✅ **Binding #2 (CRITICAL case-conversion input→wire) VERIFIED** — `toWirePayload` at service.ts:62-70 maps camelCase (`hotelId`/`previousStatus`/`newStatus`/`checkedAt` as `Date`) → snake_case wire (`hotel_id`/`previous_status`/`new_status`/`checked_at` as ISO string). Service invokes `port.publish({ event: HEALTH_CHANGED_EVENT_NAME, payload: wire })` at line 41 — NEVER the input event directly. T24 caller can pipe `runProbesForHotel(hotelId)` output straight in. Explicit test coverage for the conversion. ✓
+- ✅ **Binding #3 (Zero `@prisma/client`) VERIFIED** — grep = 0 hits. ✓
+- ✅ **Binding #4 (Zero cross-module runtime imports) VERIFIED** — grep = 1 hit, docstring only at `types.ts:6` documenting the discipline itself. Zero actual `import`. ✓
+- ✅ **Binding #5 (Per-event try/catch resilience)** — `publishAll` at service.ts:38-56 iterates events; each `port.publish(...)` in try/catch; on catch: increment `failures` + push `errCode` to `errorCodes` + emit warn log. Aggregate NEVER throws — verified by dedicated test. ✓
+- ✅ **Binding #6 (Structured warn log, no plaintext)** — service.ts:47-54 emits `{ msg, module, hotelId, provider, newStatus, errCode }`. Only `err.name` (via `extractCode`) surfaced — never `err.message`/`err.stack`. Defense-in-depth against upstream leak. ✓
+- ✅ **Binding #7 (Event-name constant)** — `HEALTH_CHANGED_EVENT_NAME = 'integration:health_changed'` exported at service.ts:26. Service uses constant, not literal. Test asserts. ✓
+- ✅ **Binding #8 (Zod `.strict()` + snake_case wire)** — schema uses `.strict()` at top level; status enum reuses T24's 3-value set; provider enum matches T24; `checked_at` as ISO string. ✓
+- ✅ **Binding #9 (Barrel discipline)** — exports service + port + payload types (input + wire) + schema + DTO + `HEALTH_CHANGED_EVENT_NAME` + `PublishSummary`. Internal `toWirePayload` helper is also exported (fine — could be useful for T25-followup composition or debugging; not internal-only). `extractCode` stays module-private. ✓
+- ✅ **Binding #10 (`.js` extensions)** — grep = 0 hits for `.ts` imports. T22 nit avoided. ✓
+- ✅ **Binding #11 (Scope containment)** — 8 new files in `src/modules/integration-health-socket-emit/**` + 1 modified `PM-STATUS-C.md`. Zero touches to `api.ts`, `worker.ts`, `prisma-client.ts`, `plugins/**`, `package.json`, other modules. ✓
+- ✅ **Binding #12 (Drift scans)** — 0 `any`, 0 `console.*`, 0 `throw new Error(`, 0 default exports, 0 forbidden imports, 0 `.skip`. No hardcoded URLs, no `as X` outside test mocks. ✓
+- ✅ **Binding #13/#14 (Naming + count)** — `should <expected> when <condition>` pattern; 17 tests (6 schema + 11 service) exceeds ACK ~13 target. ✓
+- ✅ **Binding #15 (Docker-green target)** — T25 module itself sidesteps Q-C-05 (verified 0 `@prisma/client`). Aggregate Docker-build still fails per Q-C-05 on pre-existing modules (identical to T23 partial-win pattern). SUBMIT acknowledges. ✓
+- ✅ **Binding #16 (PublishSummary shape)** — extended from `{ published, failures }` to `{ published, failures, errorCodes }` — enables cron-side alerting on specific failure classes. Non-breaking extension. ✓
+- ✅ **Binding #17 (Transition-only invariant)** — dedicated test asserts service publishes every input event without extra filtering (trusts T24 pre-filter). ✓
+
+**No tolerated deviations flagged** — T25 is the **2nd consecutive slot-C primitive with zero deviations** (after T23). Discipline pattern sustained across new-module Docker-green candidates.
+
+**Docker-green — PARTIAL WIN (2nd consecutive)**:
+- T25 module itself contributes zero to Docker failure (verified).
+- Aggregate Docker CI still red on pre-existing T10/T13/T15/T17/T21/T22/T24 modules per Q-C-05 unchanged.
+- 2/6 slot-C module-authorship achievements now sidestep Q-C-05 at module level (T23 + T25); older 5 slot-C modules (T17/T19/T21/T22/T24) still Prisma-import.
+
+**Q-C-12 (socket transport infra)** remains `open` — port type-only; adapter blocked pending Infra/DevOps + PO ratification + `pnpm add` for socket lib.
+
+**T25 status**: `wip (PLAN ACK'd)` → **approved (narrow primitive)**. Adapter (socket transport) + worker cron composition (T24 → T25) + integration test = T25-followup on Q-C-02/12 + PO socket-lib approval. **🎉 Slot C progress: 7/9 = 78%** (T17 merged + T19 PR-#18 + T24 PR-#19 + T21 PR-#20 + T22 PR-#21 + T23 PR-#22 + T25 PR-#23). **Home stretch — only T20 + T18 remain.**
+
+**Next actions**:
+- Executor C: PR #23 follows red-docker + squash-merge precedent (10 consecutive when merged).
+- Executor C: pick next primitive. Remaining queue = **T20, T18**:
+  - **T20 (Telegram outbound dispatch RPC)** — deps T06✓ + T09✓ merged; can ship **flat-routing primitive** (`sendTelegramMessage(chatId, body)`) without T18 per-dept branch, per-dept dispatch added in T20-followup. This decouples T20 from T18's parked-on-Q-OPS-06/Q-CONTRACT-25 state. **Recommend as next pick** — would take slot C to 8/9 = 89%.
+  - **T18 (Per-dept Telegram routing write-through)** — parked pending Q-OPS-06 shared-DB ratification + Q-CONTRACT-25. Cannot proceed until Parent PM resolves. Would be final task (9/9 = 100%).
+- PM C: standby for PR CI + next PLAN.
+
 
 **Scope recap**
 - ...
@@ -1739,6 +1782,7 @@ Re-run `make check` after fix, confirm pass, resubmit (attempt N+1).
 | H17 T21 a1 | 13 files in `src/modules/ota-mailbox/` (parsers ×2 + dispatcher + repo + service + schema + types + index + 2 ports + 6 tests) | 0 | 0 | 0 (only in test as intentional Proxy-exception fixture) | 0 | 0 | 0 | 0 (test fixtures use `example.com` per precedent) | n/a (worker cron deferred) | 0 (Prisma-direct + ctor-inject, ADR-0001); 1× `as unknown as object` at Prisma JSONB write boundary tolerated per Prisma-JSON typing limitation; **0 `decrypt(` invocations verified (binding #10 password-never-decrypted enforced)** |
 | H18 T22 a1 | 10 files in `src/modules/qr-provisioning/` (url-builder + service + repo + schema + types + index + 2 ports + 4 tests) | 0 | 0 | 0 | 0 | 0 | 0 | 0 (only spec-mandated `wa.me` in url-builder + `example.com` in test fixtures — allowed) | n/a (route deferred) | 0 (Prisma-direct + ctor-inject, ADR-0001); **1 tolerated nit: `.ts` extension in `index.ts:14` type import (should be `.js` per codebase convention; permitted by `moduleResolution: Bundler`; 1-char cleanup on T22-followup)** |
 | H19 T23 a1 | 10 files in `src/modules/integration-overview/` (aggregator service + schema + types + index + 4 reader ports + 2 tests) | 0 | 0 | 0 | 0 | 0 | 0 | 0 | n/a (route deferred) | **CLEANEST slot-C primitive to date — zero deviations**: 0 `@prisma/client` imports (binding #2 verified), 0 cross-module imports (binding #3 verified), 0 `decrypt`/`maskToken` (binding #8 verified), 0 `.ts`-extension nit (binding #16 — T22 nit avoided), 0 `as X` casts, 0 tolerated deviations flagged. Reader-port pattern first-class architecture win |
+| H20 T25 a1 | 8 files in `src/modules/integration-health-socket-emit/` (service + schema + types + index + 1 port + 2 tests) | 0 | 0 | 0 | 0 | 0 | 0 | 0 | n/a (transport adapter deferred) | **2nd consecutive slot-C primitive with ZERO deviations**: 0 `@prisma/client` imports (binding #3 verified), 0 cross-module runtime imports (binding #4 verified — only 1 docstring mention), 0 decrypt/maskToken, 0 `.ts`-extension, 0 `as X` casts. Case-conversion camelCase→snake_case discipline verified via `toWirePayload` + dedicated tests. Module-level Docker-green sustained (2nd consecutive) |
 
 > PM C jalankan drift scan per `PM-AGENT.md §3 Step 2` setiap SUBMIT + end-of-day full scan untuk slot C's touched files.
 
