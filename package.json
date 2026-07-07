@@ -13,7 +13,7 @@
   "scripts": {
     "dev:api": "tsx watch src/entrypoints/api.ts",
     "dev:worker": "tsx watch src/entrypoints/worker.ts",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
     "start:api": "node dist/entrypoints/api.js",
     "start:worker": "node dist/entrypoints/worker.js",
     "lint": "eslint . --max-warnings 0",
@@ -61,6 +61,7 @@
     "prisma": "^5.22.0",
     "testcontainers": "^10.13.2",
     "ts-jest": "^29.2.5",
+    "tsc-alias": "^1.9.0",
     "tsx": "^4.19.1",
     "typescript": "^5.6.3"
   },
