@@ -1527,6 +1527,94 @@ Awaiting PM C ACK — especially GAP-#1 (cross-module type import decision) + GA
 
 Proceed to coding. Post SUBMIT when `make check` green + drift clean + all 17 binding conditions honored + ~13 tests target met + case-conversion tests explicit.
 
+#### SUBMIT T25 — exec-C (Satrio) at H20 (2026-07-07) 13:00 (attempt 1, narrow primitive per ACK)
+
+Task: T25 `integration:health_changed` socket emit primitive (spec §5 row 321 + §7 + MVP §1.3 C9). Ships **`HealthChangedPublisherService`** that consumes camelCase `HealthChangedEventPayload[]` (T24's contract), converts each event to snake_case wire shape via `toWirePayload`, and publishes via a **type-only `SocketPublisherPort`** — transport SDK deferred per Q-C-12 socket-infra ratification + PO approval. Zod `IntegrationHealthChangedEventSchema` freezes the WIRE contract early. 17 unit tests (exceeds target 13; includes explicit case-conversion + transition-only invariant tests). Socket transport adapter + `worker.ts` cron composition (T24 poll → T25 publish) + integration test = **all deferred** to T25-followup.
+
+**🎯 MODULE-LEVEL DOCKER-GREEN ACHIEVED** (PM C ACK T25 binding #15): T25 module has **zero `@prisma/client` imports** and **zero `@modules/*` runtime imports** — verified via targeted greps. Whole-src Docker-build stage still requires foundation Q-C-05 fix (upstream modules like T17/T24/T21/T22 do import `@prisma/client`); T25 itself contributes zero to that failure. 2nd consecutive slot-C module-level Docker-green primitive after T23.
+
+Files changed: 8 (all new; scope strictly `src/modules/integration-health-socket-emit/**`)
+  - src/modules/integration-health-socket-emit/index.ts (new — barrel per binding #9; `.js` extensions per #10)
+  - src/modules/integration-health-socket-emit/integration-health-socket-emit.types.ts (new — HealthProvider, HealthStatus, HealthChangedEventPayload camelCase input, HealthChangedEventWirePayload snake_case wire, PublishSummary with errorCodes per binding #16)
+  - src/modules/integration-health-socket-emit/integration-health-socket-emit.schema.ts (new — zod IntegrationHealthChangedEventSchema strict per binding #8; validates WIRE shape, NOT input)
+  - src/modules/integration-health-socket-emit/integration-health-socket-emit.service.ts (new — HealthChangedPublisherService.publishAll + toWirePayload case-conversion + HEALTH_CHANGED_EVENT_NAME constant per binding #7 + extractCode helper per binding #6)
+  - src/modules/integration-health-socket-emit/ports/socket-publisher.port.ts (new — type-only SocketPublisherPort + SocketPublishRequest)
+  - src/modules/integration-health-socket-emit/__tests__/integration-health-socket-emit.schema.test.ts (new — 6 tests: valid + null previous_status + provider/status/unknown-key rejection + camelCase-input rejection)
+  - src/modules/integration-health-socket-emit/__tests__/integration-health-socket-emit.service.test.ts (new — 11 tests: event-name constant + toWirePayload × 3 [case-conversion, schema-roundtrip, null-previous] + publishAll happy × 3 [empty, single, multi] + resilience × 4 [log-and-continue, PII-clean log, named errorCode, all-fail-does-not-throw])
+
+Files NOT touched (binding #11 scope containment)
+  - src/entrypoints/api.ts (still stub — T25 has no HTTP surface)
+  - src/entrypoints/worker.ts (still stub — cron composition T24→T25 deferred; Q-C-02 sibling)
+  - src/core/prisma/prisma-client.ts (still stub — T25 has no persistence)
+  - src/plugins/ (no plugin work)
+  - `package.json`: **untouched** — verified via `git status package.json` = clean. NO socket lib add per PO-gating precedent (PO queue now 5 packages).
+  - Any other module's index.ts or internals
+
+DoD self-check
+- [x] **Spec §5 canonical event name** — `HEALTH_CHANGED_EVENT_NAME = 'integration:health_changed'` constant + `should equal the spec §5 canonical event name literal` test.
+- [x] **Case-conversion CRITICAL (binding #2)** — `toWirePayload({ hotelId, previousStatus, ... })` → `{ hotel_id, previous_status, ... }` + `checkedAt: Date` → `checked_at: string (ISO)`. Verified via: (a) `should convert camelCase input fields to snake_case wire fields`, (b) `should produce a payload that parses cleanly through IntegrationHealthChangedEventSchema` (schema roundtrip proves wire shape correctness), (c) `should preserve null previousStatus as null previous_status` (first-ever probe edge case).
+- [x] **Local type mirror (binding #1)** — `HealthChangedEventPayload` defined locally in types.ts; `grep -rn "@modules/channel-health" src/modules/integration-health-socket-emit/` = 0 real imports (only docstring reference to the rule itself).
+- [x] **Zero `@prisma/client` imports (binding #3)** — grep-verified 0 real imports.
+- [x] **Zero cross-module imports (binding #4)** — grep-verified 0 real imports.
+- [x] **Per-event try/catch + PublishSummary (binding #5)** — service iterates events; on `port.publish` throw → log + `failures++` + `errorCodes.push`. Aggregate NEVER throws. Verified via `should NOT throw when every publish fails`.
+- [x] **Structured warn log + err.name only (binding #6)** — log payload = `{ msg, module, hotelId, provider, newStatus, errCode }`. `err.message`/`stack` NEVER surfaced. Verified via `should never surface err.message or stack in the log (binding #6 defense-in-depth)` — `JSON.stringify(logged)` asserts absence of raw error text. `extractCode` uses `err.name` only.
+- [x] **Event-name constant usage (binding #7)** — service uses `HEALTH_CHANGED_EVENT_NAME` (not literal); test asserts publisher called with the constant value.
+- [x] **Zod `.strict()` freeze early (binding #8)** — schema rejects unknown top-level keys + camelCase-shaped input; asserted via 2 dedicated tests.
+- [x] **Barrel discipline (binding #9)** — index.ts exports types + service + port + wire schema + DTO + event-name constant + PublishSummary + `toWirePayload` (for T25-followup composition tests).
+- [x] **`.js` import extensions (binding #10)** — grep-verified 0 `.ts` imports.
+- [x] **Transition-only invariant (binding #17)** — `should publish every event in a multi-event batch without filtering` test proves the service does not re-derive `didTransition` or filter input.
+- [x] **Test naming (binding #13)** — all 17 tests use `should <expected> when <condition>`.
+- [x] **Test count (binding #14)** — 17 tests (exceeds ~13 target; adds edge coverage per binding #17).
+
+Quality gate
+- `make lint`: PASS (0 errors, 0 warnings)
+- `make format-check`: PASS
+- `make typecheck`: PASS (strict + exactOptionalPropertyTypes + noUncheckedIndexedAccess)
+- `make test-unit`: PASS (373 tests / 36 suites; +17 new T25, exceeds ACK §1521 target of ~13)
+- `make check` (combined): **PASS**
+- T25 module coverage (isolated to `src/modules/integration-health-socket-emit/**/*.ts`): **100% stmt / 100% branch / 100% func / 100% line** across ALL runtime files (schema + service). Ports = type-only, no runtime.
+
+Drift scans (per binding #12; scope `src/modules/integration-health-socket-emit/`)
+- `any` / `<any>` / `as any` (excluding `as unknown as` at test-mock boundary): 0 hits
+- `console.log|info|debug`: 0 hits
+- `throw new Error(` in src (non-test): 0 hits — service never throws
+- forbidden imports (express/typeorm/sequelize/moment/node-fetch): 0 hits
+- default export: 0 hits
+- `.skip(` in tests: 0 hits
+- Hardcoded URL: 0 hits
+- **`@modules/channel-health` (binding #1)**: 0 real imports (only docstring)
+- **`@prisma/client` (binding #3)**: 0 real imports
+- **any `@modules/*` (binding #4)**: 0 real imports
+- **`.ts` import extensions (binding #10)**: 0 hits
+
+Module-level Docker-green milestone (binding #15)
+- Zero `@prisma/client` type imports at any layer → `tsc -p tsconfig.build.json` inside Dockerfile has no reason to fail on this module.
+- Zero cross-module runtime imports → module compiles independently of any other primitive.
+- **Assessment**: T25 module itself is Docker-green. Whole-src PR CI Docker-build stage will likely still fail because upstream slot-C modules (T17/T24/T21/T22) still import `@prisma/client` and Q-C-05 is unresolved. That's not a T25 defect. Full-CI Docker-green blocked by foundation Q-C-05 fix (Parent PM priority signal now 5+ cross-primitive precedents).
+
+Security check (spec §5)
+- Port type-only → adapter cannot ship without Q-C-12 (socket-infra decision) + PO approval on socket lib add. Cumulative PO queue: 5 packages.
+- Log line schema: `{ msg, module, hotelId, provider, newStatus, errCode }` — never includes `err.message` / stack (binding #6 verified via test).
+- Case-conversion `toWirePayload` is a pure function; no side effects, no state.
+
+Test evidence (unit only)
+- Suites added: 2 (`integration-health-socket-emit.schema`, `integration-health-socket-emit.service`)
+- Tests added: 17 (6 schema + 11 service)
+- Case-conversion coverage: 3 dedicated tests including schema-roundtrip proof
+- Resilience coverage: all-fail + partial-fail + PII-clean + named errorCode
+- Transition-only invariant asserted (binding #17)
+
+Notes / open items
+- **Q-C-12 (Socket transport infrastructure)** — raised concurrent with PLAN ACK (T25 §1526). Blocks T25-followup adapter. Cross-team decision needed.
+- **Worker cron composition** — `worker.ts` bootstrap (Q-C-02) will wire `T24.runProbesForHotel(hotelId)` output → `T25.publishAll(events)`. Both are ready; blocked on Q-C-02.
+- **Integration test** — deferred until adapter + composition land (T25-followup).
+- **PO `pnpm add` queue now 5 packages**: `@anthropic-ai/sdk` + `imap-simple` + `qrcode` + `@aws-sdk/client-s3` + socket lib TBD (Q-C-12). Cross-slot signal for PO prioritization.
+- **Milestone progress** — Slot C after T25 approval: **7/9 primitives shipped** (T17 + T19 + T24 + T21 + T22 + T23 + T25). Remaining: T18 (parked pending Q-OPS-06/Q-CONTRACT-25), T20 (blocked on T18 for per-dept routing OR could ship flat-routing primitive).
+- Branch: `feat/integration-health-socket-emit`; PR to be opened post-commit.
+
+Requesting PM C VERDICT.
+
+
 **Scope recap**
 - ...
 
