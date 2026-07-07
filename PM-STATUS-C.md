@@ -419,6 +419,53 @@ Notes / open items
 
 Requesting PM C VERDICT.
 
+
+
+DoD self-check
+- [x] **Spec §3.2 command surface** — `/take <id>`, `/release <id>`, `/done <id>`, `/help` all parsed + dispatched. Verified in `telegram-inbound.commands.test.ts` (3 kinds × happy + case + @suffix + whitespace).
+- [x] **Anti-enumeration security posture (GAP #2)** — staff-not-recognized returns `{ kind: 'ignored', reason: 'staff_not_recognized' }`, no bot reply generated; test `should silent-ignore when staff not recognized (anti-enumeration)` asserts + verifies logged payload does NOT contain full Telegram user id (only 4-char suffix).
+- [x] **Passthrough schema for Telegram evolutions** — `TelegramUpdateSchema.passthrough()` at top level tolerates future fields; test `should preserve unknown top-level fields (passthrough) so Telegram evolutions do not break intake` asserts.
+- [x] **Rejection at wire boundary** — schema rejects missing `update_id`, wrong type, missing `chat.id` — asserted in schema tests.
+- [x] **Port abstraction (ADR-0001)** — `StaffLookupPort` + `TicketActionPort` are type-only interfaces consumed via ctor injection; adapters deferred to T19-followup. Consistent with slot-B pattern (`hotel-core-*.port.ts`).
+- [x] **PII floor on log lines** — `telegram_inbound.ignored` log for unrecognized sender masks user id (only last-4 suffix); `telegram_inbound.dispatch` log for recognized staff includes `staffId` (internal UUID, no PII).
+
+Quality gate
+- `make lint`: PASS (0 errors, 0 warnings)
+- `make format-check`: PASS
+- `make typecheck`: PASS (strict + exactOptionalPropertyTypes + noUncheckedIndexedAccess)
+- `make test-unit`: PASS (397 tests, 37 suites; +41 new for T19)
+- `make check` (combined): **PASS**
+- T19 module coverage (isolated to `telegram-inbound*.ts` + `ports/*.ts`): **100% stmts / 100% funcs / 100% lines / 92.85% branch avg** — one dead-code fallback branch in `parseCommand` (defensive `?? ''` after `.split('@')[0]` needed for `noUncheckedIndexedAccess`; unreachable at runtime given the earlier `startsWith('/')` guard).
+
+Drift scans (scope `src/modules/telegram/telegram-inbound*.ts` + `src/modules/telegram/ports/`)
+- `any` / `<any>` / `as any`: 0 hits
+- `console.log|info|debug`: 0 hits
+- `throw new Error(`: 0 hits
+- forbidden imports (express/typeorm/moment/node-fetch): 0 hits
+- default export: 0 hits
+- `.skip(` in tests: 0 hits
+
+Security check (spec §3.2 + §4.11)
+- Anti-enumeration on unknown sender: ✅ silent-ignore + PII-suffix-only log
+- No secret hardcoded / no PII in log: verified via test `should silent-ignore...` (`JSON.stringify(logged)` does not contain full telegram user id)
+- Ports type-only → no accidental adapter shipping without Q-C-03 ratification
+- HMAC verify at route boundary: N/A this attempt (deferred to router landing)
+- Zod `.passthrough()` on top-level Update = intentional for forward-compat with Telegram API evolution; strict validation on the `chat.id` / `update_id` / `message.from.id` subset we consume.
+
+Test evidence (unit only)
+- Suites added: 3 (`commands`, `schema`, `service` — under `src/modules/telegram/__tests__/telegram-inbound.*.test.ts`)
+- Tests added: 41 (18 parser + 6 schema + 17 service)
+- Silent-ignore assertion + PII-floor log assertion in the same test (`should silent-ignore when staff not recognized`)
+- All 3 outcome branches (`ok` / `not_found` / `forbidden`) × 3 command kinds covered via representative combinations
+
+Notes / open items
+- Router landing (`telegram-inbound.routes.ts` + HMAC wire + `POST /webhook/telegram/:hotel_slug` mount under `api.ts`) blocked on Q-C-01/02/03 — same as T17. Ready as T19-followup.
+- HC RPC adapter impls (`http-hotel-core-staff-lookup.adapter.ts`, `http-hotel-core-ticket-action.adapter.ts`) blocked on Q-C-03 (HC internal-RPC client contract). Ports intentionally type-only per slot-B `hotel-core-*.port.ts` precedent (see PM B T12 GAP #3 → Q-B-04).
+- AI service handover (spec §3.2 "RPC AI service (for handover)") — T19 primitive currently routes all ticket commands to `TicketActionPort` (HC). AI handover is a separate concern — worth clarifying with PM whether `/take` should first offer AI-handover reply per §3.2. Flagged as open note, not blocker.
+- Branch: `feat/telegram-inbound-commands`; PR to be opened post-commit.
+
+Requesting PM C VERDICT.
+
 ##### VERDICT T19 — APPROVED (attempt 1, narrow primitive) by PM C (H15, 2026-07-06)
 
 **Scope**: T19 primitive per spec §3.2 (parser + zod webhook schema + dispatcher + type-only HC ports + unit tests). Router / HMAC wiring / `webhook_events` persistence / HC-RPC adapters / integration test correctly deferred to T19-followup. Mirrors T17 REJECT-PLAN §125 narrow-primitive pattern + slot-B `hotel-core-*.port.ts` type-only port precedent.
