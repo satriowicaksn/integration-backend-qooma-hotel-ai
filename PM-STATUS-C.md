@@ -1661,57 +1661,6 @@ Notes / open items
 
 Requesting PM C VERDICT.
 
-##### VERDICT T25 — APPROVED (attempt 1, narrow primitive) by PM C (H20, 2026-07-07)
-
-**Scope**: T25 primitive per spec §5 row 321 + §7 emit-on-transition-only + MVP §1.3 (C9). Consumes camelCase `HealthChangedEventPayload[]` (T24 shape), converts to snake_case wire via `toWirePayload`, publishes each via type-only `SocketPublisherPort` with per-event try/catch resilience. All 17 ACK binding conditions honored. **2nd consecutive slot-C primitive with zero deviations flagged.**
-
-**PR**: [#23 `feat(integration-health-socket-emit): T25 socket emit primitive (C9)`](https://github.com/satriowicaksn/integration-backend-qooma-hotel-ai/pull/23). CI 3/4 SUCCESS + Docker-build FAILURE per Q-C-05 unchanged (upstream pre-existing modules).
-
-**PM independent verification** (checked out `origin/feat/integration-health-socket-emit`, ran gate + drift scans, restored to main after):
-
-- ✅ **Quality gate** — `make check` PASS on PM rerun: lint 0/0, format clean, typecheck strict, `test:unit` **373 passed / 36 suites** (2 pre-existing skipped; +17 new T25: 6 schema + 11 service — **exceeds ACK ~13 target**). ✓
-- ✅ **Binding #2 (CRITICAL case-conversion input→wire) VERIFIED** — `toWirePayload` at service.ts:62-70 maps camelCase (`hotelId`/`previousStatus`/`newStatus`/`checkedAt` as `Date`) → snake_case wire (`hotel_id`/`previous_status`/`new_status`/`checked_at` as ISO string). Service invokes `port.publish({ event: HEALTH_CHANGED_EVENT_NAME, payload: wire })` at line 41 — NEVER the input event directly. T24 caller can pipe `runProbesForHotel(hotelId)` output straight in. Explicit test coverage for the conversion. ✓
-- ✅ **Binding #3 (Zero `@prisma/client`) VERIFIED** — grep = 0 hits. ✓
-- ✅ **Binding #4 (Zero cross-module runtime imports) VERIFIED** — grep = 1 hit, docstring only at `types.ts:6` documenting the discipline itself. Zero actual `import`. ✓
-- ✅ **Binding #5 (Per-event try/catch resilience)** — `publishAll` at service.ts:38-56 iterates events; each `port.publish(...)` in try/catch; on catch: increment `failures` + push `errCode` to `errorCodes` + emit warn log. Aggregate NEVER throws — verified by dedicated test. ✓
-- ✅ **Binding #6 (Structured warn log, no plaintext)** — service.ts:47-54 emits `{ msg, module, hotelId, provider, newStatus, errCode }`. Only `err.name` (via `extractCode`) surfaced — never `err.message`/`err.stack`. Defense-in-depth against upstream leak. ✓
-- ✅ **Binding #7 (Event-name constant)** — `HEALTH_CHANGED_EVENT_NAME = 'integration:health_changed'` exported at service.ts:26. Service uses constant, not literal. Test asserts. ✓
-- ✅ **Binding #8 (Zod `.strict()` + snake_case wire)** — schema uses `.strict()` at top level; status enum reuses T24's 3-value set; provider enum matches T24; `checked_at` as ISO string. ✓
-- ✅ **Binding #9 (Barrel discipline)** — exports service + port + payload types (input + wire) + schema + DTO + `HEALTH_CHANGED_EVENT_NAME` + `PublishSummary`. Internal `toWirePayload` helper is also exported (fine — could be useful for T25-followup composition or debugging; not internal-only). `extractCode` stays module-private. ✓
-- ✅ **Binding #10 (`.js` extensions)** — grep = 0 hits for `.ts` imports. T22 nit avoided. ✓
-- ✅ **Binding #11 (Scope containment)** — 8 new files in `src/modules/integration-health-socket-emit/**` + 1 modified `PM-STATUS-C.md`. Zero touches to `api.ts`, `worker.ts`, `prisma-client.ts`, `plugins/**`, `package.json`, other modules. ✓
-- ✅ **Binding #12 (Drift scans)** — 0 `any`, 0 `console.*`, 0 `throw new Error(`, 0 default exports, 0 forbidden imports, 0 `.skip`. No hardcoded URLs, no `as X` outside test mocks. ✓
-- ✅ **Binding #13/#14 (Naming + count)** — `should <expected> when <condition>` pattern; 17 tests (6 schema + 11 service) exceeds ACK ~13 target. ✓
-- ✅ **Binding #15 (Docker-green target)** — T25 module itself sidesteps Q-C-05 (verified 0 `@prisma/client`). Aggregate Docker-build still fails per Q-C-05 on pre-existing modules (identical to T23 partial-win pattern). SUBMIT acknowledges. ✓
-- ✅ **Binding #16 (PublishSummary shape)** — extended from `{ published, failures }` to `{ published, failures, errorCodes }` — enables cron-side alerting on specific failure classes. Non-breaking extension. ✓
-- ✅ **Binding #17 (Transition-only invariant)** — dedicated test asserts service publishes every input event without extra filtering (trusts T24 pre-filter). ✓
-
-**No tolerated deviations flagged** — T25 is the **2nd consecutive slot-C primitive with zero deviations** (after T23). Discipline pattern sustained across new-module Docker-green candidates.
-
-**Docker-green — PARTIAL WIN (2nd consecutive)**:
-- T25 module itself contributes zero to Docker failure (verified).
-- Aggregate Docker CI still red on pre-existing T10/T13/T15/T17/T21/T22/T24 modules per Q-C-05 unchanged.
-- 2/6 slot-C module-authorship achievements now sidestep Q-C-05 at module level (T23 + T25); older 5 slot-C modules (T17/T19/T21/T22/T24) still Prisma-import.
-
-**Q-C-12 (socket transport infra)** remains `open` — port type-only; adapter blocked pending Infra/DevOps + PO ratification + `pnpm add` for socket lib.
-
-**T25 status**: `wip (PLAN ACK'd)` → **approved (narrow primitive)**. Adapter (socket transport) + worker cron composition (T24 → T25) + integration test = T25-followup on Q-C-02/12 + PO socket-lib approval. **🎉 Slot C progress: 7/9 = 78%** (T17 merged + T19 PR-#18 + T24 PR-#19 + T21 PR-#20 + T22 PR-#21 + T23 PR-#22 + T25 PR-#23). **Home stretch — only T20 + T18 remain.**
-
-**Next actions**:
-- Executor C: PR #23 follows red-docker + squash-merge precedent (10 consecutive when merged).
-- Executor C: pick next primitive. Remaining queue = **T20, T18**:
-  - **T20 (Telegram outbound dispatch RPC)** — deps T06✓ + T09✓ merged; can ship **flat-routing primitive** (`sendTelegramMessage(chatId, body)`) without T18 per-dept branch, per-dept dispatch added in T20-followup. This decouples T20 from T18's parked-on-Q-OPS-06/Q-CONTRACT-25 state. **Recommend as next pick** — would take slot C to 8/9 = 89%.
-  - **T18 (Per-dept Telegram routing write-through)** — parked pending Q-OPS-06 shared-DB ratification + Q-CONTRACT-25. Cannot proceed until Parent PM resolves. Would be final task (9/9 = 100%).
-- PM C: standby for PR CI + next PLAN.
-
-
-### ASSIGNMENT T20 — claimed by exec-C (Satrio) at H21 (2026-07-07) 14:15
-- Branch: `feat/telegram-outbound-dispatch`
-- Routed from: PM-STATUS-C.md §1655-1656 PM C recommendation ("T20 — flat-routing primitive; deps T06✓+T09✓; would take slot C to 8/9 = 89%")
-- Dependency check per §1: T02 ✓ (schema `TelegramConfig` at `prisma/schema.prisma:49-61` provides encrypted bot_token), T03 ✓ (crypto helper), T17 ✓ (Telegram config CRUD merged). All primitive-scope deps met at the flat-routing level; per-dept routing = T18 = parked.
-- **Post-VERDICT compliance**: PM C VERDICT T19 §442 → posting PLAN + waiting for ACK. **Not self-proceeding**.
-
-#### PLAN T20 — exec-C (Satrio) at H21 (2026-07-07) 14:15
 
 **Scope recap**
 Deliver C4 primitive per `docs/spec/04-integration-channels.md §2.4 (send_telegram_message RPC), §3.2 (outbound: escalation, ticket assignment, daily brief)` + `MVP-INTEGRATION-FIRST.md §1.3 (C4), §5 L126 AC ("HC RPC send_telegram_message(chat_id, ...) → bot posts")`. Ship **`TelegramDispatchService`** that consumes `send_telegram_message(hotelId, chatId, body, parseMode?)` requests from Hotel Core (escalation worker) and dispatches to Telegram Bot API via a **type-only `TelegramBotApiPort`**. Bot token decrypted at service boundary via T03 crypto helper (mirrors WA outbound dispatch pattern). **Flat routing only** — caller (HC) supplies `chatId` directly; per-dept routing lookup (T18 concern: HC-side `departments.telegram_chat_id`) is deferred by design and does NOT belong in this primitive. Types + zod `SendTelegramMessageRequestSchema` for input contract + response schema. Router (`POST /rpc/send_telegram_message` — internal RPC, auth via T09 shared-secret plugin) + Telegram Bot API adapter (`axios` PUT to `api.telegram.org/bot<token>/sendMessage`) + integration test = **all deferred** to T20-followup.
