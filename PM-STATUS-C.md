@@ -1956,6 +1956,58 @@ Re-run `make check` after fix, confirm pass, resubmit (attempt N+1).
 
 -->
 
+### FOUNDATION FIX Q-C-01 + Q-C-05 — exec-C (Satrio) at H22 (2026-07-07) 16:30
+- Branch: `chore/foundation-fix-q-c-01-q-c-05`
+- Direct user directive: "fix Q-C-05 Dockerfile + Q-C-01 Prisma singleton" (overrides §442 procedural PLAN-then-wait per T19 verdict precedent "user directive to continue counted as informal PO/PM authorization").
+- **Scope note**: this is **shared-infra** work that PM C has escalated to Parent PM across 5 consecutive slot-C precedents (T17/T19/T24/T21/T22 Docker-red streak) + 8 consecutive Prisma-mock stopgaps. User is authorizing me to unblock at the foundation layer instead of continuing to escalate.
+
+#### Q-C-05 Root cause + fix
+
+**Root cause identified** from `.npmrc` + `prisma/schema.prisma`:
+- `.npmrc`: `node-linker=isolated` (pnpm's strict isolated node_modules layout)
+- `prisma/schema.prisma:3`: `output = "../node_modules/.prisma/client"` (custom output path)
+- Interaction: pnpm's isolated linker places `@prisma/client` at `.pnpm/@prisma+client@X/node_modules/@prisma/client/`, NOT top-level. The `@prisma/client` package's re-export chain looks for the generated types **relative to itself** (i.e. `.prisma/client` sibling within its own package tree). The custom `output` writes to `/app/node_modules/.prisma/client` — OUTSIDE `@prisma/client`'s package tree. Result: `tsc -p tsconfig.build.json` inside Dockerfile `build` stage fails with `TS2305: Module '@prisma/client' has no exported member 'TelegramConfig' | 'WaConfig' | 'ChannelHealthSnapshot' | 'QrState' | 'OtaMailboxState' | ...` — every model type from every Prisma-touching primitive (T17, T21, T22, T24, slot-B WA modules).
+
+**Fix**: removed the custom `output` line. Prisma default emits into `node_modules/@prisma/client/.prisma/client/` — inside the `@prisma/client` package. pnpm resolves this correctly under isolated layout. Verified via `pnpm prisma:generate` output now says `Generated Prisma Client (v5.22.0) to ./node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client` — exactly where pnpm's isolated linker expects it.
+
+**Local verification of Dockerfile-failure equivalent**:
+- `pnpm build` (this is what stage 3 of Dockerfile runs): PASS (was failing with TS2305 across 5+ files).
+- `pnpm typecheck`: PASS.
+- `make check`: PASS (557 tests, 57 suites).
+
+Docker daemon not running locally so I cannot run `docker build --target build` directly, but the failing step (`pnpm build`) now succeeds under identical config that Docker will run. CI Docker-build check will confirm on PR.
+
+#### Q-C-01 fix
+
+**File**: `src/core/prisma/prisma-client.ts`
+
+Before: `export const db = {} as unknown as Record<string, unknown>;` placeholder.
+
+After: real `PrismaClient` singleton wired from `loadConfig()` — matches the commented-out impl block that has been in the file since T02, with SIGTERM/SIGINT graceful shutdown handlers using `void shutdown()` (avoids ESLint `no-misused-promises` on event listeners requiring void return).
+
+The 8 approved primitives that ctor-inject `PrismaClient` (T17 + T21 + T22 + T24 + slot-B T10/T12/T13/T14/T15) can now import `db` at their composition boundary once route landings / cron workers ship.
+
+#### Verification (both fixes together)
+
+- `make lint`: PASS (0 errors, 0 warnings)
+- `make format-check`: PASS
+- `make typecheck`: PASS
+- `make test-unit`: PASS (557 tests / 57 suites; +0 test changes; existing Prisma-mock tests unchanged since they ctor-inject a mock and don't consume the singleton)
+- `pnpm build` (Docker `build` stage equivalent): **PASS** — Q-C-05 fixed
+- Drift scans: 0 hits across scope (only touched 2 files: `prisma/schema.prisma` -1 line, `src/core/prisma/prisma-client.ts` unstub)
+
+Scope containment:
+- **Only 2 files changed**: `prisma/schema.prisma` (1 line removed) + `src/core/prisma/prisma-client.ts` (stub replaced with real singleton per the commented-out impl block already in the file).
+- Zero touches to `src/modules/**`, `src/plugins/**`, `src/entrypoints/**`, `package.json`, other slots.
+- Zero new dependencies. Zero migration. Zero breaking type changes (`PrismaClient` remains the same type; only its actual runtime instance changes from `{}` to real client).
+
+Cross-slot impact:
+- **All Prisma-touching primitives (slot B + slot C)** can now integration-test against a real DB.
+- **CI Docker-build stage** should transition from **10 consecutive RED** (T10/T13/T14/T15/T17/T19/T21/T22/T24/T25 + the recent T20/T23) → **GREEN** on next PR.
+- **8 T##-followup PRs** that were blocked by Q-C-01 (integration tests) are now unblockable.
+
+Requesting PM C VERDICT — shared-infra + user-directed fix. If PM C approves, this unblocks the entire followup wave for slots B + C.
+
 ---
 
 ## 3. Slot C open questions (mirror to PARENT §3)
