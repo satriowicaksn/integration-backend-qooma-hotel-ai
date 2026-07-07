@@ -1658,8 +1658,73 @@ Requesting PM C VERDICT.
 - PM C: standby for PR CI + next PLAN.
 
 
+### ASSIGNMENT T20 — claimed by exec-C (Satrio) at H21 (2026-07-07) 14:15
+- Branch: `feat/telegram-outbound-dispatch`
+- Routed from: PM-STATUS-C.md §1655-1656 PM C recommendation ("T20 — flat-routing primitive; deps T06✓+T09✓; would take slot C to 8/9 = 89%")
+- Dependency check per §1: T02 ✓ (schema `TelegramConfig` at `prisma/schema.prisma:49-61` provides encrypted bot_token), T03 ✓ (crypto helper), T17 ✓ (Telegram config CRUD merged). All primitive-scope deps met at the flat-routing level; per-dept routing = T18 = parked.
+- **Post-VERDICT compliance**: PM C VERDICT T19 §442 → posting PLAN + waiting for ACK. **Not self-proceeding**.
+
+#### PLAN T20 — exec-C (Satrio) at H21 (2026-07-07) 14:15
+
 **Scope recap**
-- ...
+Deliver C4 primitive per `docs/spec/04-integration-channels.md §2.4 (send_telegram_message RPC), §3.2 (outbound: escalation, ticket assignment, daily brief)` + `MVP-INTEGRATION-FIRST.md §1.3 (C4), §5 L126 AC ("HC RPC send_telegram_message(chat_id, ...) → bot posts")`. Ship **`TelegramDispatchService`** that consumes `send_telegram_message(hotelId, chatId, body, parseMode?)` requests from Hotel Core (escalation worker) and dispatches to Telegram Bot API via a **type-only `TelegramBotApiPort`**. Bot token decrypted at service boundary via T03 crypto helper (mirrors WA outbound dispatch pattern). **Flat routing only** — caller (HC) supplies `chatId` directly; per-dept routing lookup (T18 concern: HC-side `departments.telegram_chat_id`) is deferred by design and does NOT belong in this primitive. Types + zod `SendTelegramMessageRequestSchema` for input contract + response schema. Router (`POST /rpc/send_telegram_message` — internal RPC, auth via T09 shared-secret plugin) + Telegram Bot API adapter (`axios` PUT to `api.telegram.org/bot<token>/sendMessage`) + integration test = **all deferred** to T20-followup.
+
+**Session-start gate** (EXECUTOR-PROTOCOL §2)
+- Identity confirmed: Executor, Slot C (Satrio) ✓
+- CLAUDE.md loaded ✓
+- Task spec read: `04-integration-channels.md §2.4 row 84 (send_telegram_message signature), §3.2 outbound overview + gm/supervisor/dept telegram_id column ownership, §7 external deps row 331 (Telegram Bot API)`, `MVP-INTEGRATION-FIRST.md §1.3 (C4), §5 L126 AC`
+- Parent docs spot-read: T17 Telegram config module (`src/modules/telegram/*` — provides `TelegramConfigRepository` + `TelegramConfigDomain` w/ encrypted bot_token); slot-B BSP port precedent at `src/modules/whatsapp/ports/whatsapp-bsp.port.ts` (adapter-agnostic ABI pattern)
+- Dependencies: T02 ✓ (TelegramConfig schema), T03 ✓ (crypto encrypt/decrypt), T17 ✓ (Telegram config repository — but T20 primitive uses **reader-port** pattern per T23 §1262 first-class architecture, NOT direct T17 repo import)
+- `make typecheck` clean ✓ / `make lint` clean ✓ / `make test-unit` PASS on `main @ 109f133` (post-T25-approve). Will re-verify on branch cut.
+- Scaffolder risk: none — new module `src/modules/telegram-outbound/` (bounded context = outbound dispatch; separate from T17 config, T19 inbound commands, T25 socket-emit)
+- Known shared-infra RED: this module DOES need `decrypt(bot_token_enc)` (unlike T25/T23) — but decryption uses `@shared/utils/crypto` (T03), not `@prisma/client`. No `@prisma/client` imports = **module-level Docker-green candidate #3**.
+
+**Files to create**
+```
+src/modules/telegram-outbound/
+├── index.ts                                        (barrel — types + service + ports; adapter deferred)
+├── telegram-outbound.types.ts                      (SendTelegramMessageInput, TelegramSendResult, TelegramParseMode)
+├── telegram-outbound.schema.ts                     (zod SendTelegramMessageRequestSchema + response DTO)
+├── telegram-outbound.service.ts                    (dispatch orchestrator: lookup config → decrypt token → invoke bot API → surface result)
+├── ports/
+│   ├── telegram-config-read.port.ts                (reader port: getForHotel → { botTokenEnc, botUsername } | null; adapter wires to @modules/telegram in T20-followup)
+│   └── telegram-bot-api.port.ts                    (external IO: sendMessage({ botToken, chatId, body, parseMode? }) → { messageId })
+└── __tests__/
+    ├── telegram-outbound.schema.test.ts            (zod: valid + rejects invalid parseMode + rejects overlong body)
+    └── telegram-outbound.service.test.ts          (~10 tests: happy path, config-missing → NotFoundError, decrypt path, parseMode passthrough, bot API throw → ExternalServiceError, log discipline PII-clean)
+```
+
+**Files to modify**
+- (none) — new bounded context. Reader-port adapter + Telegram Bot API HTTP adapter land in T20-followup at composition boundary.
+
+**Files NOT touched** (foundation authority + scope containment)
+- `src/entrypoints/api.ts` (still stub — Q-C-02; RPC route landing deferred)
+- `src/entrypoints/worker.ts` (T20 is RPC entry, not worker cron)
+- `src/core/prisma/prisma-client.ts` (still stub — Q-C-01; not needed in primitive since we use reader port)
+- `src/plugins/internal-rpc-auth.plugin.ts` (T09 primitive; wiring at RPC route landing)
+- `package.json` (no new deps — axios already installed for adapter use in T20-followup)
+- `src/modules/telegram/**` (T17 primitive; T20 accesses via reader-port abstraction per T23 architectural precedent)
+
+**Approach**
+1. **`ports/telegram-config-read.port.ts`** — reader port `getForHotel({ hotelId }): Promise<{ botTokenEnc: string; botUsername: string } | null>`. Type-only. Adapter (T20-followup) wires to `@modules/telegram` barrel and returns the T17 `TelegramConfigDomain` mapped to this narrow view. Same pattern as T23 reader-port architecture.
+2. **`ports/telegram-bot-api.port.ts`** — external IO port `sendMessage({ botToken, chatId, body, parseMode? }): Promise<{ messageId: string }>`. Type-only. Adapter (T20-followup) uses `axios` to POST to `https://api.telegram.org/bot${token}/sendMessage`. Following slot-B `WhatsappBspPort` vendor-agnostic ABI pattern.
+3. **`telegram-outbound.service.ts`** — `TelegramDispatchService.sendMessage(input: SendTelegramMessageInput): Promise<TelegramSendResult>`. Flow: (a) reader port `getForHotel` → if null: `NotFoundError('telegram_config', hotelId)`; (b) `decrypt(config.botTokenEnc)` via `@shared/utils/crypto`; (c) call `TelegramBotApiPort.sendMessage` with decrypted token + input.chatId/body/parseMode; (d) on adapter throw: `ExternalServiceError('telegram_bot_api', message)`; (e) success → return `{ messageId, sentAt }`. Structured log: `{ msg: 'telegram_outbound.dispatched', module, hotelId, chatId (redacted last-4?), messageId, bodyLength, parseMode? }`. **PII floor**: `chatId` full value logged is OK (internal group ID, not phone); `body` NEVER logged, only `bodyLength`.
+4. **Zod schemas**:
+   - `SendTelegramMessageRequestSchema`: `{ hotel_id: uuid, chat_id: string min 1 max 64, body: string min 1 max 4096, parse_mode?: 'HTML' | 'MarkdownV2' }` (max 4096 per Telegram API limit; parse_mode literal union per Telegram spec).
+   - `SendTelegramMessageResponseSchema`: `{ message_id: string, sent_at: ISO string }`.
+   - snake_case wire per API-contract convention.
+5. **Unit tests** (~10):
+   - Schema (~4): valid full + valid without parse_mode + reject over-4096 body + reject invalid parse_mode.
+   - Service (~6-8): happy path with parseMode + happy path without parseMode + `NotFoundError` on missing config + decrypt call verification + bot API throw → `ExternalServiceError` + log discipline (body content NEVER in log, `bodyLength` present).
+
+**GAPs / questions**
+- **GAP T20-#1 — Flat routing vs per-dept dispatch.** Per PM C ACK T25 §1656: T20 primitive ships **flat routing** (caller supplies `chatId`), per-dept routing (T18) added in T20-followup. **My intent**: honor PM C directive. Primitive signature accepts pre-resolved `chatId`; HC's escalation worker (T20-followup consumer) will use T18's per-dept lookup (once T18 unblocks) or fall back to `default_chat_id` from `telegram_configs`. Confirm.
+- **GAP T20-#2 — Bot token decrypt location.** Two design choices: (a) service decrypts on every send (call-time — simple, safe, matches WA outbound §3.1 pattern); (b) service caches decrypted token in an LRU keyed by hotelId (perf — less crypto). **My intent**: **(a)** call-time decrypt — matches WA pattern + no cache-invalidation complexity + audit trail cleaner. Confirm.
+- **GAP T20-#3 — `parseMode` default.** Spec §2.4 shows `parse_mode?` optional. Telegram Bot API treats `parse_mode` absence as plaintext. **My intent**: no default — pass through absent/present verbatim to bot API. If caller wants HTML/Markdown, they specify. Non-blocker.
+- **GAP T20-#4 — Reader-port pattern for T17 config access.** Per T23 first-class architecture precedent (§1262), aggregators/consumers define narrow reader-ports rather than importing `@modules/telegram` barrel directly. **My intent**: define `TelegramConfigReadPort` locally in T20 module; adapter (T20-followup) maps T17's `TelegramConfigDomain` → narrow view `{ botTokenEnc, botUsername }`. Same reader-port pattern as T23. Confirm this over direct barrel import.
+- **GAP T20-#5 — Retry semantics.** Spec §7 (retry policy) discusses WA outbound retries via Bull queue. Should T20 primitive include retry logic OR defer retry to Bull-queue adapter layer? **My intent**: **defer** — primitive is a single-attempt dispatch. Retry semantics (attempts, backoff) belong at the T20-followup queue-processor layer, following T21 slot-B outbound-retry precedent (`whatsapp-outbound-retry.service.ts`). Non-blocker; primitive is loosely coupled via return-type + typed errors.
+
+Awaiting PM C ACK — especially GAP-#2 (call-time decrypt) + GAP-#4 (reader-port pattern for T17 access).
 
 **Session-start gate** (EXECUTOR-PROTOCOL §2)
 - Identity confirmed: Executor, Slot C (Satrio) ✓
