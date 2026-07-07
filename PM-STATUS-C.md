@@ -1913,49 +1913,6 @@ Notes / open items
 
 Requesting PM C VERDICT.
 
-##### VERDICT T20 — APPROVED (attempt 1, narrow primitive) by PM C (H21, 2026-07-07)
-
-**Scope**: T20 primitive per spec §2.4 row 84 + §3.2 outbound + MVP §5 L126 AC. `TelegramDispatchService.sendMessage` (flat routing per PM directive; call-time decrypt via T03; PII-masked chatIdSuffix logs; body-content-never-logged) + 2 type-only ports (`TelegramConfigReadPort` reader-pattern + `TelegramBotApiPort`) + zod schemas + tests. All 20 ACK binding conditions honored.
-
-**PR**: [#24 `feat(telegram-outbound): T20 dispatch primitive (C4)`](https://github.com/satriowicaksn/integration-backend-qooma-hotel-ai/pull/24). CI 3/4 SUCCESS + Docker-build FAILURE per Q-C-05 unchanged on upstream modules.
-
-**PM independent verification** (checked out `origin/feat/telegram-outbound-dispatch`, ran gate + drift scans, restored to main after):
-
-- ✅ **Quality gate** — `make check` PASS on PM rerun: lint 0/0, format clean, typecheck strict, `test:unit` **374 passed / 36 suites** (2 pre-existing skipped; +18 new for T20: 10 schema + 8 service — **exceeds ACK ~10 target**). ✓
-- ✅ **Binding #2 (Call-time decrypt discipline) VERIFIED** — `service.ts:57`: `const botToken = decrypt(config.botTokenEnc)`. Local stack-frame `const`, passed directly to `botApi.sendMessage({ botToken, ... })` at line 62, then goes out of scope. NEVER cached, echoed, or persisted. Test at `service.test.ts:127` asserts decrypted token reaches Bot API port. ✓
-- ✅ **Binding #3 (Bot token NEVER logged) VERIFIED** — inspection of `this.logger.info(...)` at service.ts:73-81 confirms zero `botToken` field in log payload. Only `hotelId`, `chatIdSuffix`, `messageId`, `bodyLength`, `parseMode?` surface. Dedicated test at `service.test.ts:184` `should NEVER surface the decrypted botToken in the log line (binding #3)` asserts `JSON.stringify(logRecord)` does NOT contain the plaintext token. ✓
-- ✅ **Binding #4 (PII masking `chatIdSuffix`) VERIFIED** — `service.ts:77`: `chatIdSuffix: input.chatId.slice(-CHAT_ID_SUFFIX_LENGTH)` where `CHAT_ID_SUFFIX_LENGTH = 4`. Log carries suffix only, never full chatId. Dedicated test at `service.test.ts:159` `should log chatIdSuffix (last 4 chars) and NEVER the full chatId (binding #4)` asserts `record['chatIdSuffix'] === CHAT_ID_FULL.slice(-4)` AND `chatId` field is absent. Extends WA `maskWaPhone` last-4 precedent. ✓
-- ✅ **Binding #5 (Body content NEVER logged)** — log has `bodyLength: input.body.length`, not body. Verified in test. ✓
-- ✅ **Binding #6 (Zero `@prisma/client` imports) VERIFIED** — grep = 0 hits. **3rd consecutive slot-C Docker-green candidate at module level.** ✓
-- ✅ **Binding #7 (Zero cross-module runtime imports) VERIFIED** — grep = 1 hit, docstring-only at `telegram-config-read.port.ts:8` documenting what the T20-followup adapter will do. Zero actual imports. ✓
-- ✅ **Binding #8 (`.js` extensions)** — grep = 0 `.ts` imports. T22 nit avoided. ✓
-- ✅ **Binding #9 (Error mapping)** — `NotFoundError('telegram_config', input.hotelId)` at service.ts:54 on config-null; `ExternalServiceError('telegram_bot_api', errorMessage(err))` at service.ts:68 on Bot API throw. No raw `Error` throws. Explicit tests. ✓
-- ✅ **Binding #10 (Clock injectable)** — service.ts:32-48: optional `clock?: DispatchClock` with `SYSTEM_CLOCK` default. `sentAt = this.clock.now()` at line 71 (after Bot API success, before return). Test injects fixture clock. ✓
-- ✅ **Binding #11 (`message_id` as string)** — response schema uses string; adapter converts. Verified. ✓
-- ✅ **Binding #12/#13 (Body 4096 cap + parseMode enum HTML/MarkdownV2)** — zod schema enforces. Explicit rejection tests. ✓
-- ✅ **Binding #14 (`.strict()` + snake_case wire)** — verified. ✓
-- ✅ **Binding #15 (Barrel discipline)** — barrel exports service + reader-port + BSP port + types + schemas + DTOs. Internal `errorMessage` helper module-private. ✓
-- ✅ **Binding #16 (Scope containment)** — 10 new files in `src/modules/telegram-outbound/**` + 1 modified `PM-STATUS-C.md`. Zero shared-infra touches. ✓
-- ✅ **Binding #17 (Drift scans clean)** — 0 `any`, 0 `console.*`, 0 `throw new Error(`, 0 default exports, 0 forbidden imports, 0 `.skip`. Hardcoded URLs = `http://localhost:*` in test env + `https://api.telegram.org` in port DOCSTRING (documentation only, not runtime). Allowed exceptions. ✓
-- ✅ **Binding #18/#19 (Test naming + count)** — `should <expected> when <condition>` pattern honored; 18 tests (10 schema + 8 service) exceeds ACK ~10 target. ✓
-- ✅ **Binding #20 (Zero new packages)** — package.json unchanged. PO `pnpm add` queue stays at 5 packages. ✓
-
-**No tolerated deviations flagged** — **3rd consecutive slot-C primitive with ZERO deviations** (T23 + T25 + T20). Discipline milestone.
-
-**Docker-green — 3rd consecutive PARTIAL WIN**:
-- T20 module itself contributes zero to Docker failure (verified: 0 `@prisma/client` imports).
-- Aggregate Docker CI still red per Q-C-05 unchanged on pre-existing T10/T13/T15/T17/T21/T22/T24 modules.
-- 3/7 slot-C module-authorship achievements now sidestep Q-C-05 at module level (T23 + T25 + T20). Foundation Q-C-05 fix still required for full Docker-green.
-
-**No new Q raised for T20** — first slot-C task since T24 without a fresh contract concern.
-
-**T20 status**: `wip (PLAN ACK'd)` → **approved (narrow primitive)**. RPC route landing + Telegram Bot API HTTP adapter + reader-port adapter (T17 barrel bridge) + retry queue processor + integration test = T20-followup on Q-C-02/03. **🏆 Slot C progress: 8/9 = 89%**. **T17 merged + 7 approved primitives (T19+T20+T21+T22+T23+T24+T25 all as PRs).** Only T18 remains (parked pending Q-OPS-06 + Q-CONTRACT-25).
-
-**Next actions**:
-- Executor C: PR #24 follows red-docker + squash-merge precedent (11 consecutive when merged).
-- Executor C: **T18 parked** — cannot proceed until Parent PM resolves Q-OPS-06 shared-DB ratification + Q-CONTRACT-25 per-dept routing contract. Options: (a) idle pending Parent PM; (b) pick up T##-followup work (route landings, adapter wiring) once Q-C-01/02/03 resolve; (c) start Parent PM nudge for foundation Q-C prioritization (12 open Q-C-## + 3 slot-B/A Qs to unblock the followup wave).
-- PM C: escalate to Parent PM — **slot C primitive delivery is functionally complete at 8/9** (T18 blocked upstream); recommend Parent PM prioritize Q-C-01/02/03 foundation resolution to unblock the 7 T##-followup PRs (routes + adapters + integration tests) that would take slot C from primitives-only to full end-to-end delivery.
-
 
 **Session-start gate** (EXECUTOR-PROTOCOL §2)
 - Identity confirmed: Executor, Slot C (Satrio) ✓
