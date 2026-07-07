@@ -33,7 +33,7 @@
 | T17 | Telegram config CRUD (`GET, PUT /api/integrations/telegram`)                     | merged   | PM C (H13, a2) | Primitive merged PR #11 `0d89d76` at 2026-07-04T19:32:26Z (red-docker precedent honored). Router+api.ts wiring = T17-followup blocked on Q-C-01/02/03 |
 | T18 | Per-dept Telegram routing write-through (HC `departments` table)                 | backlog  | —              | After T17; per Q-OPS-06 shared-DB direct write                     |
 | T19 | Telegram inbound webhook + commands (`/take`, `/release`, `/done`, `/help`)      | approved (primitive) | PM C (H15, a1) | Primitive shipped: parser + zod passthrough schema + type-only StaffLookupPort + TicketActionPort + service (anti-enumeration silent-ignore, PII-suffix log) + 41 unit tests, 100% stmt/func/line + 92.85% branch cov, drift clean, make check green on PM rerun. No `@prisma/client` import — sidesteps Q-C-05. Router+HMAC+HC RPC adapters+`webhook_events` persist = T19-followup on Q-C-01/02/03/06/07. Branch `feat/telegram-inbound-commands @ 9c0bbc5`, PR pending open |
-| T20 | Outbound Telegram dispatch RPC                                                   | wip (PLAN ACK'd) | PM C (H21, a1) | New module `src/modules/telegram-outbound/`. PLAN ACK'd H21: `TelegramDispatchService.sendMessage` (flat routing per PM directive; call-time decrypt via T03; PII-masked chatIdSuffix logs; body-content-never-logged; 4096-char body cap) + 2 type-only ports (TelegramConfigReadPort reader-pattern + TelegramBotApiPort BSP-agnostic) + zod schemas (snake_case wire, `.strict()`, parseMode enum HTML/MarkdownV2) + tests. **Zero `@prisma/client` + zero cross-module runtime imports** = 3rd consecutive module-level Docker-green candidate. RPC route + Bot API adapter + integration test = T20-followup on Q-C-02/03. **20 binding conditions; ZERO new Q raised** (spec §2.4 signature clear + T17 authoritative). Coding proceeding |
+| T20 | Outbound Telegram dispatch RPC                                                   | approved (primitive) | PM C (H21, a1) | Primitive shipped: `TelegramDispatchService.sendMessage` (flat routing; call-time decrypt via T03 local stack-frame token; PII `chatIdSuffix` last-4 logs; body-content-never-logged) + 2 type-only ports + zod schemas + 18 unit tests (10 schema + 8 service — exceeds ACK ~10 target). **All 20 ACK binding conditions honored — 3rd consecutive slot-C primitive with ZERO deviations flagged** (after T23 + T25). RPC route + Bot API adapter + reader-port adapter + retry queue + integration = T20-followup on Q-C-02/03. Branch `feat/telegram-outbound-dispatch`, PR #24 open |
 | T21 | OTA email IMAP poller + parser pipeline + HC pending-visit RPC                   | approved (primitive) | PM C (H17, a1) | Primitive shipped: 2 per-OTA parsers (Booking.com + Agoda) + dispatcher + Prisma-direct repo + poll orchestrator (per-mailbox try/catch, UID-advance-on-{ok,conflict,unrecognized}, freeze-on-error, max-UID computation) + 2 type-only ports + 51 unit tests (exceeds ~40 target), 100% cov on 5 files + 98.64% stmt on service, drift clean, make check green on PM rerun. All 13 ACK binding conditions honored — notable: `imap_password_enc` never decrypted in primitive (0 `decrypt(` calls; drift-scan verified). Cron worker + IMAP + HC adapters + integration = T21-followup on Q-C-01/02/09 + `imap-simple` PO approval. Branch `feat/ota-email-poller`, PR #20 open |
 | T22 | QR generation + download (1024×1024 PNG, object storage)                         | approved (primitive) | PM C (H18, a1) | Primitive shipped: `wa.me` URL builder (module-private, digit-strip + URL-encode + omit `?text=` when empty) + 2 type-only ports (QR renderer + object storage) + Prisma-direct repo (`QrState` upsert; clock-injectable `generatedAt` bump on update) + service orchestrator (build URL → validate ≤500 → render → upload → upsert → return `{url, pngUrl, generatedAt}`; error mapping to ExternalServiceError/ValidationError/NotFoundError) + zod schemas + 28 unit tests (matches ACK target). All 15 ACK binding conditions honored. Router + `pnpm add qrcode` + `pnpm add @aws-sdk/client-s3` + adapters + integration = T22-followup on Q-C-01/02/03/10 + PO package approvals. Branch `feat/qr-generation`, PR #21 open |
 | T23 | Integration overview endpoint (`GET /api/integrations`)                          | approved (primitive) | PM C (H19, a1) | Primitive shipped: 4 reader-port interfaces + aggregator service (parallel Promise.all + per-subsystem silent-null-on-throw + synthetic-down health on read-fail, clock-injectable) + zod IntegrationOverviewResponseSchema (`.strict()` + snake_case + per-subsystem-nullable-except-health) + 17 unit tests (matches ACK ~15-20 target). **All 17 ACK binding conditions honored — cleanest slot-C primitive to date** (zero `@prisma/client`, zero cross-module imports, zero decrypt/maskToken, zero `.ts`-extension nit, zero deviations flagged). Reader-port pattern executes as designed. Router + `gm_admin` + reader-port adapters + integration = T23-followup on Q-C-02/03/11. Branch `feat/integration-overview`, PR #22 open |
@@ -373,6 +373,53 @@ Files NOT touched (per T17 REJECT-PLAN Item #2 precedent — foundation authorit
   - src/core/prisma/prisma-client.ts (still stub — Q-C-01; module doesn't import from `@prisma/client`, sidesteps Q-C-05 Docker-build failure entirely)
   - src/plugins/hmac-validator.plugin.ts (T04 primitive, route-level wiring deferred)
   - src/modules/telegram/telegram-inbound.routes.ts (omitted — post-foundation follow-up)
+
+DoD self-check
+- [x] **Spec §3.2 command surface** — `/take <id>`, `/release <id>`, `/done <id>`, `/help` all parsed + dispatched. Verified in `telegram-inbound.commands.test.ts` (3 kinds × happy + case + @suffix + whitespace).
+- [x] **Anti-enumeration security posture (GAP #2)** — staff-not-recognized returns `{ kind: 'ignored', reason: 'staff_not_recognized' }`, no bot reply generated; test `should silent-ignore when staff not recognized (anti-enumeration)` asserts + verifies logged payload does NOT contain full Telegram user id (only 4-char suffix).
+- [x] **Passthrough schema for Telegram evolutions** — `TelegramUpdateSchema.passthrough()` at top level tolerates future fields; test `should preserve unknown top-level fields (passthrough) so Telegram evolutions do not break intake` asserts.
+- [x] **Rejection at wire boundary** — schema rejects missing `update_id`, wrong type, missing `chat.id` — asserted in schema tests.
+- [x] **Port abstraction (ADR-0001)** — `StaffLookupPort` + `TicketActionPort` are type-only interfaces consumed via ctor injection; adapters deferred to T19-followup. Consistent with slot-B pattern (`hotel-core-*.port.ts`).
+- [x] **PII floor on log lines** — `telegram_inbound.ignored` log for unrecognized sender masks user id (only last-4 suffix); `telegram_inbound.dispatch` log for recognized staff includes `staffId` (internal UUID, no PII).
+
+Quality gate
+- `make lint`: PASS (0 errors, 0 warnings)
+- `make format-check`: PASS
+- `make typecheck`: PASS (strict + exactOptionalPropertyTypes + noUncheckedIndexedAccess)
+- `make test-unit`: PASS (397 tests, 37 suites; +41 new for T19)
+- `make check` (combined): **PASS**
+- T19 module coverage (isolated to `telegram-inbound*.ts` + `ports/*.ts`): **100% stmts / 100% funcs / 100% lines / 92.85% branch avg** — one dead-code fallback branch in `parseCommand` (defensive `?? ''` after `.split('@')[0]` needed for `noUncheckedIndexedAccess`; unreachable at runtime given the earlier `startsWith('/')` guard).
+
+Drift scans (scope `src/modules/telegram/telegram-inbound*.ts` + `src/modules/telegram/ports/`)
+- `any` / `<any>` / `as any`: 0 hits
+- `console.log|info|debug`: 0 hits
+- `throw new Error(`: 0 hits
+- forbidden imports (express/typeorm/moment/node-fetch): 0 hits
+- default export: 0 hits
+- `.skip(` in tests: 0 hits
+
+Security check (spec §3.2 + §4.11)
+- Anti-enumeration on unknown sender: ✅ silent-ignore + PII-suffix-only log
+- No secret hardcoded / no PII in log: verified via test `should silent-ignore...` (`JSON.stringify(logged)` does not contain full telegram user id)
+- Ports type-only → no accidental adapter shipping without Q-C-03 ratification
+- HMAC verify at route boundary: N/A this attempt (deferred to router landing)
+- Zod `.passthrough()` on top-level Update = intentional for forward-compat with Telegram API evolution; strict validation on the `chat.id` / `update_id` / `message.from.id` subset we consume.
+
+Test evidence (unit only)
+- Suites added: 3 (`commands`, `schema`, `service` — under `src/modules/telegram/__tests__/telegram-inbound.*.test.ts`)
+- Tests added: 41 (18 parser + 6 schema + 17 service)
+- Silent-ignore assertion + PII-floor log assertion in the same test (`should silent-ignore when staff not recognized`)
+- All 3 outcome branches (`ok` / `not_found` / `forbidden`) × 3 command kinds covered via representative combinations
+
+Notes / open items
+- Router landing (`telegram-inbound.routes.ts` + HMAC wire + `POST /webhook/telegram/:hotel_slug` mount under `api.ts`) blocked on Q-C-01/02/03 — same as T17. Ready as T19-followup.
+- HC RPC adapter impls (`http-hotel-core-staff-lookup.adapter.ts`, `http-hotel-core-ticket-action.adapter.ts`) blocked on Q-C-03 (HC internal-RPC client contract). Ports intentionally type-only per slot-B `hotel-core-*.port.ts` precedent (see PM B T12 GAP #3 → Q-B-04).
+- AI service handover (spec §3.2 "RPC AI service (for handover)") — T19 primitive currently routes all ticket commands to `TicketActionPort` (HC). AI handover is a separate concern — worth clarifying with PM whether `/take` should first offer AI-handover reply per §3.2. Flagged as open note, not blocker.
+- Branch: `feat/telegram-inbound-commands`; PR to be opened post-commit.
+
+Requesting PM C VERDICT.
+
+
 
 DoD self-check
 - [x] **Spec §3.2 command surface** — `/take <id>`, `/release <id>`, `/done <id>`, `/help` all parsed + dispatched. Verified in `telegram-inbound.commands.test.ts` (3 kinds × happy + case + @suffix + whitespace).
@@ -1989,6 +2036,7 @@ Re-run `make check` after fix, confirm pass, resubmit (attempt N+1).
 | H18 T22 a1 | 10 files in `src/modules/qr-provisioning/` (url-builder + service + repo + schema + types + index + 2 ports + 4 tests) | 0 | 0 | 0 | 0 | 0 | 0 | 0 (only spec-mandated `wa.me` in url-builder + `example.com` in test fixtures — allowed) | n/a (route deferred) | 0 (Prisma-direct + ctor-inject, ADR-0001); **1 tolerated nit: `.ts` extension in `index.ts:14` type import (should be `.js` per codebase convention; permitted by `moduleResolution: Bundler`; 1-char cleanup on T22-followup)** |
 | H19 T23 a1 | 10 files in `src/modules/integration-overview/` (aggregator service + schema + types + index + 4 reader ports + 2 tests) | 0 | 0 | 0 | 0 | 0 | 0 | 0 | n/a (route deferred) | **CLEANEST slot-C primitive to date — zero deviations**: 0 `@prisma/client` imports (binding #2 verified), 0 cross-module imports (binding #3 verified), 0 `decrypt`/`maskToken` (binding #8 verified), 0 `.ts`-extension nit (binding #16 — T22 nit avoided), 0 `as X` casts, 0 tolerated deviations flagged. Reader-port pattern first-class architecture win |
 | H20 T25 a1 | 8 files in `src/modules/integration-health-socket-emit/` (service + schema + types + index + 1 port + 2 tests) | 0 | 0 | 0 | 0 | 0 | 0 | 0 | n/a (transport adapter deferred) | **2nd consecutive slot-C primitive with ZERO deviations**: 0 `@prisma/client` imports (binding #3 verified), 0 cross-module runtime imports (binding #4 verified — only 1 docstring mention), 0 decrypt/maskToken, 0 `.ts`-extension, 0 `as X` casts. Case-conversion camelCase→snake_case discipline verified via `toWirePayload` + dedicated tests. Module-level Docker-green sustained (2nd consecutive) |
+| H21 T20 a1 | 10 files in `src/modules/telegram-outbound/` (service + schema + types + index + 2 ports + 2 tests) | 0 | 0 | 0 | 0 | 0 | 0 | 0 (only test env `localhost` + `api.telegram.org` docstring; allowed) | n/a (RPC route + Bot API adapter deferred) | **3rd consecutive slot-C primitive with ZERO deviations**: 0 `@prisma/client` imports (binding #6 verified), 0 cross-module runtime imports (binding #7 verified — 1 docstring only), 0 `.ts`-extension, 0 `as X` casts. **1 `decrypt(` call at service.ts:57 = INTENTIONAL** (binding #2 call-time decrypt for Bot API dispatch; differs from T21 password-never-decrypted rule per service-vs-adapter role). Bot token NEVER logged (binding #3 verified via dedicated test). `chatIdSuffix` PII masking verified via dedicated test. Module-level Docker-green sustained (3rd consecutive) |
 
 > PM C jalankan drift scan per `PM-AGENT.md §3 Step 2` setiap SUBMIT + end-of-day full scan untuk slot C's touched files.
 
