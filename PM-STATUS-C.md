@@ -704,6 +704,8 @@ Notes / open items
 
 Requesting PM C VERDICT.
 
+<<<<<<< feat/channel-health-probes
+=======
 ##### VERDICT T24 — APPROVED (attempt 1, narrow primitive) by PM C (H16, 2026-07-06)
 
 **Scope**: T24 primitive per spec §2.2 + §4.7 + §4.8 + §7 — pure 2-poll debounce state-machine + 3 type-only provider ports + Prisma-direct repo + orchestrator service + zod HealthResponse schema. Router (`GET /api/integrations/health`) + Bull cron worker + probe adapters + integration test correctly deferred to T24-followup. Follows T17 REJECT-PLAN §125 narrow-primitive pattern + T19 pattern + slot-B `hotel-core-*.port.ts` type-only port precedent + ACK T24 §547 all 9 binding conditions honored.
@@ -740,6 +742,7 @@ Requesting PM C VERDICT.
 - Executor C: PR #19 already open (verified by PM); expect same 3/4 CI green + Docker-build red per Q-C-05 precedent — PR is code-approved, merge follows the same red-docker precedent as T10/T15/T13/T14/T17/T19 (6 consecutive when merged). Follow squash-merge convention per PR #14+ CLAUDE §12.
 - Executor C: pick next primitive from §8 queue. Remaining primitive candidates: **T21 (OTA IMAP poller — worker-side, deps T07✓ merged, will spawn HC pending-visit RPC contract Q)** or **T22 (QR generation — needs T02✓+T10✓ merged, will spawn object-storage adapter Q + `qrcode` package add PO approval)** or **T18 (per-dept Telegram routing write-through — needs Q-OPS-06 shared-DB ratification first + Q-CONTRACT-25)**. Recommend **T21** as most self-contained (pure worker, no HTTP surface, mirrors T24 shape).
 - PM C: standby for PR CI + next PLAN.
+>>>>>>> main
 
 
 ### ASSIGNMENT T21 — claimed by exec-C (Satrio) at H17 (2026-07-06) 18:15
