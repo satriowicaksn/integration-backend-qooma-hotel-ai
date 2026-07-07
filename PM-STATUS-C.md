@@ -1769,6 +1769,104 @@ Awaiting PM C ACK — especially GAP-#2 (call-time decrypt) + GAP-#4 (reader-por
 
 Proceed to coding. Post SUBMIT when `make check` green + drift clean + all 20 binding conditions honored + ~10 tests target met + PII discipline (chatIdSuffix + no body + no botToken) explicit-tested.
 
+#### SUBMIT T20 — exec-C (Satrio) at H21 (2026-07-07) 15:20 (attempt 1, narrow primitive per ACK)
+
+Task: T20 Telegram outbound dispatch RPC primitive (spec §2.4 + §3.2 + MVP §1.3 C4). Ships **`TelegramDispatchService.sendMessage`** with flat-routing (caller supplies pre-resolved `chatId`) + call-time bot_token decrypt via T03 crypto + PII-masked `chatIdSuffix` log + body-content-never-logged + clock-injected `sentAt` + narrow `TelegramConfigReadPort` (reader-port pattern per T23 first-class architecture) + vendor-agnostic `TelegramBotApiPort` (follows slot-B `WhatsappBspPort` precedent) + zod `SendTelegramMessageRequest/ResponseSchema` (snake_case, `.strict()`, `parse_mode` enum `HTML|MarkdownV2` only per binding #13, body cap 4096 per binding #12) + 18 unit tests. Internal RPC route + `T09` shared-secret auth + Telegram Bot API HTTP adapter (axios; already installed) + Bull-queue retry layer (T21 slot-B precedent) + integration test = **all deferred** to T20-followup pending Q-C-02.
+
+**🎯 MODULE-LEVEL DOCKER-GREEN #3** (PM C ACK T20 binding #6): T20 module has **zero `@prisma/client` imports** + **zero cross-module runtime imports** — 3rd consecutive slot-C module-level Docker-green after T23 + T25. Reader-port pattern now demonstrated across 3 primitives (T23 aggregator + T25 downstream sink + T20 config consumer).
+
+Files changed: 8 (all new; scope strictly `src/modules/telegram-outbound/**`)
+  - src/modules/telegram-outbound/index.ts (new — barrel per binding #15; `.js` extensions per #8)
+  - src/modules/telegram-outbound/telegram-outbound.types.ts (new — TelegramParseMode, SendTelegramMessageInput, TelegramSendResult, TelegramConfigForDispatch)
+  - src/modules/telegram-outbound/telegram-outbound.schema.ts (new — zod SendTelegramMessageRequest/ResponseSchema strict per binding #14; parse_mode enum per #13; body max 4096 per #12; message_id as string per #11)
+  - src/modules/telegram-outbound/telegram-outbound.service.ts (new — dispatch orchestrator with call-time decrypt per binding #2, chatIdSuffix log per binding #4, bodyLength log per #5, botToken-never-logged per #3, clock-injected sentAt per #10, NotFoundError/ExternalServiceError mapping per #9)
+  - src/modules/telegram-outbound/ports/telegram-config-read.port.ts (new — type-only reader per binding #1)
+  - src/modules/telegram-outbound/ports/telegram-bot-api.port.ts (new — type-only BSP-agnostic ABI)
+  - src/modules/telegram-outbound/__tests__/telegram-outbound.schema.test.ts (new — 10 tests: valid + omit parse_mode + reject uuid/empty-fields/overlong-body/legacy-Markdown/strict; response valid + reject non-string message_id)
+  - src/modules/telegram-outbound/__tests__/telegram-outbound.service.test.ts (new — 8 tests: happy × 3 [decrypt+dispatch, parseMode passthrough, parseMode omit], PII discipline × 3 [chatIdSuffix, bodyLength, botToken-never-logged], error mapping × 2 [NotFoundError on missing config, ExternalServiceError on adapter throw])
+
+Files NOT touched (binding #16 scope containment)
+  - src/entrypoints/api.ts (still stub — Q-C-02; RPC route landing deferred)
+  - src/entrypoints/worker.ts (still stub — T20 is RPC entry, no worker)
+  - src/core/prisma/prisma-client.ts (still stub — Q-C-01; N/A since reader-port pattern)
+  - src/plugins/internal-rpc-auth.plugin.ts (T09; wiring at RPC route landing in T20-followup)
+  - `package.json`: **untouched** — verified via `git status package.json` = clean. NO new deps (axios pre-existing for T20-followup adapter). Cumulative PO queue UNCHANGED at 5 packages per binding #20.
+  - src/modules/telegram/** (T17 primitive; T20 accesses via reader-port abstraction)
+  - Any other module
+
+DoD self-check
+- [x] **Spec §2.4 `send_telegram_message(chat_id, body, parse_mode?)`** — service signature accepts `SendTelegramMessageInput { hotelId, chatId, body, parseMode? }` (adds `hotelId` for tenancy per PM C ACK §1732).
+- [x] **§3.2 flat routing (GAP #1 approved)** — caller supplies pre-resolved `chatId`; per-dept lookup (T18) or `default_chat_id` fallback lives at T20-followup composition boundary.
+- [x] **Reader-port pattern (binding #1)** — local `TelegramConfigReadPort`; `grep -rn "^import.*@modules/telegram" src/modules/telegram-outbound/` = 0 real imports (only 1 docstring reference).
+- [x] **Call-time decrypt (binding #2)** — `service.ts:57` `const botToken = decrypt(config.botTokenEnc)`; single stack frame; passed directly to `botApi.sendMessage` at line 62; discarded at fn return. NEVER cached/persisted.
+- [x] **Bot token NEVER logged (binding #3)** — manual audit: only 1 `this.logger.info(...)` call at `service.ts:73`; payload contains `hotelId`, `chatIdSuffix`, `messageId`, `bodyLength`, optionally `parseMode` — **NO** `botToken` field. Dedicated test asserts `JSON.stringify(record)` does not contain `BOT_TOKEN_PLAINTEXT` nor its `:...secret` half.
+- [x] **PII masking `chatIdSuffix = chatId.slice(-4)` (binding #4 CRITICAL)** — verified in `service.ts:78`; dedicated test asserts `chatIdSuffix` equals last 4 chars + full `chatId` NOT in log JSON.
+- [x] **Body content NEVER logged (binding #5)** — only `bodyLength: input.body.length`; dedicated test asserts secret body content absent from log JSON.
+- [x] **Zero `@prisma/client` imports (binding #6)** — grep-verified 0 real imports. 3rd consecutive slot-C Docker-green candidate.
+- [x] **Zero cross-module runtime imports (binding #7)** — grep-verified 0 real `@modules/*` imports.
+- [x] **`.js` extension discipline (binding #8)** — grep-verified 0 `.ts` imports.
+- [x] **Error mapping (binding #9)** — `NotFoundError('telegram_config', hotelId)` when reader-port null; `ExternalServiceError('telegram_bot_api', ...)` when adapter throws. Both asserted via dedicated tests.
+- [x] **Clock injectable (binding #10)** — `service.ts:44-51` accepts optional `clock?: DispatchClock`; happy-path test asserts `result.sentAt === NOW` (injected).
+- [x] **`message_id` as string (binding #11)** — `SendTelegramMessageResponseSchema.message_id: z.string()`; dedicated test rejects numeric `message_id`.
+- [x] **Body max 4096 (binding #12)** — `SendTelegramMessageRequestSchema.body.max(4096)`; dedicated test asserts 4097-char body rejected.
+- [x] **`parseMode` enum `HTML|MarkdownV2` only (binding #13)** — `TelegramParseModeEnum`; dedicated test asserts legacy `'Markdown'` rejected.
+- [x] **Zod `.strict()` + snake_case (binding #14)** — both schemas `.strict()`; test asserts unknown top-level key rejected.
+- [x] **Barrel discipline (binding #15)** — index.ts exports service + ports + types + schemas + DTOs.
+- [x] **Scope containment (binding #16)** — verified: 0 touches to api.ts, worker.ts, prisma-client.ts, plugins/**, package.json, other modules.
+- [x] **`pnpm add` queue unchanged (binding #20)** — verified via `git status package.json` = clean. Cumulative PO queue stays at 5 packages.
+- [x] **Test naming (binding #18)** — `should <expected> when <condition>` across all 18 tests.
+- [x] **Test count (binding #19)** — 18 tests (exceeds ACK ~10 target, adds PII coverage).
+
+Quality gate
+- `make lint`: PASS (0 errors, 0 warnings)
+- `make format-check`: PASS
+- `make typecheck`: PASS (strict + exactOptionalPropertyTypes + noUncheckedIndexedAccess)
+- `make test-unit`: PASS (374 tests / 36 suites; +18 new T20)
+- `make check` (combined): **PASS**
+- T20 module coverage: **100% stmt/branch/func/line** on schema. `telegram-outbound.service.ts` = 95% stmt / 77.77% branch / 75% func / 100% line — only defensive fallbacks uncovered (SYSTEM_CLOCK on ctor `clock` omitted + `String(err)` fallback when err is not Error). Above target.
+
+Drift scans (per binding #17; scope `src/modules/telegram-outbound/`)
+- `any` / `<any>` / `as any` (excluding `as unknown as` test-mock boundary): 0 hits
+- `console.log|info|debug`: 0 hits
+- `throw new Error(` in src (non-test): 0 hits — service uses `NotFoundError` + `ExternalServiceError` only
+- forbidden imports (express/typeorm/sequelize/moment/node-fetch): 0 hits
+- default export: 0 hits
+- `.skip(` in tests: 0 hits
+- Hardcoded URL: 0 hits — `api.telegram.org` will only appear in T20-followup adapter, not primitive
+- **`botToken` in `logger.*` calls (binding #3 manual audit)**: 0 occurrences
+- **`@modules/telegram` real imports (binding #1)**: 0 hits (only docstring)
+- **`@prisma/client` real imports (binding #6)**: 0 hits
+- **`.ts` import extensions (binding #8)**: 0 hits
+
+Module-level Docker-green (binding #6 + #15)
+- Zero `@prisma/client` type imports → tsc has no reason to fail on this module in Dockerfile stage.
+- Zero cross-module runtime imports → module compiles independently.
+- **Assessment**: T20 module itself is Docker-green. Whole-src PR CI Docker-build stage still requires foundation Q-C-05 fix. 3rd consecutive Docker-green module-level primitive (T23 → T25 → T20) — strongest signal yet for foundation prioritization.
+
+Security check
+- Reader-port + BSP port both type-only → adapters cannot ship without T20-followup + Q-C-02 wiring.
+- Call-time decrypt keeps plaintext bot_token in a single stack frame; never persisted or logged.
+- PII discipline: `chatIdSuffix` last-4 (parallels slot-B `maskWaPhone`); `body` NEVER in log (only length); dedicated tests assert PII-clean.
+- `message_id` string type avoids JS number precision issues at extreme integer values.
+- Cumulative package queue unchanged — zero new dep debt.
+
+Test evidence (unit only)
+- Suites added: 2 (`telegram-outbound.schema`, `telegram-outbound.service`)
+- Tests added: 18 (10 schema + 8 service)
+- PII discipline coverage: 3 dedicated tests (chatIdSuffix, bodyLength, botToken-never-logged) with `JSON.stringify(record)` assertions
+- Call-time decrypt verified via BASE_ENV setup + `decrypt(encrypt(...))` roundtrip in mock config
+- Clock-injected `sentAt` verified via `{ now: () => NOW }` fixture
+
+Notes / open items
+- **RPC route landing** — `POST /rpc/send_telegram_message` + T09 shared-secret auth + zod `SendTelegramMessageRequestSchema` at handler boundary blocked on Q-C-02 (api.ts). Composition wires reader-port adapter (T17 barrel → view mapping) + Telegram Bot API HTTP adapter (axios → api.telegram.org).
+- **Retry layer** — Bull queue processor for retry/backoff/DLQ blocked on `worker.ts` bootstrap. Follows slot-B T14 (`whatsapp-outbound-retry.service.ts`) precedent — T20 primitive is loosely coupled via typed errors so the queue processor can classify permanent vs transient failures.
+- **Bot API adapter** — HTTP adapter to `https://api.telegram.org/bot<token>/sendMessage` uses existing axios (no new `pnpm add`); lands at T20-followup route composition.
+- **Milestone progress** — Slot C after T20 approval: **8/9 primitives shipped** (T17 + T19 + T24 + T21 + T22 + T23 + T25 + T20). Only remaining: T18 (parked pending Q-OPS-06/Q-CONTRACT-25 at Parent PM).
+- Branch: `feat/telegram-outbound-dispatch`; PR to be opened post-commit.
+
+Requesting PM C VERDICT.
+
+
 **Session-start gate** (EXECUTOR-PROTOCOL §2)
 - Identity confirmed: Executor, Slot C (Satrio) ✓
 - CLAUDE.md loaded ✓
