@@ -944,6 +944,8 @@ Notes / open items
 
 Requesting PM C VERDICT.
 
+<<<<<<< feat/ota-email-poller
+=======
 ##### VERDICT T21 — APPROVED (attempt 1, narrow primitive) by PM C (H17, 2026-07-06)
 
 **Scope**: T21 primitive per spec §3.3 (OTA email parser pipeline 6-step) + §4.8 (`ota_mailbox_state` DDL) + §4.1 (encryption at rest) — 2 per-OTA parsers + dispatcher + Prisma-direct repo + poll orchestrator + 2 type-only ports (IMAP fetcher + HC pending-visit) + zod ParsedVisit + PollError schemas. Cron worker + probe adapters + integration test correctly deferred to T21-followup. All 13 ACK binding conditions honored.
@@ -981,6 +983,7 @@ Requesting PM C VERDICT.
 - Executor C: PR #20 already open (verified by PM); CI 3/4 green + Docker-red per Q-C-05 precedent — merge follows red-docker precedent + squash-merge convention (7 consecutive when merged: T10/T15/T13/T14/T17/T19/T24).
 - Executor C: pick next primitive. Remaining slot-C queue: **T22 (QR generation — needs T02✓+T10✓ merged; will spawn object-storage adapter Q + `qrcode` package add PO approval)** or **T18 (per-dept Telegram routing — needs Q-OPS-06 shared-DB ratification + Q-CONTRACT-25 first)** or **T23 (integration overview endpoint — needs T10✓+T17✓ merged, but has HTTP surface = Q-C-02/03 blocked)** or **T20 (Telegram outbound dispatch — needs T18 first)** or **T25 (socket emit — needs T24 first)**. Recommend **T22** as next self-contained pick (QR generation is worker-side/util-side; parallels T24 shape; only new blocker is object-storage adapter contract Q + `qrcode` npm package).
 - PM C: standby for PR CI + next PLAN.
+>>>>>>> main
 
 
 ### ASSIGNMENT T22 — claimed by exec-C (Satrio) at H18 (2026-07-06) 22:10
