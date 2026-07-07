@@ -1424,8 +1424,69 @@ Requesting PM C VERDICT.
 - PM C: standby for PR CI + next PLAN.
 
 
+### ASSIGNMENT T25 — claimed by exec-C (Satrio) at H20 (2026-07-07) 11:45
+- Branch: `feat/integration-health-socket-emit`
+- Routed from: PM-STATUS-C.md §1421 PM C recommendation ("T25 — deps T24✓ approved. Small task; needs socket-infra decision. Would take slot C to 7/9")
+- Dependency check per §1: T24 ✓ (channel-health primitive approved PR #19 — `HealthChangedEvent[]` return contract from `runProbesForHotel` per T24 §562 GAP-#5 shape). All primitive-scope deps met.
+- **Post-VERDICT compliance**: PM C VERDICT T19 §442 → posting PLAN + waiting for ACK. **Not self-proceeding**.
 
-#### PLAN T## — exec-C (Satrio) at H{N} HH:MM
+#### PLAN T25 — exec-C (Satrio) at H20 (2026-07-07) 11:45
+
+**Scope recap**
+Deliver C9 primitive per `docs/spec/04-integration-channels.md §5 (row `integration:health_changed`), §7 ("Emit `integration:health_changed` on transition only")` + `MVP-INTEGRATION-FIRST.md §1.3 (C9), §4.8 (transition-only emit), §5 L130 AC ("`integration:health_changed` socket emit observed")`. Ship pure **`HealthChangedPublisherService`** that consumes `HealthChangedEvent[]` (T24's return contract) and publishes each event via a **type-only `SocketPublisherPort`** — transport SDK deferred exactly like T21 (`imap-simple`), T22 (`qrcode`, `@aws-sdk/client-s3`), T24 (`@anthropic-ai/sdk`) precedent. Types + zod `IntegrationHealthChangedEventSchema` (wire shape for gateway/FE consumers), unit tests. Adapter (socket.io / native ws / SSE — decision blocked on Q-C-12 socket-infra ratification below) + `worker.ts` wiring (T24 cron result → T25 publish) + integration test = **all deferred** to T25-followup.
+
+**🎯 DOCKER-GREEN CANDIDATE** — same as T23: **zero `@prisma/client` imports** (T25 has no persistence) + minimal cross-module coupling (only type-only import of `HealthChangedEvent` from `@modules/channel-health` barrel, or fully copied to keep zero cross-module — see GAP T25-#1). If Docker-green: 2nd slot-C consecutive Docker-green primitive.
+
+**Session-start gate** (EXECUTOR-PROTOCOL §2)
+- Identity confirmed: Executor, Slot C (Satrio) ✓
+- CLAUDE.md loaded ✓
+- Task spec read: `04-integration-channels.md §5 socket events + §7 emit-on-transition-only`, `MVP-INTEGRATION-FIRST.md §1.3 (C9), §4.8, §5 L130`
+- Parent docs spot-read: T24 `HealthChangedEvent` shape at `src/modules/channel-health/channel-health.types.ts` + `channel-health.service.ts` (returned from `runProbesForHotel`)
+- Dependencies: T24 ✓
+- `make typecheck` clean ✓ / `make lint` clean ✓ / `make test-unit` PASS on `main @ 44c814b` (post-T23-approve). Will re-verify on branch cut.
+- Scaffolder risk: none — new module `src/modules/integration-health-socket-emit/` (bounded context = socket bridge for T24 events)
+- **Known milestone target**: verify Docker-green on PR CI. If Docker still fails, root cause must be upstream drift, not this module.
+
+**Files to create**
+```
+src/modules/integration-health-socket-emit/
+├── index.ts                                        (barrel — types + service + port; adapters deferred)
+├── integration-health-socket-emit.types.ts         (HealthChangedEventPayload wire type; matches T24 shape)
+├── integration-health-socket-emit.schema.ts        (zod IntegrationHealthChangedEventSchema for wire; docstring for FE contract)
+├── integration-health-socket-emit.service.ts      (publish orchestrator: for each event → invoke port; batches OK; per-event try/catch → log-not-throw)
+├── ports/
+│   └── socket-publisher.port.ts                    (type-only: publish({ event, payload }) → Promise<void>)
+└── __tests__/
+    ├── integration-health-socket-emit.schema.test.ts   (zod valid + rejects unknown status; ~4 tests)
+    └── integration-health-socket-emit.service.test.ts  (~9 tests: empty batch, single event, multi-event, per-event try/catch, transition-only invariant (input is already filtered by T24), publish call shape, structured log on failure, aggregate does not throw on port failure)
+```
+
+**Files to modify**
+- (none) — new bounded context. Reader-port adapter (transport wiring) + worker cron composition (T24 → T25) land in T25-followup.
+
+**Files NOT touched** (foundation authority + scope containment)
+- `src/entrypoints/api.ts` (still stub — T25 is worker/gateway side, no HTTP surface)
+- `src/entrypoints/worker.ts` (still stub — Q-C-02 sibling; cron composition deferred)
+- `src/core/prisma/prisma-client.ts` (still stub — Q-C-01; T25 has no persistence anyway)
+- `src/plugins/` (no plugin work)
+- `package.json` (NO socket.io / @fastify/websocket add — PO-gated per T21/T22/T24 SDK-deferral precedent)
+- `src/modules/channel-health/**` (only barrel type-import if PM C prefers option A of GAP #1; internals untouched)
+
+**Approach**
+1. **`integration-health-socket-emit.types.ts`** — `HealthChangedEventPayload` type shape = mirror of T24's `HealthChangedEvent` (`{ hotelId, provider, previousStatus, newStatus, checkedAt }`). See GAP #1 for whether to import from `@modules/channel-health` (option A) or define locally (option B).
+2. **`ports/socket-publisher.port.ts`** — interface `SocketPublisherPort { publish(input: { event: string; payload: HealthChangedEventPayload }): Promise<void> }`. Type-only. Adapter (socket.io / SSE / etc.) deferred to T25-followup along with `pnpm add` + Q-C-12 (socket-infra decision).
+3. **`integration-health-socket-emit.service.ts`** — `HealthChangedPublisherService.publishAll(events: HealthChangedEventPayload[]): Promise<PublishSummary>`. For each event: wrap in try/catch → invoke port with `{ event: 'integration:health_changed', payload: event }`. Failure → log warn + increment `failures` counter; aggregate never throws (worker cron in T25-followup relies on this — one broken subscriber MUST NOT crash T24's poll loop, matching T21 §3.3 + T23 §9 resilience precedent). Returns `{ published: number; failures: number }` for T25-followup cron observability.
+4. **`integration-health-socket-emit.schema.ts`** — `IntegrationHealthChangedEventSchema` per spec §5. Wire fields snake_case per API-contract convention (`hotel_id`, `provider`, `previous_status`, `new_status`, `checked_at`). Status enum = `'healthy' | 'degraded' | 'down'` (matches T24 primitive). Non-strict at top level (gateway may add correlation fields; matches T24 pass-through pattern) OR strict (freeze contract early). Default: strict — freeze early; T25-followup can loosen if gateway needs to add fields.
+5. **Unit tests**: schema (~4), service (~9 as sketched above).
+
+**GAPs / questions**
+- **GAP T25-#1 — Cross-module type import.** T24's `HealthChangedEvent` is the exact input contract. Options: **(A)** import type via `import type { HealthChangedEvent } from '@modules/channel-health'` (type-only barrel import; allowed per CLAUDE §3; couples primitive to T24 shape); **(B)** define local `HealthChangedEventPayload` type, mirror shape; adapter/composition layer converts (zero cross-module coupling; matches T23 binding #3 "reader-port pattern"). **My intent**: **B** for consistency with T23 precedent + primitive independence + Docker-green isolation. If PM C prefers A for DRY, easy 1-line refactor. Confirm.
+- **GAP T25-#2 — Socket transport infrastructure (raise as Q-C-12).** No socket infra in this repo yet (Fastify-based HTTP server, no ws/socket.io). Candidates: (a) `socket.io` (needs `pnpm add socket.io` — PO), (b) native WebSocket via `@fastify/websocket` (PO), (c) Server-Sent Events (no new dep; built into Fastify but limited semantics), (d) Redis pub/sub bridge to an external gateway (needs external infra doc). **My intent**: raise as **Q-C-12** — port type-only; adapter blocked pending PO/infra ratification. Sibling to Q-C-10 (object storage), Q-C-06/07/09 (HC RPC).
+- **GAP T25-#3 — Transition-only invariant enforcement.** T24 already filters at service level (only returns events where `didTransition === true`). T25 service should NOT double-filter (redundant + would need to re-derive `didTransition`). **My intent**: T25 primitive trusts the caller (T24's `runProbesForHotel`) to pre-filter. Unit test asserts service publishes every input event without extra filtering. Confirm.
+- **GAP T25-#4 — Event name literal.** Spec says `integration:health_changed`. Should this be a schema constant or a runtime option? **My intent**: constant `HEALTH_CHANGED_EVENT_NAME = 'integration:health_changed'` in module + used as `event` field on port call. Consumers can override if T25-followup needs versioning (e.g. `v2`). Confirm.
+- **GAP T25-#5 — Per-event failure posture.** If the port throws for ONE event in a batch, should service: (a) log-warn + continue with remaining events + report count (default, matches T21/T23 "don't crash the loop"); (b) throw aggregate error; (c) buffer for retry. **My intent**: **A** — matches slot-C resilience precedent. Retry semantics for socket delivery are transport-specific and belong at the adapter (T25-followup), not the primitive.
+
+Awaiting PM C ACK — especially GAP-#1 (cross-module type import decision) + GAP-#2 (Q-C-12 socket-infra raise).
 
 **Scope recap**
 - ...
