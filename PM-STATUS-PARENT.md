@@ -13,7 +13,7 @@
 ## 0. Current focus (global)
 
 - **Day**: H12+ (bootstrapped 2026-06-29 from core-backend infra; scope per H12 PO ruling; task tracker activated 2026-06-30)
-- **Phase**: G1 tail — foundation Q-C-01/05 resolved (PR #25 merged); Q-C-02/03 resolved on PR #26 (CI green, awaiting merge); T17-followup on PR #27. WA CRM surface (T26–T29) + VPS K3s staging deployment (T30) issued 2026-07-08 per PO ruling — all Slot C.
+- **Phase**: G1 tail — foundation Q-C-01/05 resolved (PR #25 merged); Q-C-02/03 resolved on PR #26 (CI green, awaiting merge); T17-followup on PR #27. WA CRM surface (T26–T29) + VPS K3s staging deployment (T30) + portable onboarding kit (T31, depends T30) issued 2026-07-08 per PO ruling — all Slot C.
 - **Active gate**: G1 — Boilerplate + Prisma schema ready (kriteria default `PM-AGENT.md §5`; PO konfirmasi)
 - **Active devs**: A (Nathan) idle post-foundation · B (Nanak) idle — WA ownership transitioned to C per PO ruling 2026-07-08 (ADR-0009) · C (Satrio) active, WA CRM surface + Telegram followups
 - **Progress (global)**: **25 / 29 primitives merged** (T01–T25 all merged 2026-07-07; T18 backlog; T26–T29 backlog issued 2026-07-08). Followups (route landing + adapters) not started — depends on PR #26/#27 land + HC/AI RPC contract Qs.
@@ -64,6 +64,7 @@
 | T28 | WA outbound dispatch **internal RPC** landing (`POST /internal/wa/dispatch`)      | C    | Satrio  | backlog  | —           | PO ruling 2026-07-08 + ADR-0009: internal RPC only (HC caller). No public API from CRM. Consumes T13 + T14 + T16 primitives; DND/quota port supplied as passthrough (HC owns checks). Depends: PR #26 merge + T26 (share config repo wiring). See §8 |
 | T29 | WA conversation + message model + read internal RPC                              | C    | Satrio  | backlog  | —           | PO ruling 2026-07-08 + ADR-0010: new `conversations` + `messages` tables. Slot C authorized to touch `prisma/schema.prisma` + migrations for this task. Internal RPC `POST /internal/wa/conversations.list` + `messages.list`. Depends: PR #26 merge + T27 (webhook upsert messages inbound path). See §8 |
 | T30 | VPS K3s staging deployment — runbook + manifests + CI/CD (ADR-0011)               | C    | Satrio  | backlog  | —           | PO ruling 2026-07-08: staging deploy ke VPS Hetzner (`91.99.194.116`, Ubuntu 26.04, 8GB) via K3s + Traefik + cert-manager + GHCR + GH Actions auto-deploy on push main. Domain `qooma.satrioputrowicaksono.my.id` (JagoanHosting DNS). **Doc-first task** — deliverable = runbook `.md` di `docs/runbooks/` + k8s manifests di `deploy/k8s/integration/` + `.github/workflows/deploy-staging.yml`. Zero `src/` change. See §8 |
+| T31 | Portable service-onboarding template + scaffold script (distill T30)              | C    | Satrio  | backlog  | —           | PO ruling 2026-07-08 (Version C): distill T30 → reusable kit untuk onboard Auth/HC/AI ke cluster K3s yang sama. MD onboarding doc + `deploy/k8s/_template/*.yaml.template` + workflow template + `scripts/scaffold-service.sh`. **Depends T30 approved.** Doc + tooling only, zero `src/` change. See §8 |
 
 ### 1a. Pre-G1 bootstrap queue (MIRRORED into §1 on 2026-06-30 — kept as spec-driven reference)
 
@@ -101,6 +102,7 @@
 | T28           | WA outbound dispatch internal RPC (`POST /internal/wa/dispatch`)                 | C    | ADR-0009; spec §2.4 + §3.1 Outbound               |
 | T29           | WA conversation + message model + read internal RPC                              | C    | ADR-0010; spec §2.4                               |
 | T30           | VPS K3s staging deployment — runbook + manifests + CI/CD                         | C    | ADR-0011                                          |
+| T31           | Portable service-onboarding template + scaffold script (distill T30)             | C    | ADR-0011 (distill)                                |
 
 ---
 
@@ -231,6 +233,7 @@
 | 2026-07-08 | PM-STATUS-PARENT.md §0 + §1 (T26–T29 rows) + §1a (spec-driven ref) + §8 (queue detail) | Task tracker + queue extended untuk 4 task WA CRM surface baru, semua ke Slot C. WA ownership transisi Slot B → Slot C. | T26–T29 | PO |
 | 2026-07-08 | docs/decisions/0011-vps-k3s-staging-deployment.md (baru) | Staging deployment topology = K3s single-node di VPS Hetzner 8GB, Traefik + cert-manager + GHCR + GH Actions auto-deploy. Override ADR-0005 (ECS Fargate) untuk staging env; ADR-0005 tetap valid untuk prod. | T30 | PO |
 | 2026-07-08 | PM-STATUS-PARENT.md §1 (T30 row) + §1a + §8 (queue detail T30) | Task tracker + queue extended untuk 1 task deployment baru (T30), ke Slot C. Doc-first (runbook + k8s manifests + workflow), zero `src/` change. | T30 | PO |
+| 2026-07-08 | PM-STATUS-PARENT.md §0 + §1 (T31 row) + §1a + §4 + §8 (queue detail T31) | T31 issued (Version C per PO): distill T30 → portable service-onboarding template + scaffold script untuk Auth/HC/AI. Depends T30 approved. | T31 | PO |
 
 ---
 
@@ -561,6 +564,57 @@ Reference stack per ADR-0011:
 - **Cross-team courtesy heads-up**: kalau ada dev Auth/HC/AI standing by, invite mereka review runbook sebelum merge (bakal jadi pattern mereka juga).
 - **Executor accountability**: dry-run bukti wajib di PR body (screenshot atau paste log excerpt dari `kubectl` / `curl`) — task ini tidak bisa unit-test, verifikasi = manual run.
 - **Secret leak risk**: strict verify `.gitignore` sebelum push. PM C harus grep `git diff` untuk pattern secret (token, password, key) sebelum ACK PLAN executor.
+
+---
+
+### T31 — Portable service-onboarding template + scaffold script
+
+- **Slot**: C (Satrio)
+- **Owner**: TBD (PM C pick up via PM-STATUS-C.md §2 ASSIGNMENT)
+- **Started**: —
+- **Status**: queued (issued 2026-07-08, depends T30 approved)
+
+#### Scope
+
+Setelah T30 stable + PR merged, distill runbook + manifest T30 (Integration-specific) → **kit portable** untuk onboard Auth/HC/AI ke cluster K3s yang sama tanpa reinvent.
+
+**Version C** (PO ruling 2026-07-08): full template kit + interactive scaffold script.
+
+#### Files yang harus dibuat
+
+**Doc runbook**:
+- `docs/runbooks/service-onboarding-template.md` — generic step-by-step onboarding
+- `docs/runbooks/README.md` — index of runbooks
+
+**Template kit** (`deploy/k8s/_template/`):
+- `namespace.yaml.template`, `configmap.yaml.template`, `secret.template.yaml.template`, `deployment.yaml.template`, `service.yaml.template`, `ingress.yaml.template`, `job-migrate.yaml.template` — placeholder markers `<SERVICE_NAME>`, `<SUBDOMAIN>`, `<PORT>`, `<HAS_WORKER>` conditional, dst
+
+**Workflow template**:
+- `.github/workflows/deploy-staging.yml.template`
+
+**Scaffold script**:
+- `scripts/scaffold-service.sh` — interactive prompt (service name, subdomain, has-worker, uses-prisma, has-dedicated-db, has-redis) → generate `deploy/k8s/<service-name>/` + `.github/workflows/deploy-staging-<service-name>.yml`. Idempotent (refuse overwrite tanpa `--force`).
+
+**Refactor T30 output**:
+- `docs/runbooks/deploy-integration-service.md` (T30) — jadi "example implementation" cite template as source-of-truth
+
+#### T31 DoD
+
+- [ ] `scripts/scaffold-service.sh example-service` menghasilkan folder valid, semua placeholder ter-substitute
+- [ ] Manifest hasil scaffold `kubectl apply --dry-run=client -f deploy/k8s/example-service/` lulus
+- [ ] `service-onboarding-template.md` step-step tested dgn skenario "onboard fake `example-service`" sampai step "wire GH Actions"
+- [ ] Script idempotent: re-run dgn nama sama → refuse tanpa `--force`
+- [ ] Bash `set -euo pipefail` + shellcheck clean
+- [ ] Placeholder markers explicit + terdokumentasi di script top comment
+- [ ] Zero `src/` change
+
+#### Parent PM notes untuk PM C
+
+- **Dependency HARD**: T30 harus **approved** dulu. Jangan ACK PLAN T31 sebelum T30 verdict APPROVED.
+- **Executor same as T30**: Satrio paling paham konteks pattern setelah T30.
+- **Estimasi**: 1 session (~4-6 jam).
+- **Scope discipline**: Bash 100-150 baris cukup. Kalau executor mulai bikin Yeoman/Cookiecutter-level abstraction → REJECT scope creep.
+- **Verification**: transcript "run scaffold-service.sh example-service" + tunjukkan output folder di PR body.
 
 ---
 
