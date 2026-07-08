@@ -2912,6 +2912,175 @@ PM C follow-up actions (batched in this commit)
 
 ---
 
+### ASSIGNMENT T21-followup — claimed by exec-C (Satrio) at H23 (2026-07-08) 23:45
+- Branch: `feat/ota-mailbox-followup`
+- Routed from: PM-STATUS-C.md §1 T21 approved-primitive note "Cron worker + IMAP + HC adapters + integration = T21-followup on Q-C-01/02/09 + `imap-simple` PO approval." Q-C-01/02 ✓ merged; Q-C-09 (HC pending-visit RPC contract) STILL OPEN; `imap-simple` PO approval STILL PENDING. User directive (PLAN-only authorization, direct-post per screenshot): 4 remaining followups approved to PLAN. 7th composition follows stubbed-adapter precedent (T19-fu + T18-fu).
+- Deps status: T21 primitive ✓ (approved H17). Q-C-01/02 ✓ merged; Q-C-09 + `imap-simple` **open** — adapters ship as stubs; worker cron composition lands with stubs so the pipeline is end-to-end integration-testable.
+
+#### PLAN T21-followup — exec-C (Satrio) at H23 (2026-07-08) 23:45
+
+**Scope recap**
+Land runtime cron composition around the T21 OTA poller primitive per spec `04-integration-channels.md §3.3` + MVP §1.3 C5. Ships **narrow "stubbed-IO" scope**: (a) `MailboxImapStubAdapter` (returns empty inbox — no `imap-simple` dependency; when the package is approved, swap 1 file); (b) `HotelCorePendingVisitStubAdapter` (returns `{ visitId: 'stub-<uuid>' }` + logs `hc_rpc_stubbed` per invocation); (c) cron job registration in `worker.ts` (Bull cron, per-hotel per interval; iterates mailboxes from env map + calls `OtaMailboxService.poll(hotelId)`); (d) env `OTA_POLL_INTERVAL_MS` (default 60000) + `OTA_MAILBOX_MAP` JSON `{hotelId: [{mailboxId, imapHost?}]}` — MVP source-of-truth; (e) loud startup warn `msg: 'ota_mailbox.startup', ioAdapters: 'STUB', ratifyQs: 'Q-C-09', poPackages: 'imap-simple'`; (f) integration test verifies cron tick triggers service call.
+
+**Session-start gate** (EXECUTOR-PROTOCOL §2)
+- Identity confirmed ✓ / CLAUDE.md loaded ✓ / spec §3.3 + primitive PM C ACK read ✓
+- Precedent spot-read: T19-fu stubbed-HC + env-map pattern; `worker.ts` bootstrap (has TODO comments for T21/T24 cron registration); `OtaMailboxService.poll` primitive signature.
+- `make check` clean on `main` after PR #35 ✓
+
+**Files to create**
+```
+src/modules/ota-mailbox/adapters/
+├── mailbox-imap-stub.adapter.ts                     (MailboxImapPort → empty inbox; no imap-simple import)
+└── hotel-core-pending-visit-stub.adapter.ts         (HotelCorePendingVisitPort → stub visitId + warn log)
+src/modules/ota-mailbox/__tests__/
+├── mailbox-imap-stub.adapter.test.ts
+├── hotel-core-pending-visit-stub.adapter.test.ts
+└── ota-mailbox.cron.integration.test.ts             (worker cron tick → service call → mailbox-state persist)
+```
+
+**Files to modify**
+- `src/entrypoints/worker.ts` — register OTA poll cron (Bull via `@core/queue`); loop per hotel from env map; call `OtaMailboxService.poll(hotelId)`; loud startup warn.
+- `src/core/config/env.ts` — add `OTA_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(60_000)` + `OTA_MAILBOX_MAP: z.string().optional()`.
+- `.env.example` — 2 example lines.
+
+**Files NOT touched**
+- T21 primitive: `ota-mailbox.service.ts` / `.types.ts` / `.schema.ts` / `.repository.ts` / `ports/**` / parsers / dispatcher.
+- `src/entrypoints/api.ts` / `api-server.ts` — no HTTP route.
+- `package.json` — zero new deps (stub avoids `imap-simple` PO approval).
+
+**GAPs / questions**
+
+- **GAP T21fu-#1 — `imap-simple` PO approval pending**. Stub returns empty inbox unconditionally — composition end-to-end works; when package lands, swap `mailbox-imap-stub.adapter.ts` for real IMAP adapter. Non-blocker.
+- **GAP T21fu-#2 — Q-C-09 (HC pending-visit RPC contract) open**. Stub returns `{ visitId: 'stub-<uuid>' }`; when contract lands, swap 1 file. Sibling to T19-fu/T18-fu HC stubs.
+- **GAP T21fu-#3 — Env `OTA_MAILBOX_MAP` schema**. Options: (a) JSON `{ hotelId: [ { mailboxId, imapHost?, imapUser?, imapPasswordEnc? } ] }` — full config; (b) JSON `{ hotelId: [mailboxId] }` — MVP minimal (stub doesn't need connection details). **My intent**: (b) MVP. Real config lands with imap-simple adapter.
+- **GAP T21fu-#4 — Cron interval**. MVP: 60s per spec §3.3 default. Env `OTA_POLL_INTERVAL_MS`. Non-blocker.
+
+---
+
+### ASSIGNMENT T22-followup — claimed by exec-C (Satrio) at H23 (2026-07-08) 23:55
+- Branch: `feat/qr-provisioning-followup`
+- Routed from: PM-STATUS-C.md §1 T22 approved-primitive note "Router + `pnpm add qrcode` + `pnpm add @aws-sdk/client-s3` + adapters + integration = T22-followup on Q-C-01/02/03/10 + PO package approvals." Q-C-01/02/03 ✓ merged; Q-C-10 (object storage contract) STILL OPEN; `qrcode` + `@aws-sdk/client-s3` PO approvals STILL PENDING. 8th composition, same stubbed-adapter precedent.
+- Deps status: T22 primitive ✓ (approved H18). Q-C-01/02/03 ✓ merged; Q-C-10 + 2 packages **open** — QR renderer + object storage ship as stubs.
+
+#### PLAN T22-followup — exec-C (Satrio) at H23 (2026-07-08) 23:55
+
+**Scope recap**
+Land runtime routes around T22 primitive per spec `04-integration-channels.md §3.4` + MVP §1.3 C6. Ships **narrow "stubbed-IO" scope**: (a) `QrRendererStubAdapter` (returns a fixed placeholder PNG byte buffer — no `qrcode` dependency); (b) `ObjectStorageStubAdapter` (writes bytes to an in-memory `Map<key, Buffer>` and returns synthetic `publicUrl = "stub://qr/{key}"`; download route reads from same in-memory map); (c) routes: `POST /api/integrations/qr/regenerate` + `GET /api/integrations/qr/download` behind `gm_admin` guards; (d) wiring in `api-server.ts`; (e) loud startup warn `msg: 'qr_provisioning.startup', ioAdapters: 'STUB', ratifyQs: 'Q-C-10', poPackages: 'qrcode,@aws-sdk/client-s3'`; (f) integration test asserts route reachability + stub-round-trip (regenerate → download returns the placeholder bytes).
+
+**Files to create**
+```
+src/modules/qr-provisioning/adapters/
+├── qr-renderer-stub.adapter.ts                              (returns fixed 1x1 PNG placeholder bytes)
+└── object-storage-stub.adapter.ts                           (in-memory Map<key, Buffer>; publicUrl "stub://qr/…")
+src/modules/qr-provisioning/qr-provisioning.routes.ts        (POST regenerate + GET download; gm_admin)
+src/modules/qr-provisioning/__tests__/
+├── qr-renderer-stub.adapter.test.ts
+├── object-storage-stub.adapter.test.ts
+├── qr-provisioning.routes.test.ts                           (unit — fastify.inject with mocked service)
+└── qr-provisioning.routes.integration.test.ts               (integration — real Prisma + stubs; regen → download round-trip)
+```
+
+**Files to modify**
+- `src/entrypoints/api-server.ts` — instantiate stubs + `QrService` + register routes with `gmAdminGuards`; loud startup warn.
+- (no env additions — stubs are self-contained.)
+
+**Files NOT touched**
+- T22 primitive: `qr-provisioning.service.ts` / `.types.ts` / `.schema.ts` / `.repository.ts` / `qr-url-builder.ts` / `ports/**`.
+- `package.json` — zero new deps.
+
+**GAPs / questions**
+
+- **GAP T22fu-#1 — 2 PO packages pending**. Stubs sidestep both. Swap 2 files when packages land.
+- **GAP T22fu-#2 — Q-C-10 (object storage contract) open**. Stub uses in-memory Map + `stub://` URL scheme; when contract lands, swap `object-storage-stub.adapter.ts` for real S3 adapter.
+- **GAP T22fu-#3 — Placeholder PNG bytes**. Options: (a) hardcoded 1x1 transparent PNG (valid PNG, tiny); (b) empty buffer; (c) SVG-as-PNG text. **My intent**: (a) — valid PNG so FE preview doesn't 4xx. Non-blocker.
+- **GAP T22fu-#4 — Stub in-memory storage lifecycle**. Ephemeral per-process; lost on restart. Acceptable for MVP composition testing. Real S3 adapter persists.
+- **GAP T22fu-#5 — Download route content-type**. `image/png` regardless of stub/real backend. Non-blocker.
+
+---
+
+### ASSIGNMENT T24-followup-B — claimed by exec-C (Satrio) at H24 (2026-07-09) 00:05
+- Branch: `feat/channel-health-probes-followup`
+- Routed from: PM-STATUS-C.md §1 T24 approved-primitive note "T24-followup-B (probes + cron) queued behind Claude AI SDK PO approval." **T24-followup Part A** (route landing) merged this session; **Part B** ships probe adapters + worker cron. `@anthropic-ai/sdk` PO approval STILL PENDING; WA + Telegram probe HC contracts unclear. 9th composition.
+- Deps status: T24 primitive ✓ (approved H16). T24-fu-A ✓ merged (this session). `@anthropic-ai/sdk` + WA/TG probe contracts **open** — probes ship as stubs.
+
+#### PLAN T24-followup-B — exec-C (Satrio) at H24 (2026-07-09) 00:05
+
+**Scope recap**
+Complete T24 by landing the WRITE side per spec `04-integration-channels.md §7`. Ships **3 probe stub adapters** (WA / Telegram / Claude API — all return `{ ok: true, latencyMs: <random 100-300> }` unconditionally OR configurable per env; when packages / contracts land, swap 3 files) + cron job in `worker.ts` (60s per hotel, iterates `PROVIDER_ORDER`, calls `ChannelHealthService.runProbesForHotel(hotelId)`) + loud startup warn `msg: 'channel_health.startup', probeAdapters: 'STUB', ratifyQs: '—', poPackages: '@anthropic-ai/sdk'` + integration test verifies cron tick creates snapshot rows.
+
+**Files to create**
+```
+src/modules/channel-health/adapters/
+├── whatsapp-health-probe-stub.adapter.ts
+├── telegram-health-probe-stub.adapter.ts
+└── claude-api-health-probe-stub.adapter.ts
+src/modules/channel-health/__tests__/
+├── whatsapp-health-probe-stub.adapter.test.ts
+├── telegram-health-probe-stub.adapter.test.ts
+├── claude-api-health-probe-stub.adapter.test.ts
+└── channel-health.cron.integration.test.ts               (cron tick → 3 probes → 3 snapshots persisted)
+```
+
+**Files to modify**
+- `src/entrypoints/worker.ts` — register health-probe cron; loop per hotel; call `ChannelHealthService.runProbesForHotel(hotelId)`; startup warn.
+- `src/core/config/env.ts` — add `HEALTH_PROBE_INTERVAL_MS: z.coerce.number().int().positive().default(60_000)` + `HEALTH_PROBE_HOTEL_LIST: z.string().optional()` (JSON `["<uuid1>", "<uuid2>", ...]` — MVP source of hotels to probe).
+- `.env.example` — 2 example lines.
+
+**Files NOT touched**
+- T24 primitive: `channel-health.service.ts` / `.debounce.ts` / `.types.ts` / `.schema.ts` / `.repository.ts` / `ports/**` / T24-fu-A route.
+- `api-server.ts` — read side already landed.
+- `package.json` — zero new deps.
+
+**GAPs / questions**
+
+- **GAP T24fuB-#1 — 3 probe contracts unresolved**. WA: needs Meta health-endpoint contract. TG: reuse T20-fu Bot API adapter (`getMe`). Claude: needs `@anthropic-ai/sdk` PO approval. Stubs sidestep all three. Non-blocker.
+- **GAP T24fuB-#2 — `HEALTH_PROBE_HOTEL_LIST` env**. MVP hotel-list source (Auth service enumerates in real world). Empty → probe runs no hotels (harmless idle). Sibling to T21-fu OTA_MAILBOX_MAP pattern.
+- **GAP T24fuB-#3 — Stub latency randomness**. Options: (a) fixed 100ms; (b) `Math.random() * 200 + 100`; (c) env-configurable. **My intent**: (b) — visible variance in the snapshot data for FE dev; deterministic tests use `Math.random` spy. Non-blocker.
+- **GAP T24fuB-#4 — Debounce reconciliation with T24-fu-A optimistic default**. PM C ACK T24-fu-A flagged architectural inconsistency (T23-fu pessimistic-down vs T24-fu-A optimistic-healthy for missing snapshots). Once cron starts running, snapshots exist → both endpoints reflect real status → inconsistency dissolves. Non-blocker; noted for closure of the architectural gap once probes ship.
+
+---
+
+### ASSIGNMENT T25-followup — claimed by exec-C (Satrio) at H24 (2026-07-09) 00:15
+- Branch: `feat/integration-health-socket-emit-followup`
+- Routed from: PM-STATUS-C.md §1 T25 approved-primitive note "Adapter + worker cron composition = T25-followup on Q-C-02/12." Q-C-02 ✓ merged; Q-C-12 (socket transport choice + package) STILL OPEN. 10th composition — completes slot C's followup wave when landed.
+- Deps status: T25 primitive ✓ (approved H20). Q-C-12 + socket lib **open** — publisher ships as stub; wave-2 swap.
+
+#### PLAN T25-followup — exec-C (Satrio) at H24 (2026-07-09) 00:15
+
+**Scope recap**
+Land runtime composition around T25 primitive per spec `04-integration-channels.md §5`. Ships **narrow "stubbed-transport" scope**: (a) `SocketPublisherStubAdapter` (logs `socket_publish_stubbed` per event; no socket transport; no new dep); (b) worker cron composition bridging T24 → T25 — cron tick calls `ChannelHealthService.runProbesForHotel(hotelId)` → collects `HealthChangedEvent[]` → passes to `HealthChangedPublisherService.publishAll(events)`; (c) loud startup warn `msg: 'integration_health_socket_emit.startup', transport: 'STUB', ratifyQs: 'Q-C-12', poPackages: 'socket lib TBD'`; (d) integration test — seed snapshots, trigger cron, assert publisher stub `warn` invocation with expected `HealthChangedEventWireDto` payload.
+
+**Files to create**
+```
+src/modules/integration-health-socket-emit/adapters/
+└── socket-publisher-stub.adapter.ts                              (logs each publish; no transport)
+src/modules/integration-health-socket-emit/__tests__/
+├── socket-publisher-stub.adapter.test.ts
+└── integration-health-socket-emit.cron.integration.test.ts       (T24+T25 pipeline via cron tick)
+```
+
+**Files to modify**
+- `src/entrypoints/worker.ts` — after T24-fu-B cron block, wrap probe invocation with publisher composition: capture events → `publishAll(events)`.
+- (Sharing the same `HEALTH_PROBE_INTERVAL_MS` + `HEALTH_PROBE_HOTEL_LIST` env from T24-fu-B — no new env.)
+
+**Files NOT touched**
+- T25 primitive: `integration-health-socket-emit.service.ts` / `.types.ts` / `.schema.ts` / `ports/**` / `toWirePayload` helper.
+- T24 primitive.
+- `api-server.ts` — no HTTP surface for T25.
+- `package.json` — zero new deps (stub avoids socket lib approval).
+
+**GAPs / questions**
+
+- **GAP T25fu-#1 — Q-C-12 (transport choice + package) pending**. Stub logs to winston; when transport lands, swap 1 file. Non-blocker.
+- **GAP T25fu-#2 — Cron composition order (T24-fu-B ordering dependency)**. This followup depends on T24-fu-B cron block being in place. **My intent**: land T24-fu-B first, then T25-fu; or land both in same PR. Sibling to primitive-wave sequencing. Confirm.
+- **GAP T25fu-#3 — Publisher failure semantics**. T25 primitive aggregates per-event try/catch; adapter throws never bubble to caller. Stub cannot fail (no transport). Non-blocker.
+- **GAP T25fu-#4 — Room/topic scoping deferred**. Q-C-12 covers whether events go to per-hotel rooms, GM broadcast, or a single global topic. Stub doesn't discriminate. Real adapter defers.
+
+---
+
+**All 4 PLANs posted per user direct-authorization (screenshot 2026-07-08 23:40 WIB).** Implementation order suggested per dependency graph: **T22-fu (self-contained routes) → T21-fu (worker cron introduction) → T24-fu-B (worker cron extension) → T25-fu (T24-fu-B composition)**. All 4 follow the T19-fu / T18-fu stubbed-adapter precedent — swap 1-3 files per followup once PO packages + cross-service Qs resolve.
+
+---
 
 ## 3. Slot C open questions (mirror to PARENT §3)
 
