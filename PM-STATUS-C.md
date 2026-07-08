@@ -3080,6 +3080,88 @@ src/modules/integration-health-socket-emit/__tests__/
 
 **All 4 PLANs posted per user direct-authorization (screenshot 2026-07-08 23:40 WIB).** Implementation order suggested per dependency graph: **T22-fu (self-contained routes) → T21-fu (worker cron introduction) → T24-fu-B (worker cron extension) → T25-fu (T24-fu-B composition)**. All 4 follow the T19-fu / T18-fu stubbed-adapter precedent — swap 1-3 files per followup once PO packages + cross-service Qs resolve.
 
+##### PM C CONSOLIDATED ACK — 4 remaining slot-C followups PLAN APPROVED (H24, 2026-07-09)
+
+**Executive**: All 4 PLANs correctly follow the T19-fu / T18-fu stubbed-adapter precedent — 6 prior compositions established the pattern; these 4 close out the wave. Implementation order (**T22 → T21 → T24-fu-B → T25**) matches dependency graph correctly. `## 3.` heading preserved (append-only discipline sustained). Cross-service dependency check performed against `main` — 3 primitives-under-followup verified in place (`OtaPollService`, `ChannelHealthService.runProbesForHotel`, `HealthChangedPublisherService.publishAll`, `QrService.regenerate`).
+
+⚠ **PLAN corrections required BEFORE coding** (executor MUST address at implementation):
+
+**T21-fu — 3 factual PLAN errors + 1 design clarification needed**
+1. **Class name typo**: PLAN says `OtaMailboxService.poll(hotelId)` → actual export is `OtaPollService.pollAllMailboxes()` (`src/modules/ota-mailbox/ota-poll.service.ts:43`).
+2. **Method signature typo**: no `poll(hotelId)` exists; primitive is `pollAllMailboxes()` taking zero args.
+3. **Loop shape wrong**: primitive iterates internally via `repository.listActive()` (Prisma `MailboxState` table) at `ota-poll.service.ts:56`; cron should NOT loop per hotel — call `pollAllMailboxes()` ONCE per tick.
+4. **Design clarification (GAP T21fu-#3)**: how do mailboxes get into `MailboxState` table? The env `OTA_MAILBOX_MAP` needs a purpose — options:
+   - (a) **bootstrap seed** at worker startup — env drives an upsert into `MailboxState` if row doesn't exist (dev-friendly; requires seed logic at startup);
+   - (b) **filter/gate** at cron layer — env limits which hotels the cron polls even if `MailboxState` has more (unusual);
+   - (c) **skip env** entirely — assume rows land in `MailboxState` via seed script or future admin UI; cron is dumb.
+   - **My decision**: (a) is the cleanest MVP. Ship a bootstrap seed step at worker startup: parse `OTA_MAILBOX_MAP` → upsert `MailboxState` rows. Env JSON shape upgraded from PLAN GAP #3 option (b) to `{ hotelId: [{ mailboxId, imapHost, imapUser, imapPasswordEnc }] }` (full config; stub adapter still ignores IMAP fields but the shape is stable for future real adapter). Fail-fast at boot on malformed JSON per T19-fu binding #12 precedent.
+
+**T22-fu — 2 architecture clarifications needed**
+1. **`QrService.download` does NOT exist** — only `regenerate`. Download route must call `ObjectStoragePort.getPngStream(key)` directly at the route layer (route holds both `QrService` + `ObjectStoragePort` references from wiring).
+2. **Key derivation for download**: T22 primitive PM C ACK GAP #4 confirmed deterministic key `qr/{hotelId}.png`. Download route MUST use this same key convention (not query `QrState` Prisma table for `pngUrl` — that's the URL, not the key). Colocate a `qrStorageKeyFor(hotelId)` pure helper in `qr-provisioning.routes.ts` OR export from primitive service if reused elsewhere. Same key derivation MUST be used by the stub's regenerate + download so the in-memory Map round-trip works.
+
+**T24-fu-B — clean; no PLAN corrections**. Just confirm binding conditions below.
+
+**T25-fu — 1 type-mirror check required at implementation**
+1. **`HealthChangedEvent` (T24) vs `HealthChangedEventPayload` (T25)** — T25 primitive VERDICT (H20) approved "local type mirror discipline" meaning `HealthChangedEventPayload` mirrors `HealthChangedEvent` verbatim. If TypeScript accepts structural match at cron-boundary call site (`publishAll(events)` where `events: HealthChangedEvent[]`), no code change needed. If TS rejects, use `as unknown as HealthChangedEventPayload[]` at the cron boundary ONE line (documented at call site as "structural mirror per T25 primitive VERDICT §1656"). Do NOT introduce a converter helper — the mirror is intentionally structural.
+
+---
+
+**Shared binding conditions (all 4 followups — mirror T19-fu / T18-fu pattern)**
+
+1. **Stub filename discipline** — `-stub.adapter.ts` suffix; header docstring cites open Q(s) + package(s) pending.
+2. **Per-invocation `warn`** where applicable — write-side stubs (HC pending-visit, socket publisher, probe adapters returning `ok`) log per-invocation with structured payload.
+3. **Loud startup warn** in `worker.ts` (T21/T24-fu-B/T25) and `api-server.ts` (T22) with `msg`, `ratifyQs`, `poPackages` fields — ops signal.
+4. **Env JSON-parse fail-fast at boot** — malformed non-empty JSON → `TypeError` at ctor. Empty string → empty structure. T19-fu binding #12 pattern verbatim.
+5. **Env `.optional()`** — new env fields (`OTA_MAILBOX_MAP`, `OTA_POLL_INTERVAL_MS`, `HEALTH_PROBE_HOTEL_LIST`, `HEALTH_PROBE_INTERVAL_MS`) all `.optional()` / `.default(...)`. Preserves cross-slot fixture compatibility per Q-C-16.
+6. **Zero primitive touches** — verify via `git status --short` on SUBMIT per followup.
+7. **Zero package.json touches** — cumulative pnpm PO queue UNCHANGED at 5.
+8. **`.js` extension discipline** — 0 `.ts` import extensions.
+9. **Route/adapter coverage ≥ 90%** stmt/branch/func/line per followup.
+10. **`make check` PASS** per followup.
+11. **Test naming**: `should <expected> when <condition>`.
+12. **PII discipline** where applicable — T22 stub download bytes: no logging of routing IDs. T24-fu-B probe stubs: no leak of hotel-specific identifiers. T25 publisher stub: log `event` name + hotel_id but never raw internal identifiers.
+13. **Cron discipline (T21/T24-fu-B/T25)** — use `@core/queue` Bull cron (T07 primitive). NOT `setInterval`. Graceful shutdown wired in `worker.ts` existing `shutdown()`.
+14. **Integration test cron-tick pattern** — Bull test harness (or immediate-fire mock) triggers 1 tick; assert observable side-effect (T21: snapshot persisted; T24-fu-B: `channel_health_snapshots` rows; T25: publisher stub `warn` called with wire payload). Skip-without-`DATABASE_URL` where DB is required per T17/T20/T23/T19/T24/T18-fu precedent.
+15. **`.eslintrc.cjs`** already on main via T19-fu merge; NO additional edit needed (T18-fu precedent).
+16. **Response schema `.parse()` at integration where applicable** — T22 routes: apply `QrRegenerateResponseSchema.parse(res.json())` on `POST /api/integrations/qr/regenerate`. T21/T24-fu-B/T25: no HTTP response (cron-side), skip.
+17. **`gm_admin` guard on T22 routes** — `preHandler = [...gmAdminGuards]`, integration tests assert 401 + 403.
+18. **Content-type `image/png` on T22 download route** — response headers include `Content-Type: image/png`.
+19. **T25 cron ordering dependency (GAP T25fu-#2)** — ACK: land T24-fu-B first (worker cron block), then T25-fu (probe-invocation wrap). Sibling to primitive-wave sequencing.
+20. **Startup log payload discipline** — all 4 followups' startup warns include `module`, `ratifyQs` (or `'—'`), `poPackages` (or `'—'`) fields as consistent shape for ops tooling.
+
+**Per-PLAN GAP resolutions**
+
+- **T21-fu GAP #1** (`imap-simple` pending) — ACK stub.
+- **T21-fu GAP #2** (Q-C-09 open) — ACK stub with `visitId: 'stub-<uuid>'` shape.
+- **T21-fu GAP #3** (env shape) — **UPGRADED**: use full config `{ hotelId: [{ mailboxId, imapHost, imapUser, imapPasswordEnc }] }`; env is bootstrap SEED for `MailboxState` table (see corrections above).
+- **T21-fu GAP #4** (cron interval) — ACK `OTA_POLL_INTERVAL_MS.default(60_000)`.
+- **T22-fu GAP #1-#5** — ACK all as specified.
+- **T24-fu-B GAP #1-#4** — ACK all. GAP #4 note on inconsistency-dissolves-when-cron-runs is architecturally correct.
+- **T25-fu GAP #1** (Q-C-12 pending) — ACK stub.
+- **T25-fu GAP #2** (cron ordering) — ACK: T24-fu-B lands first.
+- **T25-fu GAP #3** (publisher failure semantics) — ACK; per-event try-catch in primitive means stubs cannot fail.
+- **T25-fu GAP #4** (room/topic scoping) — ACK deferred to Q-C-12 real transport.
+
+**Suggested implementation order** (matches executor's proposal, dependency-verified):
+
+1. **T22-fu** — self-contained; no `worker.ts` touch. Land first.
+2. **T21-fu** — introduces first `worker.ts` cron block + seed logic. Corrections above must be applied.
+3. **T24-fu-B** — extends `worker.ts` with health-probe cron block. Independent of T21 cron block (side-by-side registration).
+4. **T25-fu** — wraps T24-fu-B's `runProbesForHotel(hotelId)` call to pipe events through `publishAll`. Must land AFTER T24-fu-B.
+
+Each will get its own SUBMIT block + branch + PR + PM C VERDICT. This ACK covers PLAN approval only — bindings audit will occur per-followup at SUBMIT time.
+
+**Milestone target**: All 4 approvals → **10 / 10 slot-C followups approved** (T24-fu counted as A + B). Wave complete. Only remaining slot-C work then = T26-T31 (WA CRM surface + deployment) new backlog.
+
+**Carry-over from prior VERDICTs** (still in effect for all 4):
+- `throw new Error(` at entrypoint tolerated (Q-C-15). Route/adapter runtime must use AppError subclasses.
+- Winston logger no-op observation (Q-C-14) — contract tests for logger calls remain structural.
+- Q-C-13 (Telegram webhook secret) — not applicable.
+- Q-C-16 pattern extended to new env fields (all `.optional()`).
+
+Proceed on the 4 branches. Post SUBMIT per followup when: PLAN corrections applied + all 20 shared bindings + per-followup GAP resolutions honored + `make check` green + drift-scans clean.
+
 ---
 
 ## 3. Slot C open questions (mirror to PARENT §3)
