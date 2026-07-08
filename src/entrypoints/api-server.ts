@@ -19,11 +19,20 @@ import { loadConfig } from '@core/config/env.js';
 import { createLogger } from '@core/logger/logger.js';
 import { db } from '@core/prisma/prisma-client.js';
 
+import { EnvHotelSlugLookup } from '@modules/telegram/adapters/hotel-slug-lookup.adapter.js';
+import { StaffLookupStubAdapter } from '@modules/telegram/adapters/staff-lookup-stub.adapter.js';
+import { TelegramWebhookSecretResolver } from '@modules/telegram/adapters/telegram-webhook-secret.adapter.js';
+import { TicketActionStubAdapter } from '@modules/telegram/adapters/ticket-action-stub.adapter.js';
+import { telegramInboundRoutes } from '@modules/telegram/telegram-inbound.routes.js';
+import { TelegramInboundService } from '@modules/telegram/telegram-inbound.service.js';
+import { TelegramWebhookEventsRepository } from '@modules/telegram/telegram-webhook-events.repository.js';
 import { TelegramConfigRepository } from '@modules/telegram/telegram.repository.js';
 import { telegramRoutes } from '@modules/telegram/telegram.routes.js';
 import { TelegramConfigService } from '@modules/telegram/telegram.service.js';
 import { registerErrorHandler } from '@plugins/error-handler.plugin.js';
+import { registerWebhookRawBody, verifyWebhookSignature } from '@plugins/hmac-validator.plugin.js';
 import { jwtAuthGuard, requireRole } from '@plugins/jwt-auth.plugin.js';
+import { createSlugResolver, resolveTenantFromSlug } from '@plugins/tenant-resolver.plugin.js';
 
 const CORRELATION_HEADER = 'x-correlation-id';
 
@@ -74,7 +83,39 @@ export async function buildServer(): Promise<FastifyInstance> {
     guards: gmAdminGuards,
   });
 
+  // T19-followup: Telegram inbound webhook (spec §2.3 + §3.2 + §4.6-4.7).
+  // Raw-body parser + tenant resolver + signature guard compose in order.
+  // HC RPC adapters ship as stubs pending Q-C-06 + Q-C-07 (PLAN GAP #1).
+  registerWebhookRawBody(app);
+  const webhookRepo = new TelegramWebhookEventsRepository(db);
+  const secretResolver = new TelegramWebhookSecretResolver(telegramRepo);
+  const slugAdapter = new EnvHotelSlugLookup(config.TELEGRAM_WEBHOOK_HOTEL_SLUG_MAP ?? '');
+  const slugResolver = createSlugResolver({ lookup: (slug) => slugAdapter.lookup(slug) });
+  const inboundService = new TelegramInboundService(
+    new StaffLookupStubAdapter(logger),
+    new TicketActionStubAdapter(logger),
+    logger,
+  );
+  await app.register(telegramInboundRoutes, {
+    service: inboundService,
+    repo: webhookRepo,
+    tenantResolver: resolveTenantFromSlug({ resolver: slugResolver }),
+    signatureGuard: verifyWebhookSignature({
+      provider: 'telegram',
+      resolveSecret: (req) =>
+        secretResolver.resolveSecret({ hotelId: requireHotelIdForSecret(req.hotelId) }),
+    }),
+    logger,
+  });
+
   return app;
+}
+
+function requireHotelIdForSecret(candidate: string | undefined): string {
+  if (candidate === undefined || candidate === '') {
+    throw new Error('hotelId must be resolved before signature verification');
+  }
+  return candidate;
 }
 
 export async function shutdownServer(app: FastifyInstance): Promise<void> {

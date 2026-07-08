@@ -31,6 +31,7 @@ Pakai template di [0000-template.md](./0000-template.md). Filename: `<nomor-4-di
 | [0008](./0008-repo-scope-integration.md) | Repo scope = Integration / Channels service | accepted |
 | [0009](./0009-wa-integration-pure-boundary.md) | WA integration = pure integration layer (DND + quota di Hotel Core) | accepted |
 | [0010](./0010-wa-conversation-model.md) | WA conversation + message model (Integration owns storage) | accepted |
+| [0011](./0011-vps-k3s-staging-deployment.md) | Staging deployment = single-VPS K3s (Hetzner 8GB) | accepted |
 
 ## Prinsip
 

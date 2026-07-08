@@ -39,6 +39,11 @@ const EnvSchema = z.object({
   JWT_REFRESH_TTL: z.string().default('30d'),
   ENCRYPTION_KEY: z.string().length(64),
   ENCRYPTION_KEY_VERSION: z.string().default('v1'),
+  // Dev/MVP hotel-slug → hotel_id map for the Telegram inbound webhook
+  // (`POST /webhook/telegram/:hotel_slug`). JSON blob `{ "slug": "<uuid>", ... }`.
+  // Empty → every slug 404s. A proper Auth-service RPC lookup replaces
+  // this adapter once the Auth contract lands.
+  TELEGRAM_WEBHOOK_HOTEL_SLUG_MAP: z.string().optional(),
 
   // Rate limit
   RATE_LIMIT_GLOBAL_PER_MIN: z.coerce.number().int().positive().default(100),
