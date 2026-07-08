@@ -1,39 +1,64 @@
 /**
- * Entrypoint: Bull queue worker process.
+ * Entrypoint: Bull queue worker — Q-C-02 sibling.
  *
- * Tanggung jawab:
- * - Register Bull queues + processors dari semua modul
- * - Scheduler untuk job berulang (kalau ada)
- * - Graceful drain saat SIGTERM
+ * Responsibilities:
+ * - Load validated config (`@core/config/env`).
+ * - Establish Prisma singleton lifecycle (so worker cron jobs can persist).
+ * - Graceful shutdown on SIGTERM/SIGINT — closes Bull queues + Prisma.
+ *
+ * Deferred to T##-followup:
+ * - T21 OTA IMAP poll cron registration (60s per hotel).
+ * - T24 channel-health probe cron registration (60s per hotel).
+ * - T14 WA outbound retry-queue processor.
+ * - T25 socket-emit consumer bridging T24 → `integration:health_changed`.
+ *
+ * The entrypoint stays intentionally minimal: it holds the process open
+ * and provides shutdown discipline. Queue registrations wire in at each
+ * primitive's followup PR, keeping module ownership clean.
  */
 
-export {}; // ESM module marker
+import { loadConfig } from '@core/config/env.js';
+import { db } from '@core/prisma/prisma-client.js';
 
-// TODO(boilerplate): implementasi setelah Bull queue factory siap.
+let shuttingDown = false;
 
-async function main(): Promise<void> {
-  // const config = loadConfig();
-  // const logger = createLogger({ service: 'worker', level: config.LOG_LEVEL });
-  // const services = await buildServices(config);
-  //
-  // // Register processors
-  // fooQueue.process('process_something', config.WORKER_CONCURRENCY_DEFAULT, fooProcessor);
-  //
-  // // Schedule repeatable jobs
-  // await fooQueue.add('process_something', {}, { repeat: { cron: '0 * * * *' } });
-  //
-  // process.on('SIGTERM', async () => {
-  //   logger.info('SIGTERM received, draining queues...');
-  //   await fooQueue.close();
-  //   process.exit(0);
-  // });
-  //
-  // logger.info('[worker] Started');
-
-  console.warn('[worker] Entrypoint stub — implementasi setelah core/queue siap.');
+async function shutdown(): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  // T##-followup: await Promise.all([fooQueue.close(), barQueue.close()]);
+  await db.$disconnect();
 }
 
-main().catch((err) => {
+async function main(): Promise<void> {
+  const config = loadConfig();
+
+  const handleTerm = (signal: NodeJS.Signals): void => {
+    // eslint-disable-next-line no-console
+    console.warn(`[worker] ${signal} received, draining...`);
+    void shutdown()
+      .then(() => process.exit(0))
+      .catch((err: unknown) => {
+        // eslint-disable-next-line no-console
+        console.error('[worker] error during shutdown:', err);
+        process.exit(1);
+      });
+  };
+  process.on('SIGTERM', handleTerm);
+  process.on('SIGINT', handleTerm);
+
+  // eslint-disable-next-line no-console
+  console.warn(
+    `[worker] started (env=${config.NODE_ENV}); queue registrations arrive with T##-followup PRs.`,
+  );
+
+  // Keep the process alive until a signal arrives; Bull processors will
+  // hook here once the followup PRs land.
+  await new Promise<void>(() => {
+    /* never resolves — signal handlers drive shutdown */
+  });
+}
+
+main().catch((err: unknown) => {
   // eslint-disable-next-line no-console
   console.error('Fatal worker error:', err);
   process.exit(1);

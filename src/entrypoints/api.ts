@@ -1,44 +1,43 @@
 /**
- * Entrypoint: HTTP API server (Fastify).
+ * Entrypoint: HTTP API server (Fastify) — Q-C-02 resolution.
  *
- * Tanggung jawab:
- * - Register Fastify plugins (auth, hmac-validator, rate-limit, cors, error-handler)
- * - Wire up adapter → port → service (manual DI)
- * - Register module routes
- * - Graceful shutdown
+ * This file is the runtime entry only. All wiring lives in
+ * `api-server.ts` so integration tests can share the same server
+ * assembly without triggering `main()` on import.
+ *
+ * Responsibilities:
+ * - Load validated config (`@core/config/env`).
+ * - Bring up the server via `buildServer()`.
+ * - Listen on `config.API_HOST` / `config.API_PORT`.
+ * - Graceful shutdown on SIGTERM/SIGINT — `shutdownServer` closes
+ *   Fastify + the Prisma singleton.
  */
 
-export {}; // ESM module marker — prevents global scope collision with worker.ts
+import { loadConfig } from '@core/config/env.js';
 
-// TODO(boilerplate): implementasi setelah dependencies install + core modules siap.
-//
-// import Fastify from 'fastify';
-// import { loadConfig } from '@core/config/env.js';
-// import { createLogger } from '@core/logger/logger.js';
-// ... wire up
+import { buildServer, shutdownServer } from './api-server.js';
 
 async function main(): Promise<void> {
-  // const config = loadConfig();
-  // const logger = createLogger({ service: 'api', level: config.LOG_LEVEL });
-  // const fastify = Fastify({ logger });
-  //
-  // await fastify.register(corsPlugin);
-  // await fastify.register(helmetPlugin);
-  // await fastify.register(rateLimitPlugin);
-  // await fastify.register(correlationIdPlugin);
-  // await fastify.register(authJwtPlugin);
-  //
-  // const services = await buildServices(config);
-  // fastify.decorate('services', services);
-  //
-  // await fastify.register(yourRoutes, { prefix: '/api' });
-  //
-  // await fastify.listen({ port: config.API_PORT, host: config.API_HOST });
+  const config = loadConfig();
+  const app = await buildServer();
 
-  console.warn('[api] Entrypoint stub — implementasi setelah core/plugins siap.');
+  const handleTerm = (signal: NodeJS.Signals): void => {
+    app.log.info({ signal }, 'shutting down');
+    void shutdownServer(app)
+      .then(() => process.exit(0))
+      .catch((err: unknown) => {
+        app.log.error({ err }, 'error during shutdown');
+        process.exit(1);
+      });
+  };
+  process.on('SIGTERM', handleTerm);
+  process.on('SIGINT', handleTerm);
+
+  await app.listen({ port: config.API_PORT, host: config.API_HOST });
+  app.log.info({ port: config.API_PORT, host: config.API_HOST }, 'api server listening');
 }
 
-main().catch((err) => {
+main().catch((err: unknown) => {
   // eslint-disable-next-line no-console
   console.error('Fatal startup error:', err);
   process.exit(1);
