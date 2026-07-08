@@ -13,7 +13,7 @@
 ## 0. Current focus (global)
 
 - **Day**: H12+ (bootstrapped 2026-06-29 from core-backend infra; scope per H12 PO ruling; task tracker activated 2026-06-30)
-- **Phase**: G1 tail — foundation Q-C-01/05 resolved (PR #25 merged); Q-C-02/03 resolved on PR #26 (CI green, awaiting merge); T17-followup on PR #27. WA CRM surface (T26–T29) issued 2026-07-08 per PO ruling — all Slot C.
+- **Phase**: G1 tail — foundation Q-C-01/05 resolved (PR #25 merged); Q-C-02/03 resolved on PR #26 (CI green, awaiting merge); T17-followup on PR #27. WA CRM surface (T26–T29) + VPS K3s staging deployment (T30) issued 2026-07-08 per PO ruling — all Slot C.
 - **Active gate**: G1 — Boilerplate + Prisma schema ready (kriteria default `PM-AGENT.md §5`; PO konfirmasi)
 - **Active devs**: A (Nathan) idle post-foundation · B (Nanak) idle — WA ownership transitioned to C per PO ruling 2026-07-08 (ADR-0009) · C (Satrio) active, WA CRM surface + Telegram followups
 - **Progress (global)**: **25 / 29 primitives merged** (T01–T25 all merged 2026-07-07; T18 backlog; T26–T29 backlog issued 2026-07-08). Followups (route landing + adapters) not started — depends on PR #26/#27 land + HC/AI RPC contract Qs.
@@ -63,6 +63,7 @@
 | T27 | WA inbound webhook route + forward to HC/AI internal RPC                          | C    | Satrio  | backlog  | —           | PO ruling 2026-07-08. Meta-facing `POST /webhook/whatsapp/:hotel_slug`. Composes T04 HMAC + T12 ingest + T15 receipts + ADR-0010 messages upsert. Depends: PR #26 merge + Q-A-04 (HMAC secret source) parked with placeholder + Q-B-04/05 (HC/AI RPC adapters, stub-OK for MVP land). See §8 |
 | T28 | WA outbound dispatch **internal RPC** landing (`POST /internal/wa/dispatch`)      | C    | Satrio  | backlog  | —           | PO ruling 2026-07-08 + ADR-0009: internal RPC only (HC caller). No public API from CRM. Consumes T13 + T14 + T16 primitives; DND/quota port supplied as passthrough (HC owns checks). Depends: PR #26 merge + T26 (share config repo wiring). See §8 |
 | T29 | WA conversation + message model + read internal RPC                              | C    | Satrio  | backlog  | —           | PO ruling 2026-07-08 + ADR-0010: new `conversations` + `messages` tables. Slot C authorized to touch `prisma/schema.prisma` + migrations for this task. Internal RPC `POST /internal/wa/conversations.list` + `messages.list`. Depends: PR #26 merge + T27 (webhook upsert messages inbound path). See §8 |
+| T30 | VPS K3s staging deployment — runbook + manifests + CI/CD (ADR-0011)               | C    | Satrio  | backlog  | —           | PO ruling 2026-07-08: staging deploy ke VPS Hetzner (`91.99.194.116`, Ubuntu 26.04, 8GB) via K3s + Traefik + cert-manager + GHCR + GH Actions auto-deploy on push main. Domain `qooma.satrioputrowicaksono.my.id` (JagoanHosting DNS). **Doc-first task** — deliverable = runbook `.md` di `docs/runbooks/` + k8s manifests di `deploy/k8s/integration/` + `.github/workflows/deploy-staging.yml`. Zero `src/` change. See §8 |
 
 ### 1a. Pre-G1 bootstrap queue (MIRRORED into §1 on 2026-06-30 — kept as spec-driven reference)
 
@@ -99,6 +100,7 @@
 | T27           | WA inbound webhook route + HC/AI forward + `messages` upsert                     | C    | ADR-0009 + ADR-0010; spec §2.3 + §3.1 Inbound     |
 | T28           | WA outbound dispatch internal RPC (`POST /internal/wa/dispatch`)                 | C    | ADR-0009; spec §2.4 + §3.1 Outbound               |
 | T29           | WA conversation + message model + read internal RPC                              | C    | ADR-0010; spec §2.4                               |
+| T30           | VPS K3s staging deployment — runbook + manifests + CI/CD                         | C    | ADR-0011                                          |
 
 ---
 
@@ -227,6 +229,8 @@
 | 2026-07-08 | docs/decisions/0009-wa-integration-pure-boundary.md (baru); docs/spec/04-integration-channels.md §2.4 + §3.1 Outbound/Inbound | WA integration = pure integration layer. DND + quota di HC (bukan Integration). Send + conversation read = internal RPC only. Config CRUD tetap public `gm_admin` di Integration (H12 stand). Q-B-08 + Q-B-09 closed from Integration side. | T26–T29 issued 2026-07-08 | PO |
 | 2026-07-08 | docs/decisions/0010-wa-conversation-model.md (baru); docs/spec/04-integration-channels.md §2.4 + §3.1 Inbound step 5 | New `conversations` + `messages` tables (ADR-0010 DDL). Integration owns storage, HC exposes public read to CRM via internal RPC. Realtime + attachment = phase 2. | T29 | PO |
 | 2026-07-08 | PM-STATUS-PARENT.md §0 + §1 (T26–T29 rows) + §1a (spec-driven ref) + §8 (queue detail) | Task tracker + queue extended untuk 4 task WA CRM surface baru, semua ke Slot C. WA ownership transisi Slot B → Slot C. | T26–T29 | PO |
+| 2026-07-08 | docs/decisions/0011-vps-k3s-staging-deployment.md (baru) | Staging deployment topology = K3s single-node di VPS Hetzner 8GB, Traefik + cert-manager + GHCR + GH Actions auto-deploy. Override ADR-0005 (ECS Fargate) untuk staging env; ADR-0005 tetap valid untuk prod. | T30 | PO |
+| 2026-07-08 | PM-STATUS-PARENT.md §1 (T30 row) + §1a + §8 (queue detail T30) | Task tracker + queue extended untuk 1 task deployment baru (T30), ke Slot C. Doc-first (runbook + k8s manifests + workflow), zero `src/` change. | T30 | PO |
 
 ---
 
@@ -467,6 +471,98 @@ New `conversations` + `messages` tables per ADR-0010 DDL. Slot C is authorized t
 - Rasionalisasi slot pick: PO explicit approval 2026-07-08 for Slot C to own schema for this task. Coordinate with Slot A (Nathan) as courtesy notification (post to PM-STATUS-PARENT.md §10 cross-dev coord), no ACK needed.
 - Dependency: PR #26 merge. T27 consumes `conversations` + `messages` in inbound path, T28 consumes in outbound path — sequencing: T29 before T27/T28 impl OR ship T27/T28 without messages upsert then follow-up. Recommend **T29 first** to avoid T27/T28 revisit.
 - Coordination needed with: Nathan (courtesy heads-up on schema touch). No dependency block.
+
+---
+
+### T30 — VPS K3s staging deployment (runbook + manifests + CI/CD)
+
+- **Slot**: C (Satrio)
+- **Owner**: TBD (PM C pick up via PM-STATUS-C.md §2 ASSIGNMENT)
+- **Started**: —
+- **Status**: queued (issued 2026-07-08, ADR-0011)
+
+#### Scope
+
+Deliver a working staging deployment untuk service Integration ke VPS Hetzner (`91.99.194.116`, Ubuntu 26.04, 8GB) via K3s. **Doc-first task** — output = runbook markdown + Kubernetes manifests + CI/CD workflow. Zero `src/` change kecuali (a) optional Dockerfile healthcheck tweak dan (b) `.gitignore` update.
+
+Reference stack per ADR-0011:
+- K3s single-node (K8s distro)
+- Traefik (K3s default Ingress) + `cert-manager` + Let's Encrypt HTTP-01
+- Postgres 15 StatefulSet (Bitnami helm) + Redis 7 (Bitnami helm) di dalam cluster
+- GHCR (`ghcr.io/satriowicaksn/integration-backend`) sebagai container registry
+- GH Actions push `main` → build image → push GHCR → SSH ke VPS → `kubectl set image` + rollout status
+- Subdomain: `integration-staging.qooma.satrioputrowicaksono.my.id` (JagoanHosting DNS, manual A record)
+- Secret storage: `kubectl apply -f secret.staging.yaml` gitignored (sealed-secrets = future work)
+
+#### Files yang harus dibuat
+
+**Runbook** (`docs/runbooks/`):
+- `vps-k3s-bootstrap.md` — one-time VPS provisioning:
+  - SSH hardening (disable root login setelah `deploy` user created, key-only auth, UFW allow 22/80/443)
+  - Install Docker + K3s (`curl -sfL https://get.k3s.io | sh -`)
+  - Install `cert-manager` via helm + `ClusterIssuer` untuk Let's Encrypt HTTP-01
+  - Install Postgres (Bitnami helm chart, StatefulSet + PVC via K3s local-path)
+  - Install Redis (Bitnami helm chart, standalone)
+  - Create dedicated `deploy` user + SSH key untuk GH Actions (bukan personal key)
+  - Namespace + ResourceQuota untuk `integration-staging`
+  - Verification checklist: `kubectl get nodes`, cert-manager ready, Postgres accessible internally
+- `deploy-integration-service.md` — service-specific deploy:
+  - DNS setup di JagoanHosting: A record `integration-staging` → `91.99.194.116`
+  - GHCR image pull secret creation di namespace
+  - Secret create dari template
+  - Prisma migrate Job apply → wait completion
+  - Manifest apply (deployment + service + ingress)
+  - Rollout status + smoke test (`curl https://integration-staging.qooma.../health`)
+  - Rollback procedure (`kubectl rollout undo`)
+- `ci-cd-github-actions.md` — deploy flow explanation:
+  - GH secrets checklist: `VPS_SSH_HOST`, `VPS_SSH_USER`, `VPS_SSH_PRIVATE_KEY`, `VPS_KUBECONFIG_B64`, `GHCR_TOKEN` (optional if using default `GITHUB_TOKEN`)
+  - Workflow trigger explanation
+  - Troubleshooting matrix (deploy fail → check kubectl logs, image pull fail → GHCR auth, cert not issued → cert-manager events, DNS not propagated → dig)
+
+**Manifests** (`deploy/k8s/integration/`):
+- `namespace.yaml` — namespace + ResourceQuota (RAM cap sesuai ADR-0011 envelope)
+- `configmap.yaml` — non-secret env (LOG_LEVEL, PORT, etc.)
+- `secret.template.yaml` — template gitignored: DATABASE_URL, REDIS_URL, JWT secrets, ENCRYPTION_KEY, INTERNAL_RPC_SECRET, semua secret di `src/core/config/env.ts`
+- `deployment.yaml` — api Deployment (2 replica) + worker Deployment (1 replica) + readiness/liveness probe + resource limits sesuai ADR-0011 envelope
+- `service.yaml` — ClusterIP untuk api pod (port 3000)
+- `ingress.yaml` — Traefik IngressRoute (atau standard Ingress) + `cert-manager` annotations
+- `job-migrate.yaml` — Prisma migrate Job
+
+**Workflow** (`.github/workflows/`):
+- `deploy-staging.yml` — trigger on push to `main` (path filters), build multi-stage Docker image, push GHCR (image + git-sha tag), SSH ke VPS, run migrate Job, `kubectl set image` deployment/api + deployment/worker, wait rollout status, smoke test
+
+**Misc**:
+- `.gitignore` — add `deploy/k8s/**/secret.staging.yaml`
+- (optional) `Dockerfile` — verify healthcheck endpoint / EXPOSE 3000 / LABELs for GHCR
+
+#### Files yang akan dimodifikasi
+
+- `.gitignore` — tambah secret gitignore rule
+- `Dockerfile` (optional, minor) — kalau perlu tambah HEALTHCHECK atau label
+
+#### T30 DoD
+
+- [ ] `docs/runbooks/vps-k3s-bootstrap.md` di-dry-run oleh PO ke VPS 91.99.194.116, semua step exit 0 (screenshot / log excerpt di PR)
+- [ ] `docs/runbooks/deploy-integration-service.md` di-dry-run: service Integration accessible via `https://integration-staging.qooma.satrioputrowicaksono.my.id/health` return 200 dengan TLS valid dari Let's Encrypt prod
+- [ ] `GET /health` return 200 (health endpoint sudah ada di api plugin)
+- [ ] `.github/workflows/deploy-staging.yml` trigger sukses: sample commit dummy ke main → auto-build + push GHCR + deploy VPS + rollout status green
+- [ ] Prisma migration Job jalan (fresh DB apply full migration; re-run = no-op)
+- [ ] Rollback procedure dokumentasi + tested: `kubectl rollout undo deployment/api -n integration-staging` return service ke previous image
+- [ ] Semua secret staging tidak leaked ke git (verify via `git log --all --full-history -- 'deploy/**/secret.staging.yaml'` empty)
+- [ ] Resource baseline verified: `kubectl top node` < 6 GB idle setelah deploy semua komponen (Postgres, Redis, Integration api+worker)
+- [ ] Zero `src/` change kecuali Dockerfile minor + `.gitignore` (drift scan: `git diff main...HEAD -- src/` = empty)
+
+#### Parent PM notes untuk PM C
+
+- **Rasionalisasi slot pick**: PO ruling 2026-07-08 — Slot C aktif; Slot A idle post-foundation; Slot B idle post-WA milestone. Task doc-first, tidak butuh Slot A schema expertise atau Slot B WA domain.
+- **Dependency**: **Independent** dari T26–T29. Bisa dikerjakan paralel dengan T26/T27/T28/T29 (deploy skeleton bisa naik dgn `main` state saat ini; setiap T26–T29 merge = trigger auto-redeploy setelahnya).
+- **Rekomendasi sequence**: PM C boleh assign T30 duluan sebelum T26 kalau PO mau langsung lihat pipeline jalan; atau paralel dengan T29. Executor bagi dua pass: (1) bootstrap + first manual deploy pass; (2) CI/CD workflow + auto-deploy pass.
+- **Shared-infra risk**: pertama kali repo ini menambah `deploy/` folder + `.github/workflows/deploy-*.yml`. Sets pattern untuk Auth/HC/AI service onboarding nanti. Runbook harus mudah "copy for next service".
+- **Cross-team courtesy heads-up**: kalau ada dev Auth/HC/AI standing by, invite mereka review runbook sebelum merge (bakal jadi pattern mereka juga).
+- **Executor accountability**: dry-run bukti wajib di PR body (screenshot atau paste log excerpt dari `kubectl` / `curl`) — task ini tidak bisa unit-test, verifikasi = manual run.
+- **Secret leak risk**: strict verify `.gitignore` sebelum push. PM C harus grep `git diff` untuk pattern secret (token, password, key) sebelum ACK PLAN executor.
+
+---
 
 <!-- TEMPLATE — copy untuk task baru di queue:
 
