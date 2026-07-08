@@ -19,6 +19,8 @@ import { loadConfig } from '@core/config/env.js';
 import { createLogger } from '@core/logger/logger.js';
 import { db } from '@core/prisma/prisma-client.js';
 
+import { ChannelHealthRepository } from '@modules/channel-health/channel-health.repository.js';
+import { channelHealthRoutes } from '@modules/channel-health/channel-health.routes.js';
 import { TelegramConfigRepository } from '@modules/telegram/telegram.repository.js';
 import { telegramRoutes } from '@modules/telegram/telegram.routes.js';
 import { TelegramConfigService } from '@modules/telegram/telegram.service.js';
@@ -71,6 +73,15 @@ export async function buildServer(): Promise<FastifyInstance> {
   const telegramService = new TelegramConfigService(telegramRepo, logger);
   await app.register(telegramRoutes, {
     service: telegramService,
+    guards: gmAdminGuards,
+  });
+
+  // T24-followup: read-only GET /api/integrations/health (spec §2.2).
+  // Probe adapters + worker cron deferred to T24-followup-B pending AI SDK
+  // PO approval + Claude/WA/TG probe contracts.
+  const healthRepo = new ChannelHealthRepository(db);
+  await app.register(channelHealthRoutes, {
+    repository: healthRepo,
     guards: gmAdminGuards,
   });
 
