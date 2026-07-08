@@ -2293,6 +2293,75 @@ PM C follow-up actions (I'll batch in this commit)
 
 → §1 task tracker updated. Row mirrored to PARENT §1. Roll-up posted to PARENT §2.
 
+### ASSIGNMENT T18-followup — claimed by exec-C (Satrio) at H23 (2026-07-08) 22:15
+- Branch: `feat/telegram-dept-routing-followup`
+- Routed from: PM-STATUS-C.md §1 T18 approved-primitive note "Adapter (shared-DB direct-write vs RPC-HC) defers to T18-followup pending Q-OPS-06." Q-OPS-06 (shared-DB vs RPC to HC `departments`) + Q-CONTRACT-25 (cross-service write contract) STILL OPEN at Parent PM. User directive: "Ok Done, continue to the next T" — treated as informal PM authorization per 5-followup precedent (T17/T20/T23/T19/T24 all landed on same user-directed pattern). This is 6th composition, same **stubbed-HC scope** as T19-followup.
+- Deps status: T18 primitive ✓ (approved H23 attempt 1); Q-C-01/02/03 ✓ merged. Q-OPS-06 + Q-CONTRACT-25 **open** — adapters ship as stubs.
+
+#### PLAN T18-followup — exec-C (Satrio) at H23 (2026-07-08) 22:15
+
+**Scope recap**
+Land runtime composition around T18 primitive per spec `04-integration-channels.md §2.1 row 30` + `§4.10` (cross-tenant → 404). Ships **narrow "stubbed HC" scope** (mirrors T19-followup pattern): (a) `PUT /api/integrations/telegram/departments/:dept_id` route behind `[jwtAuthGuard, requireRole('gm_admin')]`; (b) zod `UpdateDepartmentTelegramRoutingRequestSchema.safeParse` at handler boundary → `ValidationError` on fail; (c) **stub adapters** for `DepartmentTelegramReadPort` (env-based `TELEGRAM_DEPT_ROUTING_MAP` JSON dept→hotel map — MVP source-of-truth, same pattern as T19-followup slug map) + `DepartmentTelegramWritePort` (returns `{ updated: true }` unconditionally + logs `hc_write_stubbed` per invocation, HC `departments` table NEVER written); (d) camelCase-domain → snake_case-wire mapping via pure helper; (e) loud startup warn `msg: 'telegram_dept_routing.startup', hcAdapters: 'STUB', ratifyQs: 'Q-OPS-06,Q-CONTRACT-25'` mirroring T19-fu binding #3; (f) wiring in `api-server.ts`; (g) unit + integration tests.
+
+**Session-start gate** (EXECUTOR-PROTOCOL §2)
+- Identity confirmed: Executor, Slot C (Satrio) ✓
+- CLAUDE.md loaded ✓
+- Task spec read: `docs/spec/04-integration-channels.md §2.1 row 30` (endpoint); `§4.10` (tenancy + 404 anti-enumeration); MVP §1.3 (C2 row 46); T18 primitive PM C ACK §1731 (20 binding conditions, spec §4.10 identical-404 rule, PII-suffix log discipline)
+- Precedent spot-read: T19-followup stub-HC composition (env-based slug map + stub adapters + loud startup warn); T18 primitive service (`updateRouting` flow: tenant check → write → NotFoundError on either miss); T18 schema (snake_case wire, `.strict()` + `.refine` at-least-one)
+- Dependencies: T18 primitive on main. Q-OPS-06 + Q-CONTRACT-25 open — adapters ship as stubs.
+- `make typecheck` clean ✓ / `make lint` clean ✓ on main
+- Scaffolder risk: none — new route file + adapters + wiring block + 1 env field.
+
+**Files to create**
+```
+src/modules/telegram-dept-routing/
+├── telegram-dept-routing.routes.ts             (PUT route; zod validate; hotelId from JWT; call service)
+└── adapters/
+    ├── department-telegram-read-stub.adapter.ts    (env dept→hotel map; MVP source-of-truth)
+    └── department-telegram-write-stub.adapter.ts   (always { updated: true }; PII-suffix warn log)
+src/modules/telegram-dept-routing/__tests__/
+├── telegram-dept-routing.routes.test.ts                 (unit — fastify.inject with mocked service; 401/400/happy/defensive)
+├── telegram-dept-routing.routes.integration.test.ts    (integration — real Prisma + env map; §4.10 cross-tenant identical-404 assertion)
+├── department-telegram-read-stub.adapter.test.ts        (unit — env map cases + missing dept null)
+└── department-telegram-write-stub.adapter.test.ts       (unit — always updated + PII-suffix warn)
+```
+
+**Files to modify**
+- `src/entrypoints/api-server.ts` — instantiate stub adapters + `TelegramDeptRoutingService` + register route with `gmAdminGuards` + loud startup warn.
+- `src/core/config/env.ts` — add `TELEGRAM_DEPT_ROUTING_MAP: z.string().optional()` (JSON blob `{ deptId: hotelId }` — same MVP pattern as T19-followup slug map per binding #11).
+- `.env.example` — add 1 example line.
+
+**Files NOT touched**
+- `src/modules/telegram-dept-routing/telegram-dept-routing.service.ts` / `.types.ts` / `.schema.ts` / `ports/**` / existing tests (T18 primitive frozen)
+- `src/entrypoints/worker.ts` (no queue; T18 is a synchronous CRUD endpoint)
+- `prisma/schema.prisma` (HC-owned `departments` table — NOT this repo's schema per spec §7 line 7)
+- `src/plugins/**` (JWT + role guards already exist)
+- `package.json` (zero new deps)
+- Other slots' modules
+
+**Approach**
+1. **`department-telegram-read-stub.adapter.ts`** — MVP stub. Ctor `(mapJson: string)`. Parses env JSON at ctor time (fail-fast on malformed input per T19-fu binding #12 precedent). `getForTenantCheck({ deptId })` → returns `{ hotelId }` from map, or `null` if deptId not present. Logs nothing (adapter is stateless, mapping is stable).
+2. **`department-telegram-write-stub.adapter.ts`** — MVP stub. Ctor `(logger)`. `updateRouting({ deptId, telegramChatId?, supervisorTelegramId? })` → returns `Promise.resolve({ updated: true })`. Per-invocation `warn` log: `msg: 'telegram_dept_routing.hc_write_stubbed', module, port: 'department_telegram_write', deptId, telegramChatIdSuffix?: last-4, supervisorTelegramIdSuffix?: last-4`. HC `departments` table NEVER written. Header docstring: "MVP STUB — replace when Q-OPS-06 + Q-CONTRACT-25 resolve."
+3. **`telegram-dept-routing.routes.ts`** — Fastify plugin. `PUT /api/integrations/telegram/departments/:dept_id`. `preHandler` = injected `gmAdminGuards`. Handler: extract `hotelId` from `req.hotelId` (JWT); extract `dept_id` from URL param; `UpdateDepartmentTelegramRoutingRequestSchema.safeParse(req.body)` → `ValidationError` on fail; call `service.updateRouting({ hotelId, deptId, telegramChatId, supervisorTelegramId })`; return `{ updated: true, updated_at: result.updatedAt.toISOString() }`. Service throws `NotFoundError('department', deptId)` for null-dept OR cross-tenant OR write-race — error-handler translates to canonical 404 envelope (§4.10 identical-shape).
+4. **`api-server.ts` wiring** — instantiate stub read + stub write + `TelegramDeptRoutingService` + register route; emit startup warn.
+5. **`env.ts`** — `TELEGRAM_DEPT_ROUTING_MAP: z.string().optional()`.
+6. **Unit tests** — ~10 total across 3 files:
+   - Read stub: 3-4 tests (hit + miss + empty map + malformed JSON → TypeError at ctor)
+   - Write stub: 3 tests (always updated + PII-suffix warn + full IDs never in log JSON)
+   - Route unit: 3-4 tests (401 guard reject + 400 zod + hotelId-missing defensive + happy 200)
+7. **Integration tests** — 6 cases: 401 no-JWT + 403 wrong role + 404 unknown dept + 404 cross-tenant dept (§4.10 IDENTICAL 404 shape assertion vs unknown-dept) + 200 happy full + 200 happy partial + correlation-id echo.
+
+**GAPs / questions**
+
+- **GAP T18fu-#1 — Q-OPS-06 + Q-CONTRACT-25 open; HC adapters shipped as stubs.** Mirrors T19-followup PLAN GAP #1 pattern (stub HC adapters unblock end-to-end integration while contracts ratify). Real adapter forks: (a) shared-DB Prisma raw query against HC `departments` table, OR (b) RPC to HC internal endpoint. Primitive is decision-agnostic. **My intent**: ship stubs + swap 2 files each once Q-OPS-06 + Q-CONTRACT-25 land. Confirm.
+- **GAP T18fu-#2 — `TELEGRAM_DEPT_ROUTING_MAP` env field.** Dept-to-hotel lookup for MVP. Options: (a) new env var JSON blob (dev-friendly, sibling to `TELEGRAM_WEBHOOK_HOTEL_SLUG_MAP` from T19-followup); (b) add a `departments` table to this repo (schema change; scope creep); (c) block. **My intent**: (a) — MVP env-based; Auth-service / HC-service RPC replaces later. Confirm.
+- **GAP T18fu-#3 — Write stub returns `updated: true` unconditionally.** T18 primitive's writer port returns discriminated `{ updated: true } | { notFound: true }`. Stub could return `updated` unconditionally (writes never fail since no real DB) OR `notFound` if dept not in env map (defensive). **My intent**: **unconditionally `updated: true`** — the read stub's tenancy check already gates access; if we get to the writer, tenancy passed. Race-condition `notFound` path is impossible with stubs (nothing changes between check and write). Confirm.
+- **GAP T18fu-#4 — Persistence NOTE for ops.** Stub write does NOT touch HC's `departments` table. Callers observe `200 { updated: true }` but HC has no state change. Loud startup warn per binding #3 (T19-fu precedent) informs ops the deployment carries stubs. Non-blocker.
+- **GAP T18fu-#5 — `.eslintrc.cjs` carry-over.** Same story as T20/T23/T19-followup (T24-followup skipped). This task DOES import adapters at entrypoint, so the override is needed. Non-blocker.
+- **GAP T18fu-#6 — Response shape.** T18 primitive schema surfaces `{ updated: true, updated_at: string }`. Route maps `result.updatedAt.toISOString()` → wire `updated_at`. Non-blocker; primitive is authoritative.
+
+**Awaiting PM C ACK** — especially GAP #1 (stub-HC composition — sibling to T19-fu approved pattern) + GAP #2 (env dept map addition) + GAP #3 (write-stub unconditional updated).
+
 ---
 
 ## 3. Slot C open questions (mirror to PARENT §3)
