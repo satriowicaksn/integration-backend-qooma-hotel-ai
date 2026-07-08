@@ -50,6 +50,14 @@ const EnvSchema = z.object({
   // 404s. Auth / HC RPC lookup replaces this once Q-OPS-06 +
   // Q-CONTRACT-25 resolve.
   TELEGRAM_DEPT_ROUTING_MAP: z.string().optional(),
+  // T21-followup OTA poll cron cadence (milliseconds). Default 60_000
+  // per spec §3.3 — 60s. Set to 0 to DISABLE the cron entirely in dev.
+  OTA_POLL_INTERVAL_MS: z.coerce.number().int().nonnegative().default(60_000),
+  // T24-followup-B channel-health probe cron cadence + hotel list.
+  // Default 60_000 per spec §7. Empty hotel list → no probes run
+  // (cron is idle). List format: JSON `["<hotel-uuid>", ...]`.
+  HEALTH_PROBE_INTERVAL_MS: z.coerce.number().int().nonnegative().default(60_000),
+  HEALTH_PROBE_HOTEL_LIST: z.string().optional(),
 
   // Rate limit
   RATE_LIMIT_GLOBAL_PER_MIN: z.coerce.number().int().positive().default(100),

@@ -19,6 +19,12 @@ import { loadConfig } from '@core/config/env.js';
 import { createLogger } from '@core/logger/logger.js';
 import { db } from '@core/prisma/prisma-client.js';
 
+import { ObjectStorageStubAdapter } from '@modules/qr-provisioning/adapters/object-storage-stub.adapter.js';
+import { QrRendererStubAdapter } from '@modules/qr-provisioning/adapters/qr-renderer-stub.adapter.js';
+import { WhatsappPhoneLookupAdapter } from '@modules/qr-provisioning/adapters/whatsapp-phone-lookup.adapter.js';
+import { QrStateRepository } from '@modules/qr-provisioning/qr-provisioning.repository.js';
+import { qrProvisioningRoutes } from '@modules/qr-provisioning/qr-provisioning.routes.js';
+import { QrService } from '@modules/qr-provisioning/qr-provisioning.service.js';
 import { EnvHotelSlugLookup } from '@modules/telegram/adapters/hotel-slug-lookup.adapter.js';
 import { StaffLookupStubAdapter } from '@modules/telegram/adapters/staff-lookup-stub.adapter.js';
 import { TelegramWebhookSecretResolver } from '@modules/telegram/adapters/telegram-webhook-secret.adapter.js';
@@ -33,6 +39,7 @@ import { DepartmentTelegramReadStubAdapter } from '@modules/telegram-dept-routin
 import { DepartmentTelegramWriteStubAdapter } from '@modules/telegram-dept-routing/adapters/department-telegram-write-stub.adapter.js';
 import { telegramDeptRoutingRoutes } from '@modules/telegram-dept-routing/telegram-dept-routing.routes.js';
 import { TelegramDeptRoutingService } from '@modules/telegram-dept-routing/telegram-dept-routing.service.js';
+import { WhatsappConfigRepository } from '@modules/whatsapp/whatsapp-config.repository.js';
 import { registerErrorHandler } from '@plugins/error-handler.plugin.js';
 import { registerWebhookRawBody, verifyWebhookSignature } from '@plugins/hmac-validator.plugin.js';
 import { jwtAuthGuard, requireRole } from '@plugins/jwt-auth.plugin.js';
@@ -145,6 +152,33 @@ export async function buildServer(): Promise<FastifyInstance> {
     module: 'telegram-dept-routing',
     hcAdapters: 'STUB',
     ratifyQs: 'Q-OPS-06,Q-CONTRACT-25',
+  });
+
+  // T22-followup: QR generation + download (spec §3.4).
+  // Renderer + object-storage adapters ship as stubs pending
+  // `qrcode` + `@aws-sdk/client-s3` PO approvals + Q-C-10.
+  const qrRepo = new QrStateRepository(db);
+  const qrStorageStub = new ObjectStorageStubAdapter();
+  const qrRendererStub = new QrRendererStubAdapter();
+  const qrService = new QrService(
+    qrRepo,
+    { renderer: qrRendererStub, storage: qrStorageStub },
+    logger,
+  );
+  const waConfigRepo = new WhatsappConfigRepository(db);
+  const waPhoneLookup = new WhatsappPhoneLookupAdapter(waConfigRepo);
+  await app.register(qrProvisioningRoutes, {
+    service: qrService,
+    storage: qrStorageStub,
+    waPhoneLookup,
+    guards: gmAdminGuards,
+  });
+  logger.warn({
+    msg: 'qr_provisioning.startup',
+    module: 'qr-provisioning',
+    ioAdapters: 'STUB',
+    ratifyQs: 'Q-C-10',
+    poPackages: 'qrcode,@aws-sdk/client-s3',
   });
 
   return app;
