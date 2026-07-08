@@ -14,9 +14,15 @@ import type { FastifyPluginAsync, preHandlerHookHandler } from 'fastify';
 
 import { AuthError, ValidationError } from '@core/errors/app-errors.js';
 
-import { UpdateDepartmentTelegramRoutingRequestSchema } from './telegram-dept-routing.schema.js';
+import {
+  UpdateDepartmentTelegramRoutingRequestSchema,
+  type UpdateDepartmentTelegramRoutingResponseDto,
+} from './telegram-dept-routing.schema.js';
 import type { TelegramDeptRoutingService } from './telegram-dept-routing.service.js';
-import type { UpdateDepartmentTelegramRoutingInput } from './telegram-dept-routing.types.js';
+import type {
+  TelegramDeptRoutingResult,
+  UpdateDepartmentTelegramRoutingInput,
+} from './telegram-dept-routing.types.js';
 
 export interface TelegramDeptRoutingRoutesOptions {
   readonly service: TelegramDeptRoutingService;
@@ -56,10 +62,7 @@ export const telegramDeptRoutingRoutes: FastifyPluginAsync<TelegramDeptRoutingRo
           : {}),
       };
       const result = await opts.service.updateRouting(input);
-      return {
-        updated: result.updated,
-        updated_at: result.updatedAt.toISOString(),
-      };
+      return toResponseDto(result);
     },
   );
 
@@ -71,4 +74,16 @@ function requireHotelId(candidate: string | undefined): string {
     throw new AuthError('Tenant scope missing on request');
   }
   return candidate;
+}
+
+/** Pure camelCase-domain → snake_case-wire mapping (PM C ACK T18-fu
+ *  binding #9). No logger, no clock, no side effects — clock lives on
+ *  the primitive service. */
+export function toResponseDto(
+  result: TelegramDeptRoutingResult,
+): UpdateDepartmentTelegramRoutingResponseDto {
+  return {
+    updated: result.updated,
+    updated_at: result.updatedAt.toISOString(),
+  };
 }

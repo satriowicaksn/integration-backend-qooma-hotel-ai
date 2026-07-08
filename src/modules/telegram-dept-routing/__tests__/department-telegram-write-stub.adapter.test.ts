@@ -54,12 +54,30 @@ describe('DepartmentTelegramWriteStubAdapter.updateRouting', () => {
     expect(serialized).not.toContain(SUPERVISOR_ID);
   });
 
-  it('should omit suffix fields when the input omits the corresponding routing ID', async () => {
+  it('should omit supervisor suffix when only telegramChatId is provided (partial-update log-reflection, binding #12)', async () => {
     const logger = buildLogger();
     const adapter = new DepartmentTelegramWriteStubAdapter(logger);
     await adapter.updateRouting({ deptId: DEPT_ID, telegramChatId: CHAT_ID });
     const record = logger.warn.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(record).toHaveProperty('telegramChatIdSuffix');
+    expect(record).not.toHaveProperty('supervisorTelegramIdSuffix');
+  });
+
+  it('should omit chat suffix when only supervisorTelegramId is provided (binding #12 mirror)', async () => {
+    const logger = buildLogger();
+    const adapter = new DepartmentTelegramWriteStubAdapter(logger);
+    await adapter.updateRouting({ deptId: DEPT_ID, supervisorTelegramId: SUPERVISOR_ID });
+    const record = logger.warn.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(record).toHaveProperty('supervisorTelegramIdSuffix');
+    expect(record).not.toHaveProperty('telegramChatIdSuffix');
+  });
+
+  it('should omit both suffixes when neither routing ID is provided (edge branch coverage)', async () => {
+    const logger = buildLogger();
+    const adapter = new DepartmentTelegramWriteStubAdapter(logger);
+    await adapter.updateRouting({ deptId: DEPT_ID });
+    const record = logger.warn.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(record).not.toHaveProperty('telegramChatIdSuffix');
     expect(record).not.toHaveProperty('supervisorTelegramIdSuffix');
   });
 });

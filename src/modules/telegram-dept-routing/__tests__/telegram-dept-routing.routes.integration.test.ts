@@ -11,6 +11,8 @@ import type { FastifyInstance } from 'fastify';
 
 import { resetConfigCache } from '@core/config/env.js';
 
+import { UpdateDepartmentTelegramRoutingResponseSchema } from '../telegram-dept-routing.schema.js';
+
 const HOTEL_ID = '11111111-2222-3333-4444-555555555555';
 const OTHER_HOTEL_ID = '99999999-9999-9999-9999-999999999999';
 const DEPT_MINE = 'dept-hk-01';
@@ -162,10 +164,24 @@ runOrSkip('T18-followup route landing (integration)', () => {
       payload: { telegram_chat_id: '-1001234567890', supervisor_telegram_id: '987654321' },
     });
     expect(res.statusCode).toBe(200);
-    const body = res.json<{ updated: boolean; updated_at: string }>();
-    expect(body.updated).toBe(true);
-    expect(typeof body.updated_at).toBe('string');
-    expect(new Date(body.updated_at).toString()).not.toBe('Invalid Date');
+    // PM C ACK T18-fu binding #11: response must parse cleanly against the
+    // primitive's authoritative schema.
+    const parsed = UpdateDepartmentTelegramRoutingResponseSchema.parse(res.json());
+    expect(parsed.updated).toBe(true);
+    expect(new Date(parsed.updated_at).toString()).not.toBe('Invalid Date');
+  });
+
+  it('should return 200 on a partial update (supervisor-only) and schema-parse cleanly', async () => {
+    const token = signGmAdminJwt();
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/api/integrations/telegram/departments/${DEPT_MINE}`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { supervisor_telegram_id: '987654321' },
+    });
+    expect(res.statusCode).toBe(200);
+    const parsed = UpdateDepartmentTelegramRoutingResponseSchema.parse(res.json());
+    expect(parsed.updated).toBe(true);
   });
 
   it('should echo the inbound x-correlation-id on the response', async () => {
