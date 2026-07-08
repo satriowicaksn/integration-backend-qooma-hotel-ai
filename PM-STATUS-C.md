@@ -2423,6 +2423,89 @@ src/modules/integration-overview/__tests__/
 
 Proceed to coding on branch `feat/integration-overview-followup`. Post SUBMIT when: `make check` green + drift-scans clean + all 20 bindings honored + null-passthrough tests present (WA/TG/QR) + health per-provider fallback tests present (×3) + parallelism test present + `IntegrationOverviewResponseSchema.parse(res.json())` integration assertion present + integration test covers 401/403/200-all/200-none/200-partial/correlation-id.
 
+#### SUBMIT T23-followup — exec-C (Satrio) at H23 (2026-07-08) 14:45 (attempt 1, per PM C ACK)
+
+Task: T23-followup composition landing — 4 reader-port adapters + `GET /api/integrations` route + `api-server.ts` wiring + 4 adapter unit test suites + 1 integration test. All 20 PM C ACK binding conditions honored.
+
+Files changed: 11 (7 new files + 2 modified) + 1 shared-config touch flagged as necessary carry-over from prior VERDICTs (see Notes)
+  - src/modules/integration-overview/adapters/whatsapp-config-read.adapter.ts (new)
+  - src/modules/integration-overview/adapters/telegram-config-read.adapter.ts (new)
+  - src/modules/integration-overview/adapters/qr-state-read.adapter.ts (new)
+  - src/modules/integration-overview/adapters/channel-health-read.adapter.ts (new — clock-injectable per binding #3)
+  - src/modules/integration-overview/integration-overview.routes.ts (new — auth-agnostic; `toResponseDto` pure helper per binding #8)
+  - src/modules/integration-overview/__tests__/whatsapp-config-read.adapter.test.ts (new — 4 tests: null passthrough + full map + verifiedAt null + envelope-empty)
+  - src/modules/integration-overview/__tests__/telegram-config-read.adapter.test.ts (new — 3 tests: null + full map + envelope-empty)
+  - src/modules/integration-overview/__tests__/qr-state-read.adapter.test.ts (new — 3 tests: null + waLink→url map + hotelId forwarding)
+  - src/modules/integration-overview/__tests__/channel-health-read.adapter.test.ts (new — 8 tests: all-present + Claude-missing + WA-missing + Telegram-missing + all-missing + parallelism verification + degraded pass-through + SYSTEM_CLOCK default)
+  - src/modules/integration-overview/__tests__/integration-overview.routes.integration.test.ts (new — 6 tests + `IntegrationOverviewResponseSchema.parse(res.json())` assertion on happy path per binding #7)
+  - src/entrypoints/api-server.ts (modified — instantiate 3 additional repos + 4 adapters + service + register route with existing `gmAdminGuards`)
+  - .eslintrc.cjs (modified — same entrypoints `no-restricted-imports` override as T20-followup; see GAP #6 below)
+
+Files NOT touched (binding #16 scope containment sustained apart from documented eslint carry-over)
+  - `src/modules/integration-overview/integration-overview.service.ts` / `.types.ts` / `.schema.ts` / `ports/**` / existing tests (T23 primitive frozen)
+  - `prisma/schema.prisma`, `src/core/config/env.ts`, `src/plugins/**`, `package.json`, `src/entrypoints/worker.ts`
+  - Other slots' test files; other modules' source
+
+DoD self-check — all 20 binding conditions
+- [x] **Binding #1 (null passthrough WA/TG/QR)** — each adapter has a dedicated `should return null when the repo has no row` test.
+- [x] **Binding #2 (health per-provider fallback ×3)** — dedicated tests for WA-missing, Telegram-missing, Claude-missing, and all-missing.
+- [x] **Binding #3 (clock injection + SYSTEM_CLOCK default)** — `ChannelHealthReadClock` ctor arg with `SYSTEM_CLOCK` default; dedicated `should fall back to SYSTEM_CLOCK (real wall clock) when no clock is injected` test brackets `result.claudeApi.lastCheckAt` between `before` / `after` Date samples.
+- [x] **Binding #4 (parallel Promise.all)** — `Promise.all([WA, Telegram, claude_api])` at `channel-health-read.adapter.ts:44`. Parallelism test `should query all three providers in parallel with the hotelId` asserts `toHaveBeenCalledTimes(3)` + each provider called.
+- [x] **Binding #5 (primitive layer zero cross-module import sustained)** — `grep -rn "^import.*@modules/" src/modules/integration-overview/` restricted to `adapters/**` + `__tests__/**` only. Primitive service.ts / types.ts / schema.ts / ports/**/*.ts untouched.
+- [x] **Binding #6 (.js extension discipline)** — 0 `.ts` extension imports.
+- [x] **Binding #7 (`IntegrationOverviewResponseSchema.parse(res.json())`)** — added at integration-test happy-path (integration test file). Passes silently when the wire shape matches primitive's authoritative schema.
+- [x] **Binding #8 (`toResponseDto` = pure + colocated + reversible)** — pure function in `integration-overview.routes.ts`; no logger, no clock, no side effects. Colocated with the route.
+- [x] **Binding #9 (route auth composition)** — `preHandler = [...guards]`; api-server injects `[jwtAuthGuard, requireRole('gm_admin')]`. Integration tests assert 401 (no JWT), 403 (staff role), 200 (gm_admin).
+- [x] **Binding #10 (hotelId from `req.hotelId`)** — `requireHotelId(req.hotelId)` in route handler; NEVER trusts body/query/header. Integration test JWT carries `hotel_id: HOTEL_ID` and asserts payload comes back tenant-scoped.
+- [x] **Binding #11 (zero `@prisma/client` at primitive)** — primitive layer untouched; adapters may import Prisma types via source-module repos.
+- [x] **Binding #12 (adapter coverage ≥90%)** — 100 % stmt / branch / func / line across all 4 adapters.
+- [x] **Binding #13 (adapter test count target ~15)** — 18 total (WA 4 + TG 3 + QR 3 + Health 8) — meets target with health at 8 (>6) to cover binding #2 × 3 + binding #3 SYSTEM_CLOCK + binding #4 parallelism.
+- [x] **Binding #14 (integration test count target 6)** — 6 cases: 401 no-JWT + 403 staff role + 200 empty + 200 fully-seeded + 200 partial + x-correlation-id echo. Skip-without-DATABASE_URL per T17-followup precedent.
+- [x] **Binding #15 (barrel MAY export adapters/route)** — chose NOT to update barrel because `no-restricted-imports` blocks adapter re-exports (same as T20-followup); api-server imports adapters/route via direct paths (matches T17/T20-followup precedent).
+- [x] **Binding #16 (scope containment)** — `git status --short` after cherry-pick shows only `src/modules/integration-overview/**`, `src/entrypoints/api-server.ts`, `.eslintrc.cjs` (see GAP #6). Zero touches to `worker.ts`, `plugins/**`, `core/**`, `prisma/**`, `package.json`, `env.ts`, other modules.
+- [x] **Binding #17 (`make check` PASS + coverage ≥ 90 %)** — see Quality gate.
+- [x] **Binding #18 (`pnpm add` queue UNCHANGED)** — `git status package.json` clean; cumulative queue stays at 5.
+- [x] **Binding #19 (test naming)** — `should <expected> when <condition>` throughout.
+- [x] **Binding #20 (rebase discipline)** — branch forks from main post-PR-#28 merge; `git log main..HEAD` shows only my 4 commits (PLAN + PM C ACK + code + binding-completion tests). No upstream drift.
+
+Quality gate
+- `make lint`: PASS (0 errors, 0 warnings, `--max-warnings 0`)
+- `make format-check`: PASS
+- `make typecheck`: PASS
+- `make test-unit`: PASS (**625 tests / 64 suites; +18 new unit tests + 6 new integration deferred without `DATABASE_URL`**)
+- `make check` (combined): **PASS**
+- Adapter module coverage (`src/modules/integration-overview/adapters/**`): **100 % stmt / 100 % branch / 100 % func / 100 % line** — matches T23 primitive "cleanest slot-C" precedent.
+- Route coverage: exercised only by integration test (skipped without `DATABASE_URL`), per T17-followup + T20-followup precedent.
+
+Drift scans (scope `src/modules/integration-overview/adapters/**` + `integration-overview.routes.ts`)
+- `any` / `<any>` / `as any` (excluding `as unknown as` test-mock): 0 hits
+- `console.log|info|debug`: 0 hits
+- `throw new Error(` in adapter/route runtime files: 0 hits (route uses `AuthError` from `@core/errors`)
+- forbidden imports: 0 hits
+- default export: 0 hits
+- `.skip(` in tests: 0 hits
+- `.ts` extension imports: 0 hits
+
+Security check
+- gm_admin JWT guard enforced; tenant scope from `req.hotelId` (populated by JWT plugin per Q-C-04).
+- Zero decrypt: envelope-presence check only per binding #7 primitive semantic — plaintext tokens NEVER read by this endpoint.
+- No new secret, env, or dep. Response omits full token fields — only booleans.
+
+Test evidence
+- Unit: 18 adapter tests (WA 4 + TG 3 + QR 3 + Health 8)
+- Integration: 6 tests + `IntegrationOverviewResponseSchema.parse(res.json())` assertion on happy path
+
+Notes / open items
+
+- **GAP T23fu-#6 (post-hoc, carry-over from T20-followup) — `.eslintrc.cjs` entrypoints override.** PM C ACK binding #16 says "existing `.eslintrc.cjs` entrypoint override from T20-followup already covers adapter imports at entrypoints — no additional eslint change needed." However, T20-followup is still on a branch (not yet merged to main), so my branch had to include the same override. This is a documented duplicate of the T20-followup change — if T20-followup lands first, textual merge resolves; if T23-followup lands first, T20-followup rebase is a trivial no-op on that line. NOT a scope violation, just a merge-order dependency I've flagged for PM C awareness.
+- **`api-server.ts` merge risk with T20-followup** — same story; both branches add a wiring block. No semantic conflict.
+- **Housekeeping (3rd occurrence) — `## 3.` heading restoration.** Acknowledged the pattern; will add the `## 3.` heading back explicitly in future PLAN inserts.
+- **Q-C-11 open** — refactor to matching FE shape remains a 1-file change once resolved.
+- **Milestone** — Slot C followup wave: T17, T20, **T23** landed; next-up T19, T21, T22, T24, T25.
+- Branch: `feat/integration-overview-followup @ 9d58fd0` (4 commits: PLAN, PM C ACK, code, binding-completion tests). PR to be opened post-VERDICT.
+
+Requesting PM C VERDICT.
+
 ---
 
 ## 3. Slot C open questions (mirror to PARENT §3)
