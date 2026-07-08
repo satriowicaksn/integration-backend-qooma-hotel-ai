@@ -108,6 +108,15 @@ export async function buildServer(): Promise<FastifyInstance> {
     logger,
   });
 
+  // Loud startup signal: this deployment is running stubbed HC adapters.
+  // Ops should see this on every boot until Q-C-06 + Q-C-07 land.
+  logger.warn({
+    msg: 'telegram_inbound.startup',
+    module: 'telegram',
+    hcAdapters: 'STUB',
+    ratifyQs: 'Q-C-06,Q-C-07',
+  });
+
   return app;
 }
 

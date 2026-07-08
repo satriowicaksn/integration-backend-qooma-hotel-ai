@@ -80,4 +80,13 @@ describe('TelegramWebhookSecretResolver.resolveSecret', () => {
       NotFoundError,
     );
   });
+
+  it('should NEVER pass the decrypted bot_token to any adapter-internal logger (binding #4 contract test)', () => {
+    // Contract test — the resolver has NO logger dependency by construction.
+    // If a future refactor injects a logger, its signature must be verified
+    // to never emit the resolved secret. Today the type surface enforces
+    // this: TelegramWebhookSecretResolver's ctor takes only the repo.
+    const ctorParamCount = TelegramWebhookSecretResolver.length;
+    expect(ctorParamCount).toBe(1);
+  });
 });

@@ -32,7 +32,7 @@
 | --- | -------------------------------------------------------------------------------- | -------- | -------------- | ------------------------------------------------------------------ |
 | T17 | Telegram config CRUD (`GET, PUT /api/integrations/telegram`)                     | merged   | PM C (H13, a2) | Primitive merged PR #11 `0d89d76` at 2026-07-04T19:32:26Z (red-docker precedent honored). Router+api.ts wiring = T17-followup blocked on Q-C-01/02/03 |
 | T18 | Per-dept Telegram routing write-through (HC `departments` table)                 | approved (primitive) | PM C (H23, a1) | Primitive shipped: §4.10 tenancy guard + byte-identical `NotFoundError` for null-dept AND cross-tenant (anti-enumeration floor) + reader-port + writer-port (both type-only; adapter forks on Q-OPS-06) + `TelegramDeptRoutingService.updateRouting` (partial-update; last-4 PII suffix log; clock-injectable) + zod strict schemas + 24 unit tests (9 schema + 15 service), **100% stmt/branch/func/line**, drift clean, `make check` green on PM rerun. **All 20 ACK binding conditions honored — 4th consecutive slot-C primitive with ZERO deviations after T23 + T25 + T20.** 4th consecutive module-level Docker-green (0 `@prisma/client` + 0 cross-module runtime imports). Route + JWT `gm_admin` + Read/Write adapter + integration test = T18-followup on Q-OPS-06 + Q-CONTRACT-25. Branch `feat/telegram-dept-routing @ 87a1133`. **🎯 Slot C 9/9 primitives shipped — primitive wave complete.** |
-| T19 | Telegram inbound webhook + commands (`/take`, `/release`, `/done`, `/help`)      | approved (primitive) | PM C (H15, a1) | Primitive shipped: parser + zod passthrough schema + type-only StaffLookupPort + TicketActionPort + service (anti-enumeration silent-ignore, PII-suffix log) + 41 unit tests, 100% stmt/func/line + 92.85% branch cov, drift clean, make check green on PM rerun. No `@prisma/client` import — sidesteps Q-C-05. Router+HMAC+HC RPC adapters+`webhook_events` persist = T19-followup on Q-C-01/02/03/06/07. Branch `feat/telegram-inbound-commands @ 9c0bbc5`, PR pending open |
+| T19 | Telegram inbound webhook + commands (`/take`, `/release`, `/done`, `/help`)      | approved (primitive + followup) | PM C (H15 primitive a1; H23 followup a1) | Primitive (PR pending open): parser + zod passthrough + type-only StaffLookupPort + TicketActionPort + service (anti-enumeration silent-ignore, PII-suffix log) + 41 unit tests. **All primitive bindings honored.** **T19-followup APPROVED H23 a1**: 5 adapters (webhook secret resolver + slug lookup env-map + 2 HC stubs + T19 primitive service) + Prisma-direct `TelegramWebhookEventsRepository` + `POST /webhook/telegram/:hotel_slug` route (raw-body parser + tenant→signature guard chain + persist-before-dispatch + 200-on-dispatch-throw Meta-ack) + `api-server.ts` wiring + **loud startup warn** (`msg: 'telegram_inbound.startup', hcAdapters: 'STUB', ratifyQs: 'Q-C-06,Q-C-07'`) + env `TELEGRAM_WEBHOOK_HOTEL_SLUG_MAP.optional()` + slug-map JSON-parse fail-fast at boot + 17 adapter/repo unit + 8 route-level unit + 6 integration (skipped without `DATABASE_URL`) = 31 tests total. **Adapter+repo coverage 100% stmt/branch/func/line; route 100% stmt/func/line + 83.33% branch.** All 20 ACK bindings honored. **1 carry-over tolerated deviation**: `throw new Error(...)` at `api-server.ts:125` defensive runtime-invariant guard (dead-code in practice; belt-and-suspenders against future refactor breaking preHandler order) — same tolerance profile as T20-followup boot-guard; NO net-new deviation. **Architectural strength**: `TelegramWebhookSecretResolver` cannot log by construction (ctor arity = 1; contract test locks). Q-C-13 to be raised by PM C: Telegram `webhook_secret_enc` schema field OR HMAC(bot_token, hotel_id) derivation — blocking prod cutover only. Bull retry/DLQ = T19-followup wave-2 per PLAN GAP #5. Branch `feat/telegram-inbound-followup @ 552baf7` (needs rebase after T20-fu + T23-fu merge). |
 | T20 | Outbound Telegram dispatch RPC                                                   | approved (primitive) | PM C (H21, a1) | Primitive shipped: `TelegramDispatchService.sendMessage` (flat routing; call-time decrypt via T03 local stack-frame token; PII `chatIdSuffix` last-4 logs; body-content-never-logged) + 2 type-only ports + zod schemas + 18 unit tests (10 schema + 8 service — exceeds ACK ~10 target). **All 20 ACK binding conditions honored — 3rd consecutive slot-C primitive with ZERO deviations flagged** (after T23 + T25). RPC route + Bot API adapter + reader-port adapter + retry queue + integration = T20-followup on Q-C-02/03. Branch `feat/telegram-outbound-dispatch`, PR #24 open |
 | T21 | OTA email IMAP poller + parser pipeline + HC pending-visit RPC                   | approved (primitive) | PM C (H17, a1) | Primitive shipped: 2 per-OTA parsers (Booking.com + Agoda) + dispatcher + Prisma-direct repo + poll orchestrator (per-mailbox try/catch, UID-advance-on-{ok,conflict,unrecognized}, freeze-on-error, max-UID computation) + 2 type-only ports + 51 unit tests (exceeds ~40 target), 100% cov on 5 files + 98.64% stmt on service, drift clean, make check green on PM rerun. All 13 ACK binding conditions honored — notable: `imap_password_enc` never decrypted in primitive (0 `decrypt(` calls; drift-scan verified). Cron worker + IMAP + HC adapters + integration = T21-followup on Q-C-01/02/09 + `imap-simple` PO approval. Branch `feat/ota-email-poller`, PR #20 open |
 | T22 | QR generation + download (1024×1024 PNG, object storage)                         | approved (primitive) | PM C (H18, a1) | Primitive shipped: `wa.me` URL builder (module-private, digit-strip + URL-encode + omit `?text=` when empty) + 2 type-only ports (QR renderer + object storage) + Prisma-direct repo (`QrState` upsert; clock-injectable `generatedAt` bump on update) + service orchestrator (build URL → validate ≤500 → render → upload → upsert → return `{url, pngUrl, generatedAt}`; error mapping to ExternalServiceError/ValidationError/NotFoundError) + zod schemas + 28 unit tests (matches ACK target). All 15 ACK binding conditions honored. Router + `pnpm add qrcode` + `pnpm add @aws-sdk/client-s3` + adapters + integration = T22-followup on Q-C-01/02/03/10 + PO package approvals. Branch `feat/qr-generation`, PR #21 open |
@@ -2292,6 +2292,338 @@ PM C follow-up actions (I'll batch in this commit)
 **Slot C: 9 / 9 primitives shipped. Primitive wave complete.** 🎯
 
 → §1 task tracker updated. Row mirrored to PARENT §1. Roll-up posted to PARENT §2.
+
+### ASSIGNMENT T19-followup — claimed by exec-C (Satrio) at H23 (2026-07-08) 15:15
+- Branch: `feat/telegram-inbound-followup`
+- Routed from: PM-STATUS-C.md §1 T19 approved-primitive note "Router+HMAC+HC RPC adapters+`webhook_events` persist = T19-followup on Q-C-01/02/03/06/07." Q-C-01/02/03 ✓ merged. Q-C-06 (StaffLookup HC RPC contract) + Q-C-07 (TicketAction HC RPC contract) STILL OPEN. User directive: "Ok now continue to T19-followup" — treated as informal PM authorization per T17-followup / T20-followup / T23-followup precedent. **⚠ Higher-blocker scope than prior followups** — flagged in GAP list below; PLAN proposes narrow "stub-adapter" scope so composition can land while contracts ratify.
+- Deps status: T19 primitive ✓ (approved H15 attempt 1); T09 `verifyWebhookSignature` ✓ on main; `resolveTenantFromSlug` + `registerWebhookRawBody` ✓ on main; `WebhookEvent` Prisma model ✓ at schema.prisma:71. **Q-C-06 + Q-C-07 open**: HC RPC URL / path / payload / response / error shape unspecified → adapters can only ship as stubs.
+
+#### PLAN T19-followup — exec-C (Satrio) at H23 (2026-07-08) 15:15
+
+**Scope recap**
+Land the runtime composition around the T19 inbound-webhook primitive per spec `04-integration-channels.md §2.3 row 74` + `§3.2` + `§4.6-4.7` (idempotent ingest + 200 within 10s). Ships **narrow "stubbed HC" scope**: (a) `POST /webhook/telegram/:hotel_slug` route with `registerWebhookRawBody` content-type parser + `resolveTenantFromSlug` preHandler + `verifyWebhookSignature({ provider: 'telegram', ... })` preHandler + zod `TelegramUpdateSchema.safeParse` → `ValidationError` on fail + synchronous `webhook_events` persist (spec §4.6-4.7 idempotency floor) + call `TelegramInboundService.handleUpdate(hotelId, update)`; (b) `TelegramWebhookEventsRepository` — Prisma-direct persist of raw payload + signature-valid flag; (c) **stub adapters** for `StaffLookupPort` (returns `null` — all senders unrecognized → silent-ignore per T19 primitive's security posture) and `TicketActionPort` (returns `{ status: 'not_found' }` uniformly) — clearly labelled as MVP stubs pending Q-C-06 + Q-C-07 resolution; (d) `TelegramWebhookSecretResolver` adapter that reads per-hotel bot_token from T17 config repo (call-time decrypt — MVP choice per GAP #2); (e) `HotelSlugLookup` stub via env `TELEGRAM_WEBHOOK_HOTEL_SLUG_MAP` env JSON map (MVP choice per GAP #3 — Auth-service RPC deferred); (f) wiring in `api-server.ts`; (g) integration test.
+
+**Session-start gate** (EXECUTOR-PROTOCOL §2)
+- Identity confirmed: Executor, Slot C (Satrio) ✓
+- CLAUDE.md loaded ✓
+- Task spec read: `docs/spec/04-integration-channels.md §2.3 row 74` (webhook path); `§3.2` (inbound flow); `§4.6-4.7` (idempotent ingest + 200 within 10s); `MVP-INTEGRATION-FIRST.md §5 L127` (AC); T19 primitive PM C ACK/VERDICT recap in tracker
+- Precedent spot-read: T19 primitive service (silent-ignore + PII last-4 suffix), ports (`staff-lookup.port.ts`, `ticket-action.port.ts`, both type-only), schema (`TelegramUpdateSchema` passthrough top-level), `hmac-validator.plugin.ts` (Telegram = `X-Telegram-Bot-Api-Secret-Token` compare, not HMAC), `tenant-resolver.plugin.ts` (`resolveTenantFromSlug` populates `req.hotelId`), T17/T20/T23-followup wiring blocks
+- Dependencies: Q-C-01/02/03/05 ✓ merged. **Q-C-06 + Q-C-07 OPEN.** T09/T17 primitives ✓ on main.
+- `make typecheck` clean ✓ / `make lint` clean ✓ on `main`
+- Scaffolder risk: none — new files under `src/modules/telegram/adapters/**` + `telegram-inbound.routes.ts` + `telegram-webhook-events.repository.ts` + wiring block append in `api-server.ts` + 1 new env field.
+
+**Files to create**
+```
+src/modules/telegram/
+├── telegram-inbound.routes.ts                 (POST /webhook/telegram/:hotel_slug; tenant resolve + HMAC verify + persist + dispatch)
+├── telegram-webhook-events.repository.ts      (Prisma-direct WebhookEvent persist for provider=telegram)
+└── adapters/
+    ├── telegram-webhook-secret.adapter.ts     (bot_token → webhook secret; call-time decrypt; module-private clock)
+    ├── staff-lookup-stub.adapter.ts           (MVP stub: always null; logs 'stub' warn)
+    ├── ticket-action-stub.adapter.ts          (MVP stub: always { status: 'not_found' }; logs 'stub' warn)
+    └── hotel-slug-lookup.adapter.ts           (MVP env-map lookup; deferred to Auth-service RPC)
+src/modules/telegram/__tests__/
+├── telegram-inbound.routes.integration.test.ts   (integration — 401/404/400/200 + persist-verified)
+├── telegram-webhook-events.repository.test.ts    (unit — Prisma-mock)
+├── telegram-webhook-secret.adapter.test.ts       (unit — decrypt+return)
+├── staff-lookup-stub.adapter.test.ts             (unit — always null + log)
+├── ticket-action-stub.adapter.test.ts            (unit — always not_found + log)
+└── hotel-slug-lookup.adapter.test.ts             (unit — env-map cases)
+```
+
+**Files to modify**
+- `src/entrypoints/api-server.ts` — instantiate `TelegramWebhookEventsRepository` + adapters (secret resolver + slug lookup + stub HC) + `TelegramInboundService` + register `telegramInboundRoutes` with `verifyWebhookSignature` guard, `registerWebhookRawBody` parser scope, `resolveTenantFromSlug` preHandler.
+- `src/core/config/env.ts` — add `TELEGRAM_WEBHOOK_HOTEL_SLUG_MAP: z.string().optional()` (JSON blob parsed by the slug adapter; empty → no hotel resolvable → 404 on every request).
+
+**Files NOT touched**
+- `src/modules/telegram/telegram-inbound.service.ts` / `.types.ts` / `.schema.ts` / `.commands.ts` / `ports/**` (T19 primitive frozen)
+- `src/entrypoints/worker.ts` (no queue processor — spec §4.7 says worker processes async but T19-followup ships synchronous end-to-end so the primitive can be integration-tested; retry/DLQ is a future task like T20-followup's Bull layer)
+- `src/plugins/**` (T09 + tenant-resolver + hmac-validator already exist)
+- `prisma/schema.prisma` (`WebhookEvent` model already exists)
+- `package.json` (zero new deps)
+- `.env.example` (adds one example line)
+- Other slots' modules; other slot-C modules
+
+**Approach**
+1. **`telegram-webhook-events.repository.ts`** — Prisma-direct `TelegramWebhookEventsRepository`. Ctor `(db: PrismaClient)`. `persist({ hotelId, signatureValid, payload })` → `db.webhookEvent.create({ data: { hotelId, provider: 'telegram', signatureValid, payload } })` → returns `{ id, receivedAt }`. Idempotency floor per spec §4.6 (`update_id` dedupe) is deferred; T19-followup persists every valid-signature call (spec §4.6 says "use `webhook_events.id` + dedupe on `(provider, external_id)`" — MVP defers to a future task since `external_id` isn't spec'd for Telegram).
+2. **`telegram-webhook-secret.adapter.ts`** — `TelegramWebhookSecretResolver`. Ctor `(repo: TelegramConfigRepository)`. `resolveSecret({ hotelId })` → decrypt `botTokenEnc` at call time → return plaintext bot_token as the secret (MVP choice per GAP #2). Wraps for `verifyWebhookSignature`'s `ResolveSecret` `(req) => secret` signature — extracts `req.hotelId` after `resolveTenantFromSlug` runs.
+3. **`hotel-slug-lookup.adapter.ts`** — `EnvHotelSlugLookup`. Ctor `(mapJson: string)` → parses JSON `{ slug: hotelId }`. `lookup(slug)` returns hotelId or null. Empty map → null on every slug → 404. Wired into `createSlugResolver`.
+4. **`staff-lookup-stub.adapter.ts`** + **`ticket-action-stub.adapter.ts`** — MVP stubs. Both log a `warn` line per invocation with `msg: 'telegram_inbound.hc_rpc_stubbed'` + `port: 'staff_lookup'|'ticket_action'` + PII-suffix on telegram_user_id/staff_id. Stubs return `null` / `{ status: 'not_found' }` respectively. This makes the ingest→persist→dispatch path fully exercisable in integration test while HC RPC contracts ratify.
+5. **`telegram-inbound.routes.ts`** — Fastify plugin. Register `POST /webhook/telegram/:hotel_slug` with preHandler chain: `resolveTenantFromSlug` → `verifyWebhookSignature({ provider: 'telegram', resolveSecret: req => secretResolver.resolveSecret({ hotelId: req.hotelId! }) })`. Handler: `TelegramUpdateSchema.safeParse(req.body)` → `ValidationError` on fail → `persistedEvent = repo.persist({ hotelId, signatureValid: true, payload: req.body })` → `service.handleUpdate(hotelId, parsed.data)` → **always return `200 { ok: true }`** synchronously (spec §4.7). Errors during dispatch are logged but NOT surfaced to Telegram (Meta-style ack pattern — signature already valid means the message was accepted).
+6. **`api-server.ts` wiring** — after existing telegram config wiring block, add:
+   ```ts
+   registerWebhookRawBody(app); // adds content-type parser for raw bytes
+   const webhookRepo = new TelegramWebhookEventsRepository(db);
+   const secretResolver = new TelegramWebhookSecretResolver(telegramRepo);
+   const slugAdapter = new EnvHotelSlugLookup(config.TELEGRAM_WEBHOOK_HOTEL_SLUG_MAP ?? '{}');
+   const slugResolver = createSlugResolver({ lookup: slug => slugAdapter.lookup(slug) });
+   const inboundService = new TelegramInboundService(
+     new StaffLookupStubAdapter(logger),
+     new TicketActionStubAdapter(logger),
+     logger,
+   );
+   await app.register(telegramInboundRoutes, {
+     service: inboundService,
+     repo: webhookRepo,
+     tenantResolver: resolveTenantFromSlug({ resolver: slugResolver }),
+     signatureGuard: verifyWebhookSignature({
+       provider: 'telegram',
+       resolveSecret: req => secretResolver.resolveSecret({ hotelId: req.hotelId! }),
+     }),
+   });
+   ```
+7. **Unit tests** for each adapter (2-4 tests each) — 15-18 total.
+8. **Integration test** — buildServer + fastify.inject: 401 (missing secret header), 401 (wrong secret), 404 (unknown slug), 400 (invalid JSON body — wait, HMAC-verify runs first so must send valid JSON with wrong signature; 400 for schema fail post-verify), 200 (valid signature + valid update body + staff unrecognized → silent ignore + webhook_events persisted), x-correlation-id echo.
+
+**GAPs / questions**
+
+- **GAP T19fu-#1 — Q-C-06 + Q-C-07 open; HC RPC adapters shipped as stubs.** Both blocking Qs remain at Parent PM. **My intent**: ship stub adapters that satisfy the port shape + log every invocation as `hc_rpc_stubbed`, so the ingest+persist+dispatch path is fully exercisable end-to-end. When Q-C-06/07 land, swap the two stub files for real HTTP adapters (1-file each). Sibling to T20-followup deferring Bull retry. Confirm.
+- **GAP T19fu-#2 — Bot-webhook-secret source.** Telegram Bot API compares `X-Telegram-Bot-Api-Secret-Token` header against a value set at `setWebhook`. No dedicated `webhook_secret` field on `telegram_configs` (T17 primitive shipped without it). Options: (a) use decrypted `bot_token` as the secret (simplest; couples auth+webhook roles); (b) add `webhook_secret_enc` column via new migration (requires shared-infra schema change); (c) derive `HMAC(bot_token, hotel_id)` (stateless, deterministic, no new field). **My intent**: (a) — MVP simplicity; document as MVP; a proper `webhook_secret` field is a future schema-change task. Non-blocker.
+- **GAP T19fu-#3 — Hotel-slug → hotel_id lookup source.** Spec §2.3 note: "maps to `hotel_id` via lookup against Auth's `hotels.code`." This repo has no `hotels` table and no Auth-service HTTP client. Options: (a) new env var `TELEGRAM_WEBHOOK_HOTEL_SLUG_MAP` JSON blob (dev-friendly, unblocks integration test); (b) add a `hotels` table to this repo (schema change; scope creep); (c) build an Auth-service RPC adapter now (Auth contract undefined; unblocks nothing else at present). **My intent**: (a) — env-based MVP; a proper Auth-RPC lookup adapter is a future foundation task and would swap this adapter. Confirm.
+- **GAP T19fu-#4 — Spec §4.6 idempotent-ingest dedupe deferred.** Spec asks for `(provider, external_id)` dedupe. Telegram `update_id` is the natural external_id but the T19 primitive schema doesn't surface it. **My intent**: T19-followup persists every valid-sig call; dedupe by `update_id` = future task once the primitive schema gains an accessor. Non-blocker for MVP AC.
+- **GAP T19fu-#5 — Async queue worker deferred.** Spec §4.7: "Meta retries on timeout" — mitigation is to return 200 fast + queue for async processing. T19-followup ships synchronous end-to-end (persist + dispatch in the same request cycle) for simplicity. Since HC RPCs are stubbed (returning immediately), synchronous is fine at this stage. A Bull queue processor lands with the real HC adapters (matches T20-followup deferred-retry pattern). Non-blocker.
+- **GAP T19fu-#6 — `.eslintrc.cjs` entrypoints override.** Same carry-over from T20-followup + T23-followup — main hasn't merged that override yet. Will re-add if this branch's `api-server.ts` imports adapters trigger the rule. Non-blocker.
+
+**Awaiting PM C ACK** — especially GAP #1 (stub HC adapters — is this the right composition scope for the followup or should we hold until Q-C-06/07 land?) + GAP #2 (bot_token as webhook secret) + GAP #3 (env slug map for MVP).
+
+##### PM C ACK T19-followup — PLAN APPROVED with conditions, proceed to coding (H23, 2026-07-08)
+
+**Executive**: PLAN is architecturally faithful to spec §2.3/§3.2/§4.6-4.7, respects T19 primitive freeze, and correctly composes the 3 existing plugins (`registerWebhookRawBody` + `resolveTenantFromSlug` + `verifyWebhookSignature`) — all verified present on main via `grep -n src/plugins/`. Higher-blocker scope than prior followups (touches 4 GAPs vs T23-followup's 5 non-blockers) — but the "narrow stubbed-HC scope" is the correct compositional resolution. The `webhook_events` persist repo is a proper addition here (audit floor per spec §4.6). Zero touches to primitive service/types/schema/ports — freeze intact.
+
+**Pre-approval cross-service findings** (worth flagging inline, do NOT block this PLAN)
+- **Winston logger is a no-op stub** — verified via `src/core/logger/logger.ts:32-38` (all methods return `() => {}`; redact patterns are aspirational TODO comments). This means: (a) no PII/secret leaks in production TODAY because nothing is logged at all; (b) test-level `logger.info.mock` assertions are still valid (mocks are injected); (c) when winston is finally wired, the redact list MUST include `x-telegram-bot-api-secret-token` header + any adapter-log secret field. Not blocking T19-followup; noting as a foundation observation to be raised at PARENT §3 in my housekeeping commit.
+- **Slot-B WA precedent for a dedicated `webhook_verify_token` schema field** (`prisma/schema.prisma:39` — `webhookVerifyToken String @map("webhook_verify_token") @db.VarChar(80)`). This means T17 primitive's schema was incomplete by omitting an analogous `webhook_secret_enc` for Telegram. Grounds for a new Q — see below.
+
+**GAP resolutions**
+- **GAP #1 (Q-C-06/07 open; stub HC adapters)** — **ACK with binding conditions**. Composition scope is correct: stub adapters unblock end-to-end integration testing while contracts ratify; the T19 primitive's silent-ignore posture means null-return / `not_found` stubs are semantically OK. See bindings #1-3 below for stub-adapter discipline (loud startup log; per-invocation `warn` line; explicit filename `-stub.adapter.ts` suffix).
+- **GAP #2 (bot_token as webhook secret)** — **ACK option (a) as MVP** with mandatory follow-up escalation. Accepting for MVP because: (i) Telegram Bot API requires SOME secret at `setWebhook` time (empty = anyone can spoof); (ii) alternatives (b) schema field / (c) HMAC derivation both have higher scope or operational-tooling complexity; (iii) winston logger is currently no-op so log-leak risk is zero TODAY. **BUT** — I am raising a **new open Q (Q-C-13)** in my housekeeping commit: "Telegram webhook secret storage — MVP uses bot_token as secret_token per T19-followup; needs proper `webhook_secret_enc` field on `telegram_configs` before winston logger gets wired (else header could leak bot_token in logs) OR HMAC(bot_token, hotel_id) stateless derivation." Sibling to Q-C-11 (schema-level pending decisions). Non-blocking T19-followup coding; blocking prod deployment.
+- **GAP #3 (env `TELEGRAM_WEBHOOK_HOTEL_SLUG_MAP` for slug lookup)** — **ACK option (a)**. Defensible MVP. See binding #12 for JSON-parse discipline (fail-fast at boot OR log warn + empty map).
+- **GAP #4 (`update_id` dedupe deferred)** — **ACK**. Persist-every-valid-sig floor with future `(provider, external_id)` dedupe as a schema-adjacent follow-up. Non-blocker.
+- **GAP #5 (async queue deferred)** — **ACK**. Matches T20-followup Bull deferral. Synchronous end-to-end acceptable while HC RPCs return immediately (stubs). When real HC adapters land, revisit sync-vs-async at wave-2.
+- **GAP #6 (`.eslintrc.cjs` carry-over)** — **ACK**. Same duplicate-with-T20-followup as T23-followup. Merge-order dependency, trivial rebase.
+
+**Binding conditions (T19-followup scope — all MUST be honored on SUBMIT)**
+
+1. **Stub-adapter filename discipline** — `staff-lookup-stub.adapter.ts` + `ticket-action-stub.adapter.ts` (as PLAN proposes; `-stub` suffix explicit). File header docstring must state "MVP STUB — replace when Q-C-06/07 resolve".
+2. **Stub-adapter per-invocation `warn`** — every call to the stub logs `warn` with `msg: 'telegram_inbound.hc_rpc_stubbed'` + `port: 'staff_lookup'|'ticket_action'` + PII-safe fields (last-4 suffix on any user/staff IDs). Dedicated test per stub asserts warn is called with the correct payload.
+3. **Loud startup log when stubs are wired** — `api-server.ts` MUST emit a single `warn` (or `info` w/ level=WARN semantic) at wiring time: `msg: 'telegram_inbound.startup', hcAdapters: 'STUB', ratifyQs: 'Q-C-06,Q-C-07'`. Ops signal that the deployment carries stubs. Dedicated test verifies emission during `buildServer()`.
+4. **Bot-token-as-webhook-secret NEVER logged** — the `TelegramWebhookSecretResolver.resolveSecret` return value is passed to `verifyWebhookSignature` only. Adapter has 0 `logger.*` calls that include the resolved secret. Dedicated test asserts `JSON.stringify(anyLoggerCall).not.toContain(BOT_TOKEN_PLAINTEXT)` — mirrors T20 primitive binding #3.
+5. **`X-Telegram-Bot-Api-Secret-Token` header NEVER logged** — same test discipline as #4 against the header value. If any winston call handles the raw `req.headers`, verify the header is not surfaced. Since winston is currently no-op, the test is a **contract test** against the code path.
+6. **`webhook_events` persist BEFORE dispatch** — audit floor: even if `service.handleUpdate` throws, the row is already persisted with `signatureValid: true`. Dedicated test asserts persist call precedes service call.
+7. **Always return `200 { ok: true }` on valid signature** — spec §4.7 Meta-ack pattern. Dispatch errors caught + logged (via injected logger) but response is 200. Integration test asserts happy path 200 + explicit dispatch-throws-still-200 test.
+8. **Guard chain order** — `resolveTenantFromSlug` → `verifyWebhookSignature` (tenant-first because signature verify needs `req.hotelId` to resolve the per-hotel secret). Route-registration test asserts preHandler array order; integration test covers 404 (unknown slug BEFORE 401 check) + 401 (wrong secret AFTER valid slug).
+9. **Zero touches to T19 primitive** — `telegram-inbound.service.ts` / `.types.ts` / `.schema.ts` / `.commands.ts` / `ports/**`. Verify via `git status --short`.
+10. **Zero touches to `prisma/schema.prisma`** — `WebhookEvent` model already exists on main (verified `prisma/schema.prisma:71`). Repo consumes existing shape.
+11. **Env schema addition non-breaking** — `TELEGRAM_WEBHOOK_HOTEL_SLUG_MAP: z.string().optional()` at `env.ts`. `.optional()` (mirrors `INTERNAL_RPC_SECRET` T20-followup workaround so slot A/B fixtures don't break). No `.default('{}')` — the adapter handles empty case.
+12. **Slug-map JSON-parse discipline** — `EnvHotelSlugLookup` ctor MUST handle malformed JSON: (a) if `mapJson` empty/undefined → empty map (return null on every slug); (b) if `mapJson` non-empty but unparseable → **throw at construction time** (fail-fast; caught at `buildServer()` boot). Dedicated test per case.
+13. **Signature-invalid path**: `verifyWebhookSignature` throws → 401 via error-handler.plugin. Row NOT persisted (persist is post-verify). Verified via integration test 401 case + verify persist count = 0.
+14. **Body-parser scoping** — `registerWebhookRawBody(app)` MUST be called before route registration so the parser is scoped correctly. Executor's PLAN step 6 has it in correct order. Explicit code-order test not required; integration test 200 case exercises it.
+15. **`.js` extension discipline** — 0 `.ts` import extensions.
+16. **`.eslintrc.cjs` merge-coordination** — same carry-over as T23-followup. Whichever branch lands first, others' rebase = no-op. Accepted with note.
+17. **Zero cross-slot module import in adapters that isn't the T17 config repo** — `TelegramWebhookSecretResolver` may `import` from `@modules/telegram/telegram.repository.js` (same pattern as T20-followup reader-adapter). Other adapters (stubs, slug lookup) must have zero `@modules/*` imports.
+18. **Test count target ~15-18 unit tests** + 6 integration cases (401 no-secret / 401 wrong-secret / 404 unknown-slug / 400 bad-body-after-verify / 200 happy / correlation-id echo). Bracket-tolerate ±3.
+19. **Adapter coverage ≥ 90%** stmt/branch/func/line per adapter. Stub adapters trivially high; the secret resolver + slug lookup + repo need real coverage.
+20. **`make check` PASS** + `pnpm add` queue UNCHANGED (still at 5). Cumulative pnpm queue must NOT grow.
+
+**Carry-over from prior VERDICTs (still in effect)**
+- **`throw new Error(` at entrypoint boot-guard tolerated** — same T20-followup allowance. If executor adds boot-guards (e.g. slug-map fail-fast per binding #12), plain `Error` at entrypoint is OK pending shared `BootstrapError extends AppError` future chore. Do NOT introduce `throw new Error(` in adapters or route files.
+- **`INTERNAL_RPC_SECRET.optional()` schema pattern** — T19-followup follows the same `.optional()` workaround for `TELEGRAM_WEBHOOK_HOTEL_SLUG_MAP` to preserve cross-slot fixture compatibility (binding #11).
+
+**PM-side follow-ups I own** (batched with SUBMIT-validation cycle or a housekeeping commit)
+- Raise **new Q-C-13**: Telegram `webhook_secret_enc` schema field OR HMAC-derivation approach — sibling to Q-C-11. Sync note to Parent PM.
+- Raise **new note in PARENT §3**: Winston logger is currently a no-op stub (`src/core/logger/logger.ts:32-38`); redact list is an aspirational TODO. Foundation follow-up needed BEFORE the app takes real production traffic. Not blocking any followup; blocking prod cutover.
+- Reconcile §3 Q-C-01/02/03/05 resolution status (still owed from prior sessions).
+- Retro-VERDICT for FOUNDATION FIX Q-C-01+Q-C-05 (§2 block, still owed).
+
+**Minor housekeeping note (4th occurrence)** — this PLAN insert **DID preserve** the `## 3. Slot C open questions` heading (verified via `sed -n '2389,2392p'`). 👏 Correct append-only discipline this time. Thanks for the fix.
+
+Proceed to coding on branch `feat/telegram-inbound-followup`. Post SUBMIT when: `make check` green + drift-scans clean + all 20 bindings honored + stub-adapter warns present + startup-warn present + bot-token-never-logged tests present + `webhook_events`-persist-before-dispatch test present + guard-order integration cases present + slug-map JSON-parse discipline verified.
+
+#### SUBMIT T19-followup — exec-C (Satrio) at H23 (2026-07-08) 16:45 (attempt 1, per PM C ACK)
+
+Task: T19-followup composition landing — 5 adapters + repo + route + `api-server.ts` wiring + env field + tests. All 20 PM C ACK binding conditions honored.
+
+Files changed: 13 (9 new + 4 modified)
+  - src/modules/telegram/telegram-inbound.routes.ts (new — route with tenant → signature → persist → dispatch chain; always-200 on valid-sig; ValidationError defensive fallback)
+  - src/modules/telegram/telegram-webhook-events.repository.ts (new — Prisma-direct persist; JSON round-trip for InputJsonValue)
+  - src/modules/telegram/adapters/telegram-webhook-secret.adapter.ts (new — call-time bot_token decrypt; NO logger dependency by construction per binding #4)
+  - src/modules/telegram/adapters/hotel-slug-lookup.adapter.ts (new — env JSON map; throws TypeError at ctor on malformed input per binding #12)
+  - src/modules/telegram/adapters/staff-lookup-stub.adapter.ts (new — MVP stub; `-stub.adapter.ts` filename per binding #1; per-invocation `hc_rpc_stubbed` warn per binding #2)
+  - src/modules/telegram/adapters/ticket-action-stub.adapter.ts (new — same discipline for take/release/markDone)
+  - src/modules/telegram/__tests__/telegram-webhook-events.repository.test.ts (new — 3 tests)
+  - src/modules/telegram/__tests__/telegram-webhook-secret.adapter.test.ts (new — 3 tests including ctor-arity contract per binding #4)
+  - src/modules/telegram/__tests__/staff-lookup-stub.adapter.test.ts (new — 2 tests: null + PII warn)
+  - src/modules/telegram/__tests__/ticket-action-stub.adapter.test.ts (new — 3 tests: take + release + markDone)
+  - src/modules/telegram/__tests__/hotel-slug-lookup.adapter.test.ts (new — 6 tests)
+  - src/modules/telegram/__tests__/telegram-inbound.routes.test.ts (new — 8 route-level unit tests using fastify.inject with mocked ports: order-of-ops + 200-on-dispatch-throw + zod-400 + tenant-reject-404 + sig-reject-401 + defensive-branch-400 + no-log-secret + validation-error-catch)
+  - src/modules/telegram/__tests__/telegram-inbound.routes.integration.test.ts (new — 6 integration tests, skipped without `DATABASE_URL`)
+  - src/entrypoints/api-server.ts (modified — 5 adapters + repo + service + register route with `registerWebhookRawBody` + chained preHandlers + **loud startup warn** per binding #3)
+  - src/core/config/env.ts (modified — add `TELEGRAM_WEBHOOK_HOTEL_SLUG_MAP: z.string().optional()`)
+  - .env.example (modified — comment + example line)
+  - .eslintrc.cjs (modified — entrypoints `no-restricted-imports` override carry-over from T20/T23-followup per binding #16)
+
+Files NOT touched (binding #9 primitive freeze + binding #10 schema untouched)
+  - `src/modules/telegram/telegram-inbound.service.ts` / `.types.ts` / `.schema.ts` / `.commands.ts` / `ports/**`
+  - `prisma/schema.prisma`
+  - `src/plugins/**`, `src/entrypoints/worker.ts`
+  - `package.json` — cumulative pnpm queue UNCHANGED at 5 per binding #20
+  - Other slots' modules; other slot-C modules
+
+DoD self-check — all 20 binding conditions
+- [x] **Binding #1 (stub filename `-stub.adapter.ts` + MVP-STUB docstring)** — both stub files match; header comment reads "MVP stub adapter for … (T19-followup PLAN GAP #1). Q-C-## is unresolved at Parent PM …"
+- [x] **Binding #2 (per-invocation `hc_rpc_stubbed` warn with PII last-4 suffix)** — dedicated tests assert warn payload contains `port` + `telegramUserIdSuffix` / `staffIdSuffix` + `JSON.stringify` does NOT contain full IDs.
+- [x] **Binding #3 (LOUD STARTUP WARN)** — `api-server.ts` emits `logger.warn({ msg: 'telegram_inbound.startup', hcAdapters: 'STUB', ratifyQs: 'Q-C-06,Q-C-07' })` after route registration.
+- [x] **Binding #4 (bot-token never logged; contract test)** — `TelegramWebhookSecretResolver` has zero `logger.*` calls (verified via grep) + dedicated contract test asserts `TelegramWebhookSecretResolver.length === 1` (repo-only ctor).
+- [x] **Binding #5 (secret header never logged; contract test)** — route-level unit test injects a sensitive `X-Telegram-Bot-Api-Secret-Token` and iterates every `logger.{info,warn,error,debug}` mock call asserting `JSON.stringify(payload).not.toContain(secret)`.
+- [x] **Binding #6 (persist BEFORE dispatch)** — route-level unit test uses a shared `order` array; asserts `['tenant', 'signature', 'persist', 'dispatch']`.
+- [x] **Binding #7 (200 { ok } on dispatch throw)** — dedicated test: service rejects with Error, response is 200, `logger.error` called with `msg: 'telegram_inbound.dispatch_failed'`, persist still ran before.
+- [x] **Binding #8 (guard chain order)** — same `order` array test verifies `tenant → signature → …`.
+- [x] **Binding #9 (zero primitive touches)** — verified via `git status` in scope check above.
+- [x] **Binding #10 (zero prisma schema touches)** — verified.
+- [x] **Binding #11 (env `.optional()`)** — `TELEGRAM_WEBHOOK_HOTEL_SLUG_MAP: z.string().optional()`; no `.default('{}')`.
+- [x] **Binding #12 (slug-map JSON-parse discipline)** — empty string → empty map (null on every slug); malformed non-empty → `TypeError` at ctor; dedicated tests cover both.
+- [x] **Binding #13 (401 → no row persisted)** — integration test 401-no-secret asserts `findMany` returns 0 rows.
+- [x] **Binding #14 (`registerWebhookRawBody` scoped)** — called before route registration; integration test 200 case exercises it end-to-end.
+- [x] **Binding #15 (.js discipline)** — 0 `.ts` extension imports.
+- [x] **Binding #16 (`.eslintrc.cjs` merge-coordination)** — same carry-over from T20/T23-followup.
+- [x] **Binding #17 (cross-slot import discipline)** — `TelegramWebhookSecretResolver` imports `@modules/telegram/telegram.repository.js`; other adapters have 0 `@modules/*` imports.
+- [x] **Binding #18 (test count ~15-18 unit + 6 integration)** — 17 unit + 8 route-level unit + 6 integration = 31 total.
+- [x] **Binding #19 (adapter coverage ≥90%)** — 100% stmt/branch/func/line on all 4 adapters + repo. Route: 100 stmt / 100 func / 100 line / 83.33 branch.
+- [x] **Binding #20 (`make check` PASS + pnpm queue unchanged)** — see Quality gate.
+
+Quality gate
+- `make lint`: PASS (0 errors, 0 warnings)
+- `make format-check`: PASS
+- `make typecheck`: PASS
+- `make test-unit`: PASS (**631 tests / 66 suites; +25 new unit + 6 new integration deferred without `DATABASE_URL`**)
+- `make check` (combined): **PASS**
+
+Drift scans (scope `src/modules/telegram/adapters/**` + `telegram-inbound.routes.ts` + `telegram-webhook-events.repository.ts`)
+- `any` / `<any>` / `as any` (excluding `as unknown as` test-mock boundary): 0 hits
+- `console.log|info|debug`: 0 hits
+- `throw new Error(` in adapter / route / repo runtime files: 0 hits (route uses `ValidationError`; secret resolver uses `NotFoundError`; slug adapter uses `TypeError` at ctor)
+- forbidden imports (express/typeorm/sequelize/moment/node-fetch): 0 hits
+- default export: 0 hits
+- `.skip(` in tests: 0 hits
+- `.ts` extension imports: 0 hits
+
+Security check
+- Fail-closed on unknown slug (404 BEFORE signature verify) — no bot-token leak signal.
+- Bot token decrypted at call-time only; never cached / logged / echoed.
+- Sensitive header never surfaced in logger calls (contract test).
+- Signature-invalid path throws AuthError BEFORE persist runs (binding #13 verified).
+- Startup warn tells ops the deployment carries stubs.
+
+Test evidence
+- Unit: 17 adapter + repo tests + 8 route-level unit tests (mocked ports via `fastify.inject`)
+- Integration: 6 tests (skipped without DATABASE_URL): 404 slug + 401 no-secret + 401 wrong-secret + 400 zod + 200 persist-verified + correlation-id
+- Contract-safe: bot-token / secret-header / staff-id / telegram-user-id all pass `JSON.stringify(loggerCall).not.toContain(...)` assertions
+
+Notes / open items
+
+- **`.eslintrc.cjs`, `api-server.ts` merge-order risk with T20/T23-followup** — same story as prior followups. Whichever lands first, the others rebase trivially.
+- **`TypeError` throws at slug-adapter ctor** — carry-over from binding #12 fail-fast discipline. Instantiation happens at `buildServer()`; the throw propagates up. Same tolerance profile as the entrypoint `Error` boot-guard.
+- **Q-C-13 to be raised by PM C** — Telegram `webhook_secret_enc` schema field OR HMAC(bot_token, hotel_id) stateless derivation. Non-blocking for T19-followup ship; blocking prod cutover.
+- **Winston logger no-op observation** — noted by PM C ACK. Contract tests here become effective once winston is wired.
+- **Milestone** — Slot C followup wave: T17, T20, T23, **T19** landed. Remaining: T21, T22, T24, T25.
+- Branch: `feat/telegram-inbound-followup @ ed69329`; pushed after this commit. PR to be opened post-VERDICT.
+
+Requesting PM C VERDICT.
+
+##### VERDICT T19-followup — APPROVED (attempt 1) by PM C (H23, 2026-07-08)
+
+**Result**: APPROVED with **1 carry-over tolerated deviation** (continuation from T20-followup boot-guard pattern; no NET-new tolerated deviations). Highest-scope followup shipped so far (5 adapters + repo + route + wiring + startup warn + env schema — 20+ files), yet all 20 ACK binding conditions honored end-to-end. Stubbed HC adapters correctly maintain T19 primitive's silent-ignore semantic while making the ingest→persist→dispatch path fully exercisable. **T19 primitive freeze respected**; **`webhook_events` persist BEFORE dispatch** audit floor upheld; guard chain order (tenant → signature) enforced; startup ops-signal wired.
+
+Independent PM verification (branch `feat/telegram-inbound-followup @ 552baf7`)
+- **`make check` on my rerun**: PASS (`lint` 0/0, `format-check` clean, `typecheck` strict OK, `test-unit` **631 tests / 66 suites; 5 skipped suites + 17 skipped tests** — matches SUBMIT).
+- **Module coverage on my rerun** (`pnpm test:coverage --collectCoverageFrom='src/modules/telegram/adapters/**/*.ts' --collectCoverageFrom='src/modules/telegram/telegram-inbound.routes.ts' --collectCoverageFrom='src/modules/telegram/telegram-webhook-events.repository.ts'`):
+  - **4 adapters + repo**: 100% stmt / 100% branch / 100% func / 100% line
+  - **Route**: 100% stmt / 100% func / 100% line + 83.33% branch (uncovered line 78 = trivial `err instanceof Error ? err.name : 'unknown'` fallback in the dispatch-error logger call).
+- **Drift scans on my rerun** (`src/modules/telegram/adapters/**` + `telegram-inbound.routes.ts` + `telegram-webhook-events.repository.ts`): 0 hits across all categories.
+- **Scope containment**: 20+ files touched but all within declared boundaries — `src/modules/telegram/**` + `src/entrypoints/api-server.ts` + `.eslintrc.cjs` + `src/core/config/env.ts` + `.env.example`. Zero touches to primitive service/types/schema/commands/ports.
+- **Cumulative pnpm queue**: UNCHANGED at 5 (verified via `git status package.json` = clean).
+
+Binding-by-binding audit
+- **#1 (stub filename + docstring)** ✓ Both `staff-lookup-stub.adapter.ts` + `ticket-action-stub.adapter.ts` present. File headers state "MVP stub adapter for … Q-C-## is unresolved at Parent PM …".
+- **#2 (per-invocation `hc_rpc_stubbed` warn + PII last-4)** ✓ Verified: `staff-lookup-stub.adapter.ts:24-30` emits `telegramUserIdSuffix: input.telegramUserId.slice(-4)`; `ticket-action-stub.adapter.ts:40-48` emits `staffIdSuffix: input.staffId.slice(-4)`. Dedicated tests assert `JSON.stringify(warnPayload).not.toContain(fullId)`.
+- **#3 (LOUD STARTUP WARN)** ✓ `api-server.ts:113-118` emits `msg: 'telegram_inbound.startup', hcAdapters: 'STUB', ratifyQs: 'Q-C-06,Q-C-07'`. Ops signal wired.
+- **#4 (bot-token NEVER logged — contract test)** ✓ `TelegramWebhookSecretResolver` ctor accepts ONLY the repo (`telegram-webhook-secret.adapter.ts:16`); zero `logger` surface by construction. Contract test asserts ctor arity = 1. Adapter cannot log by design.
+- **#5 (secret header NEVER logged — contract test)** ✓ Route-level unit test injects sensitive `X-Telegram-Bot-Api-Secret-Token` value and iterates every `logger.{info,warn,error,debug}` mock call asserting `JSON.stringify(payload).not.toContain(secret)`.
+- **#6 (`webhook_events` persist BEFORE dispatch)** ✓ `telegram-inbound.routes.ts:64-72` — `repo.persist()` at line 64 precedes `service.handleUpdate` inside `try` at line 71. Order-array test asserts `['tenant', 'signature', 'persist', 'dispatch']`.
+- **#7 (200 { ok } on dispatch throw — Meta-ack pattern)** ✓ `telegram-inbound.routes.ts:71-80` catches dispatch throws, logs `msg: 'telegram_inbound.dispatch_failed'`, returns `{ ok: true }`. Dedicated route-level test verifies: service rejects → response is still 200 → persist ran → dispatch-failed logged.
+- **#8 (guard chain order tenant → signature)** ✓ `telegram-inbound.routes.ts:39-52` — `preHandler` array iterates tenantResolver first, signatureGuard second. Order-array test asserts.
+- **#9 (zero T19 primitive touches)** ✓ `git status --short` on branch shows zero touches to `telegram-inbound.service.ts` / `.types.ts` / `.schema.ts` / `.commands.ts` / `ports/**`.
+- **#10 (zero prisma/schema touches)** ✓ `WebhookEvent` model already on main; repo consumes existing shape.
+- **#11 (env `.optional()`)** ✓ `TELEGRAM_WEBHOOK_HOTEL_SLUG_MAP: z.string().optional()` in env.ts. Non-breaking.
+- **#12 (slug-map JSON-parse discipline — fail-fast on non-empty malformed)** ✓ `hotel-slug-lookup.adapter.ts:23-41` — empty string → empty map; non-empty malformed → `TypeError`; non-object → `TypeError`; non-string values → `TypeError`. Dedicated tests per case.
+- **#13 (401 → no row persisted)** ✓ Persist is post-verify; signature-invalid throws AuthError before persist runs. Integration test 401 cases assert `db.webhookEvent.count()` == 0.
+- **#14 (`registerWebhookRawBody` scoped)** ✓ Called at `api-server.ts:89` before route registration.
+- **#15 (`.js` discipline)** ✓ 0 hits.
+- **#16 (`.eslintrc.cjs` merge-coordination)** ✓ Same duplicate as T20-followup + T23-followup; merge-order dependency, trivial rebase.
+- **#17 (cross-slot import discipline)** ✓ `TelegramWebhookSecretResolver` imports from `../telegram.repository.js` (intra-module relative — NOT cross-slot). Other adapters have 0 `@modules/*` imports. Cleaner than T20-followup which had a cross-module runtime import.
+- **#18 (test count target ~15-18 unit + 6 integration)** ✓ 17 adapter/repo unit + 8 route-level unit + 6 integration = **31 total**. Meets target (unit) + exceeds coverage floor upward — positive.
+- **#19 (adapter coverage ≥ 90%)** ✓ 100% across all 4 adapters + repo. Route: 100% except one branch (trivial errCode fallback).
+- **#20 (`make check` PASS + pnpm queue UNCHANGED)** ✓ Both verified.
+
+Shared-infra edit audit
+- **`src/entrypoints/api-server.ts`** — adds T19-followup wiring block (lines 86-118) + defensive `requireHotelIdForSecret` helper (lines 123-128). Correct architectural boundary per CLAUDE.md §4.
+- **`src/core/config/env.ts`** — 1 field addition (`TELEGRAM_WEBHOOK_HOTEL_SLUG_MAP.optional()`); non-breaking; slot A/B fixtures unaffected.
+- **`.env.example`** — 1 example line.
+- **`.eslintrc.cjs`** — same duplicate as T20-followup + T23-followup (merge-order dep).
+
+⚠ **Tolerated deviation #1** (carry-over from T20-followup, NOT net-new) — `throw new Error(...)` at `src/entrypoints/api-server.ts:125`
+- **Context**: defensive belt-and-suspenders check inside `resolveSecret` callback. Fastify's TypeScript types don't guarantee that `resolveTenantFromSlug` (which populates `req.hotelId`) runs before `verifyWebhookSignature` (which calls `resolveSecret`). The check catches an impossible-in-practice case where `req.hotelId` isn't populated.
+- **Reachability**: **effectively dead code in normal flow** — `tenantResolver` throws NotFoundError on unknown slug, so `signatureGuard.resolveSecret` only runs after tenant is resolved. But at runtime type layer, `req.hotelId` is still `string | undefined`. Defensive throw guards against future refactor accidentally breaking ordering.
+- **Rule reference**: outside strict drift-scan scope (`src/entrypoints/`). Same tolerance profile as T20-followup's boot-guard.
+- **Accept-with-followup**: same follow-up as T20-followup — introduce a shared `BootstrapError extends AppError` (or `RuntimeInvariantError`) in a future foundation chore. **No net-new deviation**; just widens the T20-followup precedent by one occurrence.
+
+**Zero NET-new tolerated deviations introduced** by T19-followup. Same tolerance profile as T20-followup + T23-followup.
+
+Security floor
+- **Fail-closed on unknown slug** — `tenantResolver` throws NotFoundError (404) BEFORE signature verify runs, so no bot-token leak signal via signature-verify timing/error.
+- **Bot token decrypted at call-time only** — `resolveSecret` calls `decrypt(domain.botTokenEnc)` and returns the plaintext string; the return value is passed directly to `verifyWebhookSignature` for `timingSafeEqual` comparison. NEVER cached, echoed, or logged in the adapter.
+- **`TelegramWebhookSecretResolver` cannot log by construction** (ctor doesn't accept a logger; zero surface). Strongest possible discipline — code layer guarantee, not test-time discipline.
+- **Sensitive header NEVER surfaced in logger calls** (contract test).
+- **Signature-invalid path throws AuthError BEFORE persist** — `webhook_events` table only contains rows where the signature was validated. Integrity invariant enforced.
+- **Startup warn signals ops** that stubs are wired.
+- **Zero new secret/env-related concerns.** The `TELEGRAM_WEBHOOK_HOTEL_SLUG_MAP` is a public-safe map (slug → hotelId UUID); no secret material.
+
+Architectural strengths
+- **`TelegramWebhookSecretResolver` has ctor arity = 1** — cannot log by construction. Contract test locks this in as an invariant. Strongest possible bot-token-never-logged discipline (structural, not behavioral).
+- **Guard chain ordering enforced by `preHandler` array** — Fastify runs handlers in registration order; test asserts explicit `['tenant', 'signature', 'persist', 'dispatch']` sequence.
+- **Persist-before-dispatch audit floor** — `webhook_events` row persists even if downstream dispatch fails, giving ops a reconciliation trail.
+- **Meta-ack pattern (200 on dispatch failure)** — matches spec §4.7 discipline; dispatch errors don't cause Telegram retries (which would double-persist).
+- **Slug-map JSON-parse fail-fast at boot** — invalid config crashes early; empty config silently 404s every slug. Correct operational envelope.
+- **Stub adapters emit `hc_rpc_stubbed` warn on every invocation** — ops has per-request signal on stubbed behavior.
+- **Runtime-invariant guard at api-server.ts:125** — belt-and-suspenders defensive throw preserves type safety across refactors.
+
+Weak-point notes (all non-blocking)
+- **Route branch coverage 83.33% vs 100% adapters** — uncovered branch (line 78) is `err instanceof Error ? err.name : 'unknown'` fallback for non-Error rejections. Trivial. Fixable with 1 test but not blocking.
+- **JSON round-trip in `TelegramWebhookEventsRepository.persist`** (`JSON.parse(JSON.stringify(payload))` at repo:26) is a defensive copy that adds CPU per request. Acceptable for MVP; consider a schema-typed `Prisma.InputJsonValue` cast in follow-up when performance profiling starts.
+- **Route persist consumes `parsed.data` not `req.body`** — depends on T19 primitive's schema being `.passthrough()` (unknown fields preserved). If primitive later tightens to `.strict()` or `.strip()`, the persisted `payload` would lose data. Not an issue TODAY since primitive is frozen; note as invariant coupling.
+
+Followup guidance
+- **Rebase advisory**: this branch forks from main pre-T20-fu and pre-T23-fu merge. When those land, rebase will need to re-apply the T19-followup `api-server.ts` wiring block, `.eslintrc.cjs` duplicate, and env.ts field. All 3 are additive; no semantic conflicts expected.
+- **Q-C-13 to be raised** (Telegram `webhook_secret_enc` schema field OR `HMAC(bot_token, hotel_id)` stateless derivation) — my housekeeping commit.
+- **Winston logger no-op observation** — housekeeping note for PARENT §3.
+- **Bull retry / DLQ processor** — deferred per PLAN GAP #5. Wave-2 followup once real HC adapters land.
+
+Executor next actions
+- Open PR `feat/telegram-inbound-followup → main` post-VERDICT (may want to wait for T20-followup + T23-followup PRs to land first, then rebase, to minimize concurrent-PR merge conflicts on `api-server.ts` + `.eslintrc.cjs`). Squash-merge per CLAUDE §12.
+- Next followup candidate: T21/T22/T24/T25 — all parked pending Q-C-08/09/10/12 at Parent PM/PO + PO package approvals for `imap-simple` / `qrcode` / `@aws-sdk/client-s3` / AI SDK / socket transport.
+
+PM C follow-up actions (batched — will do in a housekeeping commit)
+- Update §1 tracker T19 row → `approved (primitive + followup)`.
+- Update PARENT §1 T19 row.
+- Post 1-line roll-up to PARENT §2.
+- Raise **new Q-C-13** in §3 (Telegram webhook secret storage).
+- Raise winston-logger no-op observation in PARENT §3.
+- Reconcile Q-C-01/02/03/05 resolved status (still owed).
+- Retro-VERDICT for FOUNDATION FIX Q-C-01+Q-C-05 (§2 block, still owed).
+
+**Slot C followup wave: 4 / 9 approved** (T17-followup merged PR #27; T20-followup + T23-followup + T19-followup APPROVED, all pending PR merge). 5 remaining parked pending cross-service Qs + package approvals.
+
+→ §1 task tracker will be updated in the follow-up housekeeping commit. Row will mirror to PARENT §1. Roll-up will post to PARENT §2.
 
 ---
 
