@@ -2010,6 +2010,124 @@ Requesting PM C VERDICT — shared-infra + user-directed fix. If PM C approves, 
 
 ---
 
+### ASSIGNMENT T18 — claimed by exec-C (Satrio) at H23 (2026-07-08) 09:00
+- Branch: `feat/telegram-dept-routing`
+- Routed from: PM-STATUS-C.md §1 T18 (backlog; only remaining slot-C task). Self-claim via EXECUTOR-PROTOCOL §3(B). User directive: "Post your plan for T18" — treated as informal PO/PM authorization per T19 verdict precedent (§442) that user directive counts as PM ACK for narrow primitive shipping while Parent-PM Qs remain open.
+- Deps status: T02 ✓ (schema; departments NOT in this repo's schema per Q-OPS-06 pending). T03 ✓ (crypto helper — not consumed by T18 primitive). Q-C-01 ✓ (Prisma singleton merged PR #25). Q-OPS-06 + Q-CONTRACT-25 (Parent PM) still **open** — but per T19–T25 precedent, cross-service Qs are absorbed by port abstraction; adapter (shared-DB direct write OR RPC to HC) defers to T18-followup.
+
+#### PLAN T18 — exec-C (Satrio) at H23 (2026-07-08) 09:00
+
+**Scope recap**
+Deliver C2 per `docs/spec/MVP-INTEGRATION-FIRST.md §1.3 row 46` + `§4.10` + `§5 L125` and `docs/spec/04-integration-channels.md §2.1 row 30` + `§2.1 Cross-service write detail` + `§3.2 Per-dept config update`: `PUT /api/integrations/telegram/departments/:dept_id` (role `gm_admin`). Body `{ telegram_chat_id?, supervisor_telegram_id? }` writes-through to HC's `departments` table. **Per §4.10**: verify dept.hotel_id === session.hotelId BEFORE write; cross-tenant attempt → **404 NotFoundError** (spec-mandated enumeration guard, NOT 403). Both routing IDs are Telegram numeric IDs (chat/user); `supervisor_telegram_id` is individual-user PII → last-4 suffix log discipline (T20 precedent). This is a **shared bounded context** with T17 (Telegram config CRUD) semantically, but a **separate module** architecturally since the port targets HC's `departments` table (not this service's `telegram_configs`).
+
+**Session-start gate** (EXECUTOR-PROTOCOL §2)
+- Identity confirmed: Executor, Slot C (Satrio) ✓
+- CLAUDE.md loaded ✓
+- Task spec read: `docs/spec/MVP-INTEGRATION-FIRST.md §1.3 (C2 row 46)`, `§4.10 (cross-service write + tenancy check)`, `§5 L125 (AC)`; `docs/spec/04-integration-channels.md §2.1 (row 30 + Cross-service write detail)`, `§3.2 Per-dept config update`, `§7 does-NOT-own note L7 (`departments.telegram_chat_id` HC-owned)`, `§10 Q-CONTRACT-25 + Q-OPS-06`
+- Parent docs spot-read: `CLAUDE.md §4 (Hexagonal Disiplin), §5 (naming, errors), §6 (security)`; T19/T20/T24 PLAN+ACK+SUBMIT precedent (port-primitive with cross-service adapter deferred); `src/modules/telegram-outbound/` (T20 reference for reader-port pattern + PII-suffix discipline)
+- Dependencies: T02 ✓ (own-schema not consumed — HC-owned column). T03 ✓ (crypto not consumed by T18). Q-C-01 ✓ (Prisma singleton merged). **Q-OPS-06 + Q-CONTRACT-25 (Parent PM)**: open — port abstraction absorbs the write mechanism (shared-DB direct-write vs RPC-HC); primitive is decision-agnostic.
+- `make typecheck` clean ✓ / `make lint` clean ✓ (main clean after Q-C-01/Q-C-05 merge)
+- Scaffolder risk: none — new bounded context under `src/modules/telegram-dept-routing/`, no `pnpm create` / `prisma init`.
+
+**Files to create**
+```
+src/modules/telegram-dept-routing/
+├── index.ts                                              (barrel — service + ports + schemas + types)
+├── telegram-dept-routing.types.ts                        (UpdateDepartmentTelegramRoutingInput, TelegramDeptRoutingResult, DepartmentTenancy)
+├── telegram-dept-routing.schema.ts                       (zod strict; snake_case wire; at-least-one-field refine)
+├── telegram-dept-routing.service.ts                      (tenancy check → write; log with PII last-4 suffixes)
+├── ports/
+│   ├── department-telegram-read.port.ts                  (type-only; getForTenantCheck({ deptId }) → { hotelId } | null)
+│   └── department-telegram-write.port.ts                 (type-only; updateRouting({ deptId, telegramChatId?, supervisorTelegramId? }) → { updated: true } | { notFound: true })
+└── __tests__/
+    ├── telegram-dept-routing.schema.test.ts              (~5 tests: happy, single-field, reject empty body, reject overlong, reject unknown key strict)
+    └── telegram-dept-routing.service.test.ts             (~9 tests: happy full + happy chat-only + happy supervisor-only + NotFound-when-dept-missing + NotFound-when-cross-tenant + NotFound-when-write-race + PII suffix in log + no full ID in log + clock-injected updatedAt)
+```
+
+**Files NOT touched** (foundation authority + scope containment — matches T19–T25 precedent)
+- `src/entrypoints/api.ts` (still stub — Q-C-02; route landing deferred to T18-followup)
+- `src/plugins/**` (Q-C-03; JWT preHandler + `gm_admin` guard land in T18-followup)
+- `prisma/schema.prisma` (HC-owned `departments` — NOT this repo's schema per §7 line 7; adapter that talks to HC's table lives in T18-followup)
+- `src/modules/telegram/**` (T17; T18 does NOT read/write `telegram_configs` — separate concern)
+- `package.json` (zero new deps)
+- Any other module
+
+**Approach**
+1. **`ports/department-telegram-read.port.ts`** — type-only reader `DepartmentTelegramReadPort.getForTenantCheck({ deptId }): Promise<{ hotelId: string } | null>`. Adapter (T18-followup) resolves via (a) shared-DB direct Prisma query against `departments` if Q-OPS-06 lands shared-DB, OR (b) RPC to HC `GET /internal/departments/:id` if Q-OPS-06 lands RPC. Primitive is agnostic. Reader-port pattern per T23 first-class architecture.
+2. **`ports/department-telegram-write.port.ts`** — type-only writer `DepartmentTelegramWritePort.updateRouting({ deptId, telegramChatId?, supervisorTelegramId? }): Promise<{ updated: true } | { notFound: true }>`. Adapter same fork as read port; T18-followup landing. Return-type discriminated union (not throw) so service can classify race-condition dept-delete-between-check-and-write cleanly.
+3. **`telegram-dept-routing.service.ts`** — `TelegramDeptRoutingService.updateRouting(input)`. Flow:
+   - (a) `dept = await this.deptRead.getForTenantCheck({ deptId: input.deptId })`;
+   - (b) if `dept === null` → `throw NotFoundError('department', input.deptId)` (enumeration guard per §4.10);
+   - (c) if `dept.hotelId !== input.hotelId` → `throw NotFoundError('department', input.deptId)` (SAME 404 message — **critical spec §4.10 requirement** to prevent cross-tenant enumeration; NOT 403);
+   - (d) `result = await this.deptWrite.updateRouting({ deptId, telegramChatId: input.telegramChatId, supervisorTelegramId: input.supervisorTelegramId })`;
+   - (e) if `result.notFound === true` → `throw NotFoundError('department', input.deptId)` (race: dept deleted between check and write);
+   - (f) `logger.info({ msg: 'telegram_dept_routing.updated', module, hotelId, deptId, telegramChatIdSuffix?: last-4, supervisorTelegramIdSuffix?: last-4 })` — full IDs NEVER logged;
+   - (g) return `{ updated: true, updatedAt: this.clock.now().toISOString() }`.
+4. **`telegram-dept-routing.schema.ts`** — `UpdateDepartmentTelegramRoutingRequestSchema`: `{ telegram_chat_id?: string min1 max64, supervisor_telegram_id?: string min1 max64 }`, `.strict()`, `.refine(v => v.telegram_chat_id !== undefined || v.supervisor_telegram_id !== undefined, 'at least one field required')`. `UpdateDepartmentTelegramRoutingResponseSchema`: `{ updated: true, updated_at: ISO string }`. Snake_case wire.
+5. **Zero cross-module runtime imports** + **zero `@prisma/client` imports** — 4th consecutive slot-C module-level Docker-green candidate (after T23, T25, T20). Reader/writer ports keep the module HC-agnostic.
+6. **Unit tests** (~14):
+   - Schema (~5): happy full + happy chat-only + happy supervisor-only + reject empty body (both fields undefined) + reject overlong ID (65 chars) + reject unknown top-level key (`.strict()`).
+   - Service (~9): happy full-fields + happy chat-only + happy supervisor-only + `NotFoundError` when reader returns null + `NotFoundError` on cross-tenant (dept.hotelId !== input.hotelId) + `NotFoundError` on write-race (writer returns `{ notFound: true }`) + PII log discipline: `telegramChatIdSuffix` is last-4 of input + `supervisorTelegramIdSuffix` is last-4 of input + full ID NEVER appears in `JSON.stringify(loggedPayload)` + clock-injected `updatedAt` equals fixture.
+
+**GAPs / questions**
+
+- **GAP T18-#1 — Q-OPS-06 open (shared-DB vs RPC).** Primary blocker; parked at Parent PM per PM-STATUS-C.md §0 cross-service note. **My intent**: proceed on **port-primitive only** per T19–T25 precedent (cross-service Qs absorbed by port). Adapter lands in T18-followup once Q-OPS-06 resolved. Primitive is decision-agnostic — same code compiles against either adapter. Confirm.
+- **GAP T18-#2 — Response shape not spec'd.** Spec §2.1 row 30 + §5 L125 define behavior (write-through) but not response body shape. **My intent**: `{ updated: true, updated_at: ISO string }` — minimal confirmation payload; FE re-fetches `GET /api/settings/departments/:id` per §5 L125 to verify. Sibling to Q-C-11 (FE-team ratification); flag as Q-C-13 (FE-shape sub-Q) if PM C wants to formalize. Non-blocker.
+- **GAP T18-#3 — Nullable to unset routing?** Spec doesn't say whether `PUT` can clear a routing (setting to `null`) or only set/update. **My intent**: **PUT sets only** — reject `null` at schema (`z.string().min(1)`); "unset a routing" is a separate concern (out of MVP). Sibling to Q-C-11. If PM C prefers nullable, 1-line refactor: `z.string().min(1).nullable()`. Non-blocker.
+- **GAP T18-#4 — Tenant identification cascades Q-C-03/04.** Session `hotelId` extracted from JWT payload (Q-C-04 preferred outcome). **My intent**: service ctor takes `hotelId` as method-argument (from route handler post-Q-C-03 JWT plugin extract). Handler lands in T18-followup. Primitive service unit tests use synthetic `hotelId`. Confirm.
+- **GAP T18-#5 — Cross-tenant response body.** Spec §4.10: "cross-tenant attempt → 404". **My intent**: throw the SAME `NotFoundError('department', deptId)` as dept-missing case (identical error code + message via error-handler translation) — indistinguishable-by-response between "dept doesn't exist" and "dept exists but wrong tenant" to prevent enumeration. Dedicated test asserts identical thrown error shape. Confirm.
+- **GAP T18-#6 — PII suffix on `telegram_chat_id`.** T20 precedent: `chat_id` may be group (`-100…`) OR user (`12345…`); individual user IDs = PII → log suffix last-4. **My intent**: log `telegramChatIdSuffix = telegramChatId.slice(-4)` and `supervisorTelegramIdSuffix = supervisorTelegramId.slice(-4)` when present. Full IDs never logged. Same discipline as T20 binding #4. Confirm.
+
+**Awaiting PM C ACK** — especially GAP #1 (proceed on primitive-only per T19–T25 precedent despite Q-OPS-06 open) + GAP #5 (identical 404 shape for missing-vs-cross-tenant per §4.10 enumeration guard).
+
+##### PM C ACK T18 — PLAN APPROVED, proceed to coding (H23, 2026-07-08)
+
+**Executive**: PLAN faithful to spec (§2.1 row 30, §4.10 cross-tenant 404 mandate, §5 L125 AC, §7 L7 HC-owns-column, §3.2 endpoint semantics — verified against `docs/spec/MVP-INTEGRATION-FIRST.md` + `docs/spec/04-integration-channels.md`) and respects established slot-C narrow-primitive precedent (T19→T25). Reader+writer port split correctly absorbs Q-OPS-06 (shared-DB vs RPC) — primitive is fork-agnostic; the adapter is the right place to defer the decision. Foundation Qs Q-C-01/02/03/05 now resolved on `main` (PRs #25 `ff2d5e7` + #26 `41d25fb`/`c0d0fb7`) so T18-followup can land router + JWT preHandler after Q-OPS-06 lands. **Narrow primitive remains the correct scope** — without Q-OPS-06 the writer adapter cannot ship a runtime.
+
+Bounded-context / module-name check: `src/modules/telegram-dept-routing/` as a **separate module** is consistent with slot-C precedent (T17 `telegram/` + T19 `telegram-inbound/` + T20 `telegram-outbound/` — each operation = its own module). Approve name.
+
+**GAP resolutions**
+- **GAP #1 (Q-OPS-06 open)** — ACK. Port abstracts either fork; adapter → T18-followup post-Q-OPS-06.
+- **GAP #2 (response shape `{ updated: true, updated_at: ISO }`)** — ACK. Non-blocker; absorb under Q-C-11 (FE-shape). Do NOT open a new Q-C-13.
+- **GAP #3 (nullable-to-unset)** — ACK. PUT sets only; `z.string().min(1)`; unset semantics = out-of-MVP.
+- **GAP #4 (tenant-id source)** — ACK. Service takes `hotelId` as method arg; JWT extract at T18-followup handler (Q-C-03 now available on main).
+- **GAP #5 (identical 404 shape)** — ACK. `throw NotFoundError('department', deptId)` on BOTH null-dept AND cross-tenant. Dedicated test **MUST** assert byte-identical thrown-error shape between the two branches (same `code`, same `message`, same `details`). §4.10 anti-enumeration floor — non-negotiable.
+- **GAP #6 (PII last-4 suffix)** — ACK. Follow T20 binding #4 verbatim. `JSON.stringify(loggedPayload)` assertion required; full IDs never in log record.
+
+**Binding conditions (T18 primitive scope — all MUST be honored on SUBMIT)**
+
+1. **Reader port + writer port both type-only** — zero adapter code in `ports/**`.
+2. **Zero `@prisma/client` imports** — 4th consecutive slot-C module-level Docker-green candidate. `grep -rn "@prisma/client" src/modules/telegram-dept-routing/` = 0 hits on SUBMIT.
+3. **Zero cross-module runtime imports** — `grep -rn "^import.*@modules/" src/modules/telegram-dept-routing/` = 0 real hits (docstring OK).
+4. **`.js` extension discipline** — zero `.ts` import extensions.
+5. **Service flow order = spec §4.10 EXACTLY** — (a) read-for-tenancy → (b) NotFound on null → (c) NotFound on cross-tenant → (d) write → (e) NotFound on write-race → (f) log → (g) return. Order-of-operations test recommended.
+6. **Cross-tenant 404 anti-enumeration (CRITICAL, §4.10)** — SAME `NotFoundError('department', deptId)` for null-dept AND cross-tenant. NO `ForbiddenError`. NO alternate message. Byte-identical thrown-shape test required.
+7. **PII discipline (CRITICAL)** — log payload contains `telegramChatIdSuffix` + `supervisorTelegramIdSuffix` (last-4 via `slice(-4)`) only; full IDs never logged. `JSON.stringify(loggedPayload)` assertion required (2 dedicated tests, mirrors T20 pattern).
+8. **Zero decrypt / crypto imports** — routing IDs are plain identifiers (not secrets). No `@shared/utils/crypto` import.
+9. **Clock injectable** — optional `clock?: { now(): Date }` ctor arg; happy-path test asserts `updated_at === injected NOW`.
+10. **Zod `.strict()` + snake_case wire + `.refine()` at-least-one-field** on request; response also `.strict()`.
+11. **Writer port return type = discriminated union `{ updated: true } | { notFound: true }`** — NOT throw. Handles dept-deleted-between-check-and-write race cleanly.
+12. **Partial update semantic (explicit)** — writer updates ONLY provided fields; unspecified field preserved. Document via port docstring + dedicated tests (happy chat-only preserves supervisor + happy supervisor-only preserves chat). Do NOT null-out unspecified fields.
+13. **Never trust body for `hotel_id`** — service receives `hotelId` as method arg from JWT-extracted handler (T18-followup); primitive tests use synthetic value.
+14. **Error mapping** — only `NotFoundError` from `@core/errors`. No `throw new Error(...)`. No generic strings.
+15. **Barrel `index.ts` exports** — service + ports + schemas + types + DTOs (T20 binding #15 precedent).
+16. **Scope containment** — zero touches to `src/entrypoints/**`, `src/plugins/**`, `src/core/**`, `prisma/**`, `package.json`, other modules. Verify via `git status` on SUBMIT.
+17. **Test naming** — `should <expected> when <condition>` throughout.
+18. **Test count target** — ~14 per PLAN (5 schema + 9 service); ±2 acceptable.
+19. **`make check` PASS** + module coverage ≥ 90% stmt/branch/func/line (T23/T25 precedent).
+20. **Cumulative `pnpm add` PO queue UNCHANGED** — T18 adds ZERO new deps. Verify via `git status package.json` = clean on SUBMIT.
+
+**Minor housekeeping note**: the PLAN insert accidentally removed the `## 3. Slot C open questions` heading (append-only violation per PM-AGENT §0.4). Restored below in this ACK. Non-blocking; flagged for future append discipline.
+
+**PM-side housekeeping I own (during SUBMIT-validation cycle, not blocking executor)**
+- Retro-post VERDICT for FOUNDATION FIX Q-C-01+Q-C-05 (§2 block ending line 2009) reflecting PR #25 merge.
+- Reconcile §1 tracker rows: mark Q-C-01/02/03/05 resolved in §3; note T17-followup landed via PR #27.
+- Roll-up post to PARENT §2 after your T18 SUBMIT VERDICT.
+
+Proceed to coding on branch `feat/telegram-dept-routing`. Post SUBMIT when: `make check` green + drift-scans clean + all 20 bindings honored + spec §4.10 order-of-operations test present + PII-floor `JSON.stringify(loggedPayload)` assertion present + byte-identical NotFoundError shape test present for both null-dept and cross-tenant branches.
+
+---
+
 ## 3. Slot C open questions (mirror to PARENT §3)
 
 > PM C catat di sini ketika executor C raise `GAP` atau `BLOCKED`. Setelah resolve atau eskalasi ke Parent PM, update status. Parent PM consolidate ke `PM-STATUS-PARENT.md §3`.
