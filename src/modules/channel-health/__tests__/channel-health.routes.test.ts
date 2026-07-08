@@ -169,6 +169,25 @@ describe('channelHealthRoutes — GET /api/integrations/health', () => {
     }
   });
 
+  it('should query providers in the order dictated by PROVIDER_ORDER (binding #6)', async () => {
+    const repo = buildRepo();
+    const calls: string[] = [];
+    repo.findLatestByHotelProvider.mockImplementation((_hotelId, provider) => {
+      calls.push(provider);
+      return Promise.resolve(null);
+    });
+    const app = await buildApp(repo);
+    try {
+      await app.inject({ method: 'GET', url: '/api/integrations/health' });
+      // PROVIDER_ORDER is ['whatsapp', 'telegram', 'claude_api'] per T24
+      // primitive `channel-health.service.ts:98-102`. Locking in the
+      // ordering contract even though the reads run in parallel.
+      expect(calls).toEqual(['whatsapp', 'telegram', 'claude_api']);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('should fall back to injected clock for Claude last_check_at when no snapshot exists yet', async () => {
     const repo = buildRepo();
     repo.findLatestByHotelProvider.mockResolvedValue(null);
