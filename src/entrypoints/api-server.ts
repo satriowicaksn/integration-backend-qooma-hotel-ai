@@ -19,9 +19,18 @@ import { loadConfig } from '@core/config/env.js';
 import { createLogger } from '@core/logger/logger.js';
 import { db } from '@core/prisma/prisma-client.js';
 
+import { ChannelHealthRepository } from '@modules/channel-health/channel-health.repository.js';
+import { ChannelHealthReadAdapter } from '@modules/integration-overview/adapters/channel-health-read.adapter.js';
+import { QrStateReadAdapter } from '@modules/integration-overview/adapters/qr-state-read.adapter.js';
+import { TelegramConfigReadAdapter } from '@modules/integration-overview/adapters/telegram-config-read.adapter.js';
+import { WhatsappConfigReadAdapter } from '@modules/integration-overview/adapters/whatsapp-config-read.adapter.js';
+import { integrationOverviewRoutes } from '@modules/integration-overview/integration-overview.routes.js';
+import { IntegrationOverviewService } from '@modules/integration-overview/integration-overview.service.js';
+import { QrStateRepository } from '@modules/qr-provisioning/qr-provisioning.repository.js';
 import { TelegramConfigRepository } from '@modules/telegram/telegram.repository.js';
 import { telegramRoutes } from '@modules/telegram/telegram.routes.js';
 import { TelegramConfigService } from '@modules/telegram/telegram.service.js';
+import { WhatsappConfigRepository } from '@modules/whatsapp/whatsapp-config.repository.js';
 import { registerErrorHandler } from '@plugins/error-handler.plugin.js';
 import { jwtAuthGuard, requireRole } from '@plugins/jwt-auth.plugin.js';
 
@@ -71,6 +80,27 @@ export async function buildServer(): Promise<FastifyInstance> {
   const telegramService = new TelegramConfigService(telegramRepo, logger);
   await app.register(telegramRoutes, {
     service: telegramService,
+    guards: gmAdminGuards,
+  });
+
+  // T23-followup: aggregated integration overview (spec §2.1 row 27).
+  // 4 reader-port adapters bridge to each subsystem's repository; the
+  // service composes them via Promise.allSettled with per-subsystem
+  // resilience (T23 primitive bindings #9-#11).
+  const waRepo = new WhatsappConfigRepository(db);
+  const qrRepo = new QrStateRepository(db);
+  const healthRepo = new ChannelHealthRepository(db);
+  const overviewService = new IntegrationOverviewService(
+    {
+      whatsapp: new WhatsappConfigReadAdapter(waRepo),
+      telegram: new TelegramConfigReadAdapter(telegramRepo),
+      qr: new QrStateReadAdapter(qrRepo),
+      health: new ChannelHealthReadAdapter(healthRepo),
+    },
+    logger,
+  );
+  await app.register(integrationOverviewRoutes, {
+    service: overviewService,
     guards: gmAdminGuards,
   });
 
