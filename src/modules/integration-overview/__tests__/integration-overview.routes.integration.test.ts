@@ -14,6 +14,8 @@ import { resetConfigCache } from '@core/config/env.js';
 
 import { encrypt } from '@shared/utils/crypto.js';
 
+import { IntegrationOverviewResponseSchema } from '../integration-overview.schema.js';
+
 const HOTEL_ID = '11111111-2222-3333-4444-555555555555';
 const JWT_SECRET = 'x'.repeat(48);
 
@@ -222,6 +224,10 @@ runOrSkip('T23 route landing (integration)', () => {
     expect(body.health.whatsapp.status).toBe('healthy');
     expect(body.health.telegram.status).toBe('degraded');
     expect(body.health.claude_api.status).toBe('healthy');
+
+    // PM C ACK T23-followup binding #7: response must parse cleanly
+    // against the primitive's authoritative schema.
+    expect(() => IntegrationOverviewResponseSchema.parse(res.json())).not.toThrow();
   });
 
   it('should return partial subsystems when only some are configured', async () => {

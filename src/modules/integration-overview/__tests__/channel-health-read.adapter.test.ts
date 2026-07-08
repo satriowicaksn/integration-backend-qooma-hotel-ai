@@ -72,7 +72,7 @@ describe('ChannelHealthReadAdapter.getSnapshot', () => {
     expect(result.telegram.status).toBe('healthy');
   });
 
-  it('should fall back to `down` with lastMessageAt=null when a channel snapshot is missing', async () => {
+  it('should fall back to `down` with lastMessageAt=null when the WhatsApp snapshot is missing', async () => {
     const repo = buildRepo();
     repo.findLatestByHotelProvider.mockImplementation((_hotelId, provider) => {
       if (provider === 'whatsapp') return Promise.resolve(null);
@@ -83,6 +83,21 @@ describe('ChannelHealthReadAdapter.getSnapshot', () => {
     const result = await adapter.getSnapshot({ hotelId: HOTEL_ID });
 
     expect(result.whatsapp).toEqual({ status: 'down', lastMessageAt: null });
+  });
+
+  it('should fall back to `down` with lastMessageAt=null when the Telegram snapshot is missing', async () => {
+    const repo = buildRepo();
+    repo.findLatestByHotelProvider.mockImplementation((_hotelId, provider) => {
+      if (provider === 'telegram') return Promise.resolve(null);
+      return Promise.resolve(buildDomain(provider, 'healthy'));
+    });
+    const adapter = buildAdapter(repo);
+
+    const result = await adapter.getSnapshot({ hotelId: HOTEL_ID });
+
+    expect(result.telegram).toEqual({ status: 'down', lastMessageAt: null });
+    expect(result.whatsapp.status).toBe('healthy');
+    expect(result.claudeApi.status).toBe('healthy');
   });
 
   it('should default to all-down when the hotel has no snapshots at all', async () => {
@@ -123,5 +138,19 @@ describe('ChannelHealthReadAdapter.getSnapshot', () => {
     expect(result.whatsapp.status).toBe('degraded');
     expect(result.telegram.status).toBe('degraded');
     expect(result.claudeApi.status).toBe('degraded');
+  });
+
+  it('should fall back to SYSTEM_CLOCK (real wall clock) when no clock is injected (binding #3 default)', async () => {
+    const repo = buildRepo();
+    repo.findLatestByHotelProvider.mockResolvedValue(null);
+    const adapter = new ChannelHealthReadAdapter(repo as unknown as ChannelHealthRepository);
+
+    const before = new Date();
+    const result = await adapter.getSnapshot({ hotelId: HOTEL_ID });
+    const after = new Date();
+
+    const lastCheckAt = new Date(result.claudeApi.lastCheckAt);
+    expect(lastCheckAt.getTime()).toBeGreaterThanOrEqual(before.getTime());
+    expect(lastCheckAt.getTime()).toBeLessThanOrEqual(after.getTime());
   });
 });
