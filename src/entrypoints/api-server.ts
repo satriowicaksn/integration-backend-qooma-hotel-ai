@@ -13,6 +13,7 @@
 
 import { randomUUID } from 'node:crypto';
 
+import axios from 'axios';
 import Fastify, { type FastifyInstance } from 'fastify';
 
 import { loadConfig } from '@core/config/env.js';
@@ -22,10 +23,16 @@ import { db } from '@core/prisma/prisma-client.js';
 import { TelegramConfigRepository } from '@modules/telegram/telegram.repository.js';
 import { telegramRoutes } from '@modules/telegram/telegram.routes.js';
 import { TelegramConfigService } from '@modules/telegram/telegram.service.js';
+import { TelegramBotApiHttpAdapter } from '@modules/telegram-outbound/adapters/telegram-bot-api-http.adapter.js';
+import { TelegramConfigReadAdapter } from '@modules/telegram-outbound/adapters/telegram-config-read.adapter.js';
+import { telegramOutboundRoutes } from '@modules/telegram-outbound/telegram-outbound.routes.js';
+import { TelegramDispatchService } from '@modules/telegram-outbound/telegram-outbound.service.js';
 import { registerErrorHandler } from '@plugins/error-handler.plugin.js';
+import { internalRpcAuthGuard } from '@plugins/internal-rpc-auth.plugin.js';
 import { jwtAuthGuard, requireRole } from '@plugins/jwt-auth.plugin.js';
 
 const CORRELATION_HEADER = 'x-correlation-id';
+const BOT_API_TIMEOUT_MS = 10_000;
 
 export async function buildServer(): Promise<FastifyInstance> {
   const config = loadConfig();
@@ -72,6 +79,29 @@ export async function buildServer(): Promise<FastifyInstance> {
   await app.register(telegramRoutes, {
     service: telegramService,
     guards: gmAdminGuards,
+  });
+
+  // T20-followup: Telegram outbound RPC. Service-to-service secret
+  // (spec §4.11), NOT JWT. Reader adapter bridges to the T17 config
+  // repo; HTTP adapter posts to Telegram Bot API.
+  if (config.INTERNAL_RPC_SECRET === undefined) {
+    throw new Error(
+      'INTERNAL_RPC_SECRET is required to register internal RPC routes (spec §4.11).',
+    );
+  }
+  const telegramConfigReadAdapter = new TelegramConfigReadAdapter(telegramRepo);
+  const telegramBotApiClient = axios.create({ timeout: BOT_API_TIMEOUT_MS });
+  const telegramBotApiAdapter = new TelegramBotApiHttpAdapter(
+    telegramBotApiClient,
+    config.TELEGRAM_API_BASE,
+  );
+  const telegramDispatchService = new TelegramDispatchService(
+    { config: telegramConfigReadAdapter, botApi: telegramBotApiAdapter },
+    logger,
+  );
+  await app.register(telegramOutboundRoutes, {
+    service: telegramDispatchService,
+    guards: [internalRpcAuthGuard({ secret: config.INTERNAL_RPC_SECRET })],
   });
 
   return app;

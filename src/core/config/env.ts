@@ -39,6 +39,15 @@ const EnvSchema = z.object({
   JWT_REFRESH_TTL: z.string().default('30d'),
   ENCRYPTION_KEY: z.string().length(64),
   ENCRYPTION_KEY_VERSION: z.string().default('v1'),
+  // Internal RPC (service-to-service) shared secret. Consumed by
+  // `internalRpcAuthGuard`. Optional at load-time so unrelated unit
+  // tests can boot; `api-server.ts` throws at wiring time when an RPC
+  // route is registered without this set.
+  INTERNAL_RPC_SECRET: z.string().min(32).optional(),
+  // Telegram Bot API base URL. Default is Telegram's public endpoint;
+  // overridable for integration tests (local mock listener) and future
+  // corporate egress proxying.
+  TELEGRAM_API_BASE: z.string().url().default('https://api.telegram.org'),
 
   // Rate limit
   RATE_LIMIT_GLOBAL_PER_MIN: z.coerce.number().int().positive().default(100),
