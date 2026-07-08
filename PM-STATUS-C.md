@@ -2126,6 +2126,108 @@ Bounded-context / module-name check: `src/modules/telegram-dept-routing/` as a *
 
 Proceed to coding on branch `feat/telegram-dept-routing`. Post SUBMIT when: `make check` green + drift-scans clean + all 20 bindings honored + spec §4.10 order-of-operations test present + PII-floor `JSON.stringify(loggedPayload)` assertion present + byte-identical NotFoundError shape test present for both null-dept and cross-tenant branches.
 
+#### SUBMIT T18 — exec-C (Satrio) at H23 (2026-07-08) 10:30 (attempt 1, narrow primitive per PM C ACK)
+
+Task: T18 Per-dept Telegram routing write-through primitive (spec `04-integration-channels.md §2.1 row 30` + `§3.2` + `§4.10` + `§7 L7`; MVP §1.3 C2 + `§4.10` + `§5 L125`). Ships **`TelegramDeptRoutingService.updateRouting`** with §4.10 tenancy guard + IDENTICAL 404 anti-enumeration + PII-suffix log discipline + clock-injected `updatedAt` + narrow reader / writer ports (both type-only; adapter forks on Q-OPS-06) + zod strict schemas + 20 unit tests. Router + JWT `gm_admin` guard + Read/Write adapter + integration test = **all deferred** to T18-followup pending Q-OPS-06 + Q-CONTRACT-25 (adapter fork choice). Q-C-01/02/03/05 now landed on `main` (PRs #25/#26 per PM C ACK), so T18-followup unblockable once Q-OPS-06 resolves.
+
+**🎯 MODULE-LEVEL DOCKER-GREEN #4**: T18 module has **zero `@prisma/client` imports** + **zero cross-module runtime imports** — 4th consecutive slot-C module-level Docker-green after T23 + T25 + T20.
+
+Files changed: 8 (all new; scope strictly `src/modules/telegram-dept-routing/**`)
+  - src/modules/telegram-dept-routing/index.ts (new — barrel per binding #15; `.js` extensions per #4)
+  - src/modules/telegram-dept-routing/telegram-dept-routing.types.ts (new — `UpdateDepartmentTelegramRoutingInput`, `TelegramDeptRoutingResult`, `DepartmentTenancy`)
+  - src/modules/telegram-dept-routing/telegram-dept-routing.schema.ts (new — zod `.strict()` + `.refine` empty-body guard per binding #10; snake_case wire; 64-char ID cap)
+  - src/modules/telegram-dept-routing/telegram-dept-routing.service.ts (new — spec §4.10 order-of-operations per binding #5; identical `NotFoundError` per binding #6; PII suffix logs per binding #7; clock-injectable per binding #9; only `NotFoundError` errors per binding #14)
+  - src/modules/telegram-dept-routing/ports/department-telegram-read.port.ts (new — type-only reader per binding #1)
+  - src/modules/telegram-dept-routing/ports/department-telegram-write.port.ts (new — type-only writer with discriminated-union result per binding #11 + partial-update docstring per binding #12)
+  - src/modules/telegram-dept-routing/__tests__/telegram-dept-routing.schema.test.ts (new — 8 tests: happy both + happy chat-only + happy supervisor-only + reject empty + reject overlong + reject unknown-key strict + reject empty-string; response valid + reject non-literal `updated`)
+  - src/modules/telegram-dept-routing/__tests__/telegram-dept-routing.service.test.ts (new — 12 tests: 3 happy + 3 error-mapping + 3 PII + 1 injected-clock + 1 default-clock fallback + 3 order-of-operations + 1 byte-identical-shape)
+
+Files NOT touched (binding #16 scope containment, verified via `git status`)
+  - `src/entrypoints/api.ts` (Q-C-02 resolved on main; route landing still deferred to T18-followup pending Q-OPS-06 for adapter)
+  - `src/entrypoints/worker.ts` (T18 is CRUD, no worker)
+  - `src/core/prisma/prisma-client.ts` (Q-C-01 resolved on main; NOT consumed by primitive — port abstracts)
+  - `src/plugins/**` (Q-C-03 resolved on main; JWT `gm_admin` preHandler lands with T18-followup route)
+  - `prisma/schema.prisma` (HC-owned `departments` table per spec §7 L7 — NOT this repo's schema)
+  - `package.json` (zero new deps; cumulative PO queue UNCHANGED at 5 packages per binding #20)
+  - `src/modules/telegram/**` (T17; T18 does NOT touch `telegram_configs`)
+  - Any other module
+
+DoD self-check
+- [x] **Spec §2.1 row 30** — service signature accepts `{ hotelId, deptId, telegramChatId?, supervisorTelegramId? }`; route landing (`:dept_id` path param) deferred.
+- [x] **Spec §4.10 tenancy BEFORE write** — `service.ts:52` reads tenancy first; write only reached on match. Verified via order-of-operations test (`['read', 'write']`) + guard-fails-write test + guard-fails-logger test.
+- [x] **Spec §4.10 IDENTICAL 404 anti-enumeration (binding #6, CRITICAL)** — same `NotFoundError('department', deptId)` on BOTH null-dept AND cross-tenant. Dedicated byte-identical test compares `code`, `statusCode`, `message`, `details` across both branches.
+- [x] **MVP §5 L125 AC** — `updateRouting` writes both fields (happy full) OR only the provided field (happy partial); test asserts writer call omits the absent property (partial-update).
+- [x] **PM C ACK Binding #1** — reader + writer ports both type-only; no adapter code in `ports/**`.
+- [x] **Binding #2** — 0 `@prisma/client` imports (verified via grep).
+- [x] **Binding #3** — 0 `@modules/*` cross-module imports.
+- [x] **Binding #4** — 0 `.ts` extension imports; all barrel + inter-file use `.js`.
+- [x] **Binding #5** — order-of-operations test present (`callOrder` array, expects `['read', 'write']`).
+- [x] **Binding #6** — byte-identical shape assertion between null-dept and cross-tenant.
+- [x] **Binding #7** — PII suffix test with `JSON.stringify(record).not.toContain(fullId)` for both `telegramChatIdSuffix` and `supervisorTelegramIdSuffix`; omit-when-input-omits test.
+- [x] **Binding #8** — 0 `decrypt` imports; 0 `@shared/utils/crypto` imports (routing IDs are non-secret identifiers).
+- [x] **Binding #9** — `clock?: RoutingClock` ctor arg + `SYSTEM_CLOCK` default; both paths tested (injected `NOW` + real wall-clock fallback bracketed by `Date` samples).
+- [x] **Binding #10** — `.strict()` + snake_case + `.refine()` at-least-one on request; `.strict()` on response.
+- [x] **Binding #11** — writer port returns `{ updated: true } | { notFound: true }` (discriminated union, not throw); race-condition test validates `notFound` → `NotFoundError`.
+- [x] **Binding #12** — partial-update semantic documented in writer port docstring; happy chat-only + happy supervisor-only tests verify writer receives only provided keys (`expect(call).not.toHaveProperty(...)`).
+- [x] **Binding #13** — service takes `hotelId` as method arg (not body); tests use synthetic UUID.
+- [x] **Binding #14** — only `NotFoundError` from `@core/errors`; 0 `throw new Error(`.
+- [x] **Binding #15** — barrel exports service + ports + schemas + types + DTOs.
+- [x] **Binding #16** — verified `git status --short` shows only `src/modules/telegram-dept-routing/**`.
+- [x] **Binding #17** — `should <expected> when <condition>` test naming throughout.
+- [x] **Binding #18** — 20 tests (8 schema + 12 service); target ~14 ±2 exceeded upward for extra §4.10 + order-of-ops + default-clock coverage.
+- [x] **Binding #19** — module coverage **100% stmt / 100% branch / 100% func / 100% line** (exceeds 90% target).
+- [x] **Binding #20** — `git status package.json` = clean; cumulative PO queue UNCHANGED at 5 packages.
+
+Quality gate
+- `make lint`: PASS (0 errors, 0 warnings, `--max-warnings 0`)
+- `make format-check`: PASS
+- `make typecheck`: PASS (strict + `exactOptionalPropertyTypes` + `noUncheckedIndexedAccess`)
+- `make test-unit`: PASS (**607 tests / 60 suites; +20 new T18**)
+- `make check` (combined): **PASS**
+- T18 module coverage (isolated to `src/modules/telegram-dept-routing/**`): **100% stmt / 100% branch / 100% func / 100% line** — matches T23 cleanest-primitive precedent.
+
+Drift scans (per EXECUTOR-PROTOCOL §4.4; scope `src/modules/telegram-dept-routing/`)
+- `any` / `<any>` / `as any` (excluding `as unknown as` test-mock boundary): 0 hits
+- `console.log|info|debug`: 0 hits
+- `throw new Error(`: 0 hits — service uses `NotFoundError` only
+- forbidden imports (express/typeorm/sequelize/moment/node-fetch): 0 hits
+- default export: 0 hits
+- `.skip(` in tests: 0 hits
+- `@prisma/client` imports: **0 hits** (binding #2)
+- `@modules/*` cross-module imports: **0 hits** (binding #3)
+- `.ts` extension imports: **0 hits** (binding #4)
+- `decrypt(` / `@shared/utils/crypto` imports: **0 hits** (binding #8)
+
+Module-level Docker-green
+- Zero `@prisma/client` type imports → tsc has no reason to fail on this module in Dockerfile stage.
+- Zero cross-module runtime imports → module compiles independently.
+- **Assessment**: T18 module is Docker-green. **4th consecutive Docker-green module-level primitive** (T23 → T25 → T20 → T18). Whole-src Docker-build stage already green post-Q-C-05 fix (PR #25).
+
+Security check
+- Reader + writer ports both type-only → no runtime adapter surface until T18-followup composition.
+- §4.10 anti-enumeration guard: byte-identical `NotFoundError` for null-dept AND cross-tenant means an attacker cannot distinguish "dept exists in another tenant" from "dept doesn't exist." Dedicated test enforces the property.
+- PII: `supervisor_telegram_id` is always an individual user ID (PII per T20 §4); `telegram_chat_id` may be group or individual user. Both logged as last-4 suffix only; full IDs never in log JSON (dedicated tests assert via `JSON.stringify(record).not.toContain(...)`).
+- No hardcoded secret / URL / route path.
+- Zero new package. Cumulative PO queue unchanged.
+- No `decrypt` — routing IDs are non-secret identifiers.
+
+Test evidence (unit only)
+- Suites added: 2 (`telegram-dept-routing.schema`, `telegram-dept-routing.service`)
+- Tests added: 20 (8 schema + 12 service — groups: 3 happy, 3 error-mapping + guard, 3 PII, 2 clock (injected + default), 3 order-of-operations, 1 byte-identical-shape)
+- PII discipline coverage: 2 dedicated tests with `JSON.stringify(record)` assertions (chat + supervisor)
+- §4.10 discipline coverage: 3 dedicated tests (identical-shape + fail-closed-on-write + fail-closed-on-log)
+
+Notes / open items
+- **Route landing** — `PUT /api/integrations/telegram/departments/:dept_id` + JWT `gm_admin` guard + zod validation at handler + tenant extraction from JWT `hotel_id` (Q-C-04 preferred outcome) blocked on Q-OPS-06 (adapter fork) — router landing + adapter should ship together for testability.
+- **Read/Write adapter** — forks on Q-OPS-06:
+  - Shared-DB path: adapter uses Prisma raw query against HC's `departments` table (requires cross-schema access + tenancy in the SQL WHERE clause; T18-followup delivers repo + adapter that consumes `db` singleton from Q-C-01 fix).
+  - RPC path: adapter calls HC `GET /internal/departments/:id` + `PATCH /internal/departments/:id/telegram-routing` with T09 shared-secret auth.
+  - Primitive is identical against either.
+- **Milestone progress** — Slot C after T18 approval: **9 / 9 primitives shipped** (T17 + T18 + T19 + T20 + T21 + T22 + T23 + T24 + T25). Slot-C primitive wave **complete**. Followup wave (route + adapter + integration test per primitive) is the next phase, unblocked by Q-C-01/02/03/05 landed on main.
+- Branch: `feat/telegram-dept-routing @ 87a1133`; PR to be opened post-VERDICT.
+
+Requesting PM C VERDICT.
+
 ---
 
 ## 3. Slot C open questions (mirror to PARENT §3)
