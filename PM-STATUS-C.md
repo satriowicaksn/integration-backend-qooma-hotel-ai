@@ -36,7 +36,7 @@
 | T20 | Outbound Telegram dispatch RPC                                                   | approved (primitive) | PM C (H21, a1) | Primitive shipped: `TelegramDispatchService.sendMessage` (flat routing; call-time decrypt via T03 local stack-frame token; PII `chatIdSuffix` last-4 logs; body-content-never-logged) + 2 type-only ports + zod schemas + 18 unit tests (10 schema + 8 service — exceeds ACK ~10 target). **All 20 ACK binding conditions honored — 3rd consecutive slot-C primitive with ZERO deviations flagged** (after T23 + T25). RPC route + Bot API adapter + reader-port adapter + retry queue + integration = T20-followup on Q-C-02/03. Branch `feat/telegram-outbound-dispatch`, PR #24 open |
 | T21 | OTA email IMAP poller + parser pipeline + HC pending-visit RPC                   | approved (primitive) | PM C (H17, a1) | Primitive shipped: 2 per-OTA parsers (Booking.com + Agoda) + dispatcher + Prisma-direct repo + poll orchestrator (per-mailbox try/catch, UID-advance-on-{ok,conflict,unrecognized}, freeze-on-error, max-UID computation) + 2 type-only ports + 51 unit tests (exceeds ~40 target), 100% cov on 5 files + 98.64% stmt on service, drift clean, make check green on PM rerun. All 13 ACK binding conditions honored — notable: `imap_password_enc` never decrypted in primitive (0 `decrypt(` calls; drift-scan verified). Cron worker + IMAP + HC adapters + integration = T21-followup on Q-C-01/02/09 + `imap-simple` PO approval. Branch `feat/ota-email-poller`, PR #20 open |
 | T22 | QR generation + download (1024×1024 PNG, object storage)                         | approved (primitive) | PM C (H18, a1) | Primitive shipped: `wa.me` URL builder (module-private, digit-strip + URL-encode + omit `?text=` when empty) + 2 type-only ports (QR renderer + object storage) + Prisma-direct repo (`QrState` upsert; clock-injectable `generatedAt` bump on update) + service orchestrator (build URL → validate ≤500 → render → upload → upsert → return `{url, pngUrl, generatedAt}`; error mapping to ExternalServiceError/ValidationError/NotFoundError) + zod schemas + 28 unit tests (matches ACK target). All 15 ACK binding conditions honored. Router + `pnpm add qrcode` + `pnpm add @aws-sdk/client-s3` + adapters + integration = T22-followup on Q-C-01/02/03/10 + PO package approvals. Branch `feat/qr-generation`, PR #21 open |
-| T23 | Integration overview endpoint (`GET /api/integrations`)                          | approved (primitive) | PM C (H19, a1) | Primitive shipped: 4 reader-port interfaces + aggregator service (parallel Promise.all + per-subsystem silent-null-on-throw + synthetic-down health on read-fail, clock-injectable) + zod IntegrationOverviewResponseSchema (`.strict()` + snake_case + per-subsystem-nullable-except-health) + 17 unit tests (matches ACK ~15-20 target). **All 17 ACK binding conditions honored — cleanest slot-C primitive to date** (zero `@prisma/client`, zero cross-module imports, zero decrypt/maskToken, zero `.ts`-extension nit, zero deviations flagged). Reader-port pattern executes as designed. Router + `gm_admin` + reader-port adapters + integration = T23-followup on Q-C-02/03/11. Branch `feat/integration-overview`, PR #22 open |
+| T23 | Integration overview endpoint (`GET /api/integrations`)                          | approved (primitive + followup) | PM C (H19 primitive a1; H23 followup a1) | Primitive (PR #22 merged): 4 reader-port interfaces + aggregator (parallel Promise.all + per-subsystem silent-null + synthetic-down health on read-fail, clock-injectable) + zod strict schema + 17 unit tests. **All 17 primitive bindings honored — cleanest slot-C primitive to date.** **T23-followup APPROVED H23 a1**: 4 reader-port adapters (WA + Telegram + QR + ChannelHealth; per-provider `down` fallback at health adapter with injected clock) + `GET /api/integrations` route (JWT gm_admin guard; `req.hotelId` tenant scope) + pure `toResponseDto` camel→snake helper + `api-server.ts` wiring + 18 adapter unit tests (WA 4 + TG 3 + QR 3 + Health 8) + 6 integration tests (skipped without `DATABASE_URL` per T17/T20-followup precedent) including `IntegrationOverviewResponseSchema.parse(res.json())` assertion on happy path. **Adapter coverage 100% stmt/branch/func/line — cleanest slot-C followup to date, ZERO deviations flagged.** Shared-infra edits: `.eslintrc.cjs` = documented duplicate of T20-followup (merge-order dependency, no-op rebase); `api-server.ts` wiring block mirrors T20-followup pattern. **`throw new Error(` tolerated-deviation from T20-followup NOT re-introduced.** Branch `feat/integration-overview-followup @ 9d58fd0` (needs rebase — 4 commits ahead of main). Q-C-11 (FE shape) still open — refactor to matching wire = 1-file schema change. |
 | T24 | Channel health probes + snapshots + 2-poll debounce                              | approved (primitive) | PM C (H16, a1) | Primitive shipped: pure 2-poll debounce state-machine + 3 type-only provider ports + Prisma-direct repo + service (probes → debounce → per-poll persist → transition-gated HealthChangedEvent[]) + 29 unit tests, 100% cov all 4 runtime files, drift clean, make check green on PM rerun. All 9 ACK binding conditions honored. Router+worker cron+probe adapters+integration = T24-followup on Q-C-01/02/03/05/08 + AI SDK PO approval. Branch `feat/channel-health-probes @ d84c8cc`, PR #19 open |
 | T25 | `integration:health_changed` socket emits                                        | approved (primitive) | PM C (H20, a1) | Primitive shipped: type-only SocketPublisherPort + `HealthChangedPublisherService.publishAll` (per-event try/catch, aggregate never throws) + `toWirePayload` camelCase→snake_case conversion + local type mirror + zod schema + `HEALTH_CHANGED_EVENT_NAME` constant + 17 unit tests (exceeds ACK ~13 target). **All 17 ACK binding conditions honored — 2nd consecutive slot-C primitive with ZERO deviations** (after T23). PublishSummary extended to `{ published, failures, errorCodes }` for cron alerting. Adapter + worker cron composition = T25-followup on Q-C-02/12. Branch `feat/integration-health-socket-emit`, PR #23 open |
 
@@ -2505,6 +2505,80 @@ Notes / open items
 - Branch: `feat/integration-overview-followup @ 9d58fd0` (4 commits: PLAN, PM C ACK, code, binding-completion tests). PR to be opened post-VERDICT.
 
 Requesting PM C VERDICT.
+
+##### VERDICT T23-followup — APPROVED (attempt 1) by PM C (H23, 2026-07-08)
+
+**Result**: APPROVED with **ZERO deviations flagged**. Cleanest slot-C followup to date. All 20 ACK binding conditions honored; primitive freeze respected; adapter surface uniformly clean across all 4 modules; integration test seeds real Prisma rows and asserts against the primitive's authoritative schema via `IntegrationOverviewResponseSchema.parse(res.json())`. **`throw new Error(` tolerated-deviation from T20-followup NOT re-introduced** (route uses `AuthError`, adapters have 0 runtime error-throw, primitive service unchanged, no new boot-guard needed).
+
+Independent PM verification (branch `feat/integration-overview-followup @ 9d58fd0`)
+- **`make check` on my rerun**: PASS (`lint` 0/0, `format-check` clean, `typecheck` strict OK, `test-unit` **625 tests / 64 suites; 5 skipped suites + 17 skipped tests** — matches SUBMIT).
+- **Adapter coverage on my rerun** (`pnpm test:coverage --collectCoverageFrom='src/modules/integration-overview/adapters/**/*.ts'`): **100% stmt / 100% branch / 100% func / 100% line** across all 4 adapters (`whatsapp-config-read`, `telegram-config-read`, `qr-state-read`, `channel-health-read`). Matches T23 primitive "cleanest slot-C" precedent.
+- **Drift scans on my rerun** (`src/modules/integration-overview/adapters/**` + `integration-overview.routes.ts`): 0 hits on `any`, `console.*`, `throw new Error(`, forbidden imports, default export, `.ts` extension.
+- **Primitive layer integrity** (grep on `service.ts` / `types.ts` / `schema.ts` / `ports/**`): 0 real `@prisma/client` imports (1 comment-only mention verified), 0 cross-module `@modules/*` imports. Freeze verified.
+- **File inventory match**: 11 files as declared (5 new source + 5 new tests + 2 modified — `api-server.ts` + `.eslintrc.cjs`).
+- **Scope containment**: `git status --short` clean at branch tip; touches limited to `src/modules/integration-overview/**` + `src/entrypoints/api-server.ts` + `.eslintrc.cjs`.
+
+Binding-by-binding audit
+- **#1 (null passthrough WA/TG/QR)** ✓ All 3 adapters have `if (row/domain === null) return null;` at line 15 respectively; dedicated tests per adapter.
+- **#2 (health per-provider `down` fallback ×3)** ✓ `toChannelPill(null) → { status: 'down', lastMessageAt: null }`; `toClaudePill(null) → { status: 'down', lastCheckAt: clock.now().toISOString() }`. Tests: WA-missing (test:75), TG-missing (test:88), Claude-missing (test:60), all-missing (test:103).
+- **#3 (clock injection + SYSTEM_CLOCK default)** ✓ `ChannelHealthReadClock` interface + `SYSTEM_CLOCK` default + optional ctor arg. SYSTEM_CLOCK bracket test at test:143 uses `before`/`after` wall-clock envelope.
+- **#4 (`Promise.all` parallel)** ✓ `channel-health-read.adapter.ts:40` uses `Promise.all([WA, Telegram, claude_api])`. Parallelism test asserts `toHaveBeenCalledTimes(3)` + each provider called by name. **Weak-parallelism note** — the test doesn't strictly PROVE parallel vs sequential (both would produce 3 calls), but the code visibly uses `Promise.all`. Accepted; non-blocking.
+- **#5 (primitive zero cross-module import)** ✓ Verified via targeted grep. Adapter/tests only.
+- **#6 (`.js` extension discipline)** ✓ 0 hits.
+- **#7 (`IntegrationOverviewResponseSchema.parse(res.json())`)** ✓ `integration-overview.routes.integration.test.ts:230` asserts `expect(() => IntegrationOverviewResponseSchema.parse(res.json())).not.toThrow()` on happy path.
+- **#8 (`toResponseDto` pure + colocated + reversible)** ✓ Pure function at `integration-overview.routes.ts:51`. No logger, no clock, no side effects. Colocated pure helpers `toWhatsappWire` / `toTelegramWire` / `toQrWire` / `toHealthWire` / `toChannelPillWire` / `toClaudePillWire` — full camelCase → snake_case reversal.
+- **#9 (route auth composition)** ✓ `preHandler = [...opts.guards]`; api-server injects `[jwtAuthGuard, requireRole('gm_admin')]`. Integration test cases 1-2: 401 (no JWT) + 403 (staff role).
+- **#10 (hotelId from `req.hotelId`)** ✓ `requireHotelId(req.hotelId)` at `routes.ts:36`; throws `AuthError` if missing. Integration test JWT payload `hotel_id: HOTEL_ID` — tenant scope path validated.
+- **#11 (zero `@prisma/client` at primitive)** ✓ Verified.
+- **#12 (adapter coverage ≥ 90%)** ✓ 100% across all 4 metrics on all 4 adapters.
+- **#13 (adapter test count target ~15)** ✓ 18 total (WA 4 + TG 3 + QR 3 + Health 8). Upward overshoot on Health per binding #2 requirement + `SYSTEM_CLOCK` fallback + parallelism + degraded pass-through. **Positive.**
+- **#14 (integration test count target 6)** ✓ 6 cases exactly (401 + 403 + 200-empty + 200-all + 200-partial + correlation-id echo).
+- **#15 (barrel discipline)** ✓ Chose NOT to update barrel (executor rationale: `no-restricted-imports` blocks adapter re-exports; api-server imports adapters via direct paths — same as T17/T20-followup). Accepted.
+- **#16 (scope containment)** ✓ Verified via `git diff --stat`. `.eslintrc.cjs` change is documented carry-over from T20-followup (see GAP #6 note below).
+- **#17 (`make check` PASS + coverage ≥ 90%)** ✓ 100% actual.
+- **#18 (`pnpm add` queue UNCHANGED)** ✓ `package.json` untouched; cumulative queue stays at 5.
+- **#19 (test naming)** ✓ `should <expected> when <condition>` throughout all 24 tests (18 unit + 6 integration).
+- **#20 (rebase discipline)** ✓ Branch cleanly forks from main post-PR #28; 4 commits ahead as declared.
+
+Shared-infra edit audit
+- **`src/entrypoints/api-server.ts`** — adds T23-followup wiring block (mirrors T20-followup pattern). Wiring adds 3 new repos (`WhatsappConfigRepository`, `QrStateRepository`, `ChannelHealthRepository`), 4 adapters, service, route with existing `gmAdminGuards`. Correct architectural boundary per CLAUDE.md §4. Accepted.
+- **`.eslintrc.cjs`** — **duplicate of T20-followup change** (both branches add the same 3-line `no-restricted-imports: 'off'` override for `src/entrypoints/*.ts`). GAP #6 disclosure accurate. Merge-order dependency: whichever branch lands first, the other's rebase is a trivial no-op (identical text). Accepted with note.
+- **Zero touches to `env.ts`, `prisma/**`, `worker.ts`, `plugins/**`, `package.json`** — cleaner than T20-followup (no new env, no boot-guard). No new tolerated deviation introduced.
+
+Security floor
+- **JWT gm_admin guard enforced** at route registration via `gmAdminGuards`. Integration test verifies 401 / 403 branches.
+- **Tenant scope from `req.hotelId`** (populated by JWT plugin per Q-C-04) — never trusts body/query/header. Integration test JWT payload carries `hotel_id`.
+- **Zero decrypt / zero crypto** at overview layer — endpoint returns booleans (`has_access_token` / `has_bot_token`) derived from envelope-presence, NEVER decrypts. Full tokens never touched.
+- **No new secret / env / dep.** Response omits full token fields.
+
+Architectural strengths
+- **Uniform adapter shape across all 4 modules** — same ctor pattern, same null-passthrough discipline, same view-mapping structure. Easy to audit and extend.
+- **Adapter-local per-provider `down` fallback** vs service-level wholesale `syntheticHealthDown` — clean compositional separation. Adapter handles per-provider misses (missing snapshots); service handles port-throws (infrastructure faults).
+- **`toResponseDto` pure helper** at route file is exemplary: 7 small pure functions, each with a single conversion responsibility.
+- **Integration test uses realistic Prisma seeds** with `encrypt()` for token fields — mirrors production data shape.
+- **`IntegrationOverviewResponseSchema.parse(res.json())` assertion** at integration happy path is the strongest possible defense against schema/wire drift between primitive and followup.
+
+Weak-point notes (all non-blocking)
+- **Parallelism test proves call-count, not strict parallel-vs-sequential ordering** (binding #4). Code review confirms `Promise.all` is used — the guarantee is at the code layer. If we wanted a stronger assertion, a follow-up refactor could inject controlled-latency mocks and assert wall-time is bounded. Not worth blocking on for a followup at this scope.
+- **SUBMIT §2504 says "Slot C followup wave: T17, T20, T23 landed"** — actually T17 IS landed (PR #27 on main), T20-followup + T23-followup are both APPROVED but not yet merged to main. Minor wording nuance — treat as pending-merge, not landed.
+
+Followup guidance
+- **Rebase advisory**: branch is 4 commits ahead of main post-PR #28. Trivial rebase before opening PR.
+- **`.eslintrc.cjs` merge coordination**: T20-followup PR (not yet merged) and T23-followup PR both add the same 3-line eslint override. Whichever lands first, the other's rebase is a trivial no-op on that hunk. No pre-emptive action needed.
+- **Q-C-11 open**: FE contract ratification still pending at Parent PM/PO. Refactor to matching FE shape = 1-file change on `integration-overview.schema.ts` per PM C ACK T23 primitive §1258.
+
+Executor next actions
+- Open PR `feat/integration-overview-followup → main` post-VERDICT. Squash-merge per CLAUDE §12.
+- Next followup: T19/T21/T22/T24/T25 followups all parked pending Q-C-06/07/08/09/10/12 at Parent PM/PO (+ package approvals for T21 `imap-simple` / T22 `qrcode` + `@aws-sdk/client-s3` / T24 AI SDK / T25 socket transport lib).
+
+PM C follow-up actions (batched in this commit)
+- Update §1 tracker T23 row → `approved (primitive + followup)`.
+- Update PARENT §1 T23 row.
+- Post 1-line roll-up to PARENT §2.
+
+**Slot C followup wave: 3 / 9 approved** (T17-followup PR #27 merged; T20-followup + T23-followup APPROVED, pending PR merge). 6 remaining parked pending cross-service Qs.
+
+→ §1 task tracker updated. Row mirrored to PARENT §1. Roll-up posted to PARENT §2.
 
 ---
 
