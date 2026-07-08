@@ -2293,6 +2293,68 @@ PM C follow-up actions (I'll batch in this commit)
 
 → §1 task tracker updated. Row mirrored to PARENT §1. Roll-up posted to PARENT §2.
 
+### ASSIGNMENT T24-followup — claimed by exec-C (Satrio) at H23 (2026-07-08) 17:00
+- Branch: `feat/channel-health-followup`
+- Routed from: PM-STATUS-C.md §1 T24 approved-primitive note "Router+worker cron+probe adapters+integration = T24-followup on Q-C-01/02/03/05/08 + AI SDK PO approval." Q-C-01/02/03/05 ✓ merged; Q-C-08 (degraded semantics) OPEN — non-blocking for READ endpoint; AI SDK PO approval NOT yet granted — Claude API probe deferred. User directive: "Done, continue to the next T" — treated as informal PM authorization per T17-followup / T20-followup / T23-followup / T19-followup precedent (4 consecutive followups). Followup wave now on 4/8 (T17, T20, T23, T19 landed).
+- Deps status: T24 primitive ✓ (approved H16, PR #19 open). Q-C-01/02/03 ✓ merged. `ChannelHealthRepository` on main. `HealthResponseSchema` + `PROVIDER_ORDER` + `currentStatusOr` helpers on main.
+
+#### PLAN T24-followup — exec-C (Satrio) at H23 (2026-07-08) 17:00
+
+**Scope recap**
+Ship the **narrow READ route** landing per spec `04-integration-channels.md §2.2 row 48` + MVP §1.3 C8: `GET /api/integrations/health` behind `gm_admin` guards. Composes `HealthResponseDto` from the latest snapshot per provider (WA / Telegram / Claude API) via 3 parallel `ChannelHealthRepository.findLatestByHotelProvider` reads. Uses primitive-exported `PROVIDER_ORDER` + `currentStatusOr` helpers for status derivation. **Probe adapters + worker cron ARE DEFERRED** to a separate T24-followup-B task pending: (a) Claude API probe adapter needs AI SDK PO approval — currently not granted; (b) WhatsApp probe adapter needs slot-B WA config repo integration + Meta health-endpoint contract; (c) Telegram probe adapter needs bot API adapter (reuse T20-followup HTTP adapter); (d) cron worker needs `worker.ts` bootstrap similar to `api-server.ts` (Q-C-02 landed api.ts but worker.ts still stub — verify). This landing gives FE the read endpoint immediately; writes come with the probe wave.
+
+**Session-start gate** (EXECUTOR-PROTOCOL §2)
+- Identity confirmed: Executor, Slot C (Satrio) ✓
+- CLAUDE.md loaded ✓
+- Task spec read: `docs/spec/04-integration-channels.md §2.2 row 48` (endpoint + response shape); MVP §1.3 C8; T24 primitive PM C ACK precedent (`PROVIDER_ORDER`, `currentStatusOr`, per-provider `HealthResponseDto` shape via `HealthResponseSchema`); T24 `channel-health.schema.ts` docstring on `last_message_at` composition (route-layer concern)
+- Precedent spot-read: T17-followup + T20-followup + T23-followup + T19-followup route landings; `api-server.ts` wiring blocks; T23-followup's ChannelHealthReadAdapter (returns HealthOverviewView camelCase — this task uses HealthResponseDto snake_case, distinct shape per spec)
+- Dependencies: all foundation Qs landed; `ChannelHealthRepository` + `HealthResponseSchema` + `PROVIDER_ORDER` on main.
+- `make typecheck` clean ✓ / `make lint` clean ✓ on main
+- Scaffolder risk: none — new route file + wiring block append + tests. No `pnpm create` / generator.
+
+**Files to create**
+```
+src/modules/channel-health/
+├── channel-health.routes.ts              (GET /api/integrations/health; parallel reads → HealthResponseDto)
+└── __tests__/
+    ├── channel-health.routes.test.ts             (unit — mocked repo; pure composition + status derivation + 401/403 shapes when guarded)
+    └── channel-health.routes.integration.test.ts (integration — fastify.inject with real Prisma; 6 cases)
+```
+
+**Files to modify**
+- `src/entrypoints/api-server.ts` — reuse `healthRepo = new ChannelHealthRepository(db)` from T23-followup wiring block (if landed; else new); register `channelHealthRoutes` under `gmAdminGuards`.
+
+**Files NOT touched**
+- `src/modules/channel-health/channel-health.service.ts` / `.debounce.ts` / `.types.ts` / `.schema.ts` / `.repository.ts` / `ports/**` (T24 primitive frozen)
+- `src/entrypoints/worker.ts` (probe cron deferred — separate followup)
+- `prisma/schema.prisma` (no schema change)
+- `src/plugins/**` (guards already exist)
+- `src/core/config/env.ts` (no new env)
+- `package.json` (zero new deps)
+- Other modules
+
+**Approach**
+1. **`channel-health.routes.ts`** — Fastify plugin. `GET /api/integrations/health`. `preHandler` = injected guards (JWT + gm_admin). Handler: extract `hotelId` from `req.hotelId`; call `Promise.all` on 3 `repo.findLatestByHotelProvider(hotelId, provider)` calls (using `PROVIDER_ORDER`); pass results to a pure `toHealthResponseDto` helper that maps to snake_case + applies `currentStatusOr` fallback for un-probed providers (spec §2.2 optimistic-healthy default).
+2. **`toHealthResponseDto` shape** (per T24 primitive schema):
+   - `claude_api: { status, last_check_at: snapshot?.checkedAt.toISOString() ?? clock.now().toISOString() }` — `uptime_30d` + `avg_response_ms` OMITTED (route-layer aggregation deferred; schema `.optional()` accommodates)
+   - `whatsapp: { status, last_message_at: null }` — `last_message_at` per spec docstring §channel-health.schema.ts:11 = MAX(outbound_dispatch.sent_at) / MAX(webhook_events.received_at); MVP nulls it (schema `.nullable().optional()` accommodates)
+   - `telegram: { status, last_message_at: null }` — same
+3. **Clock injection** — the route handler takes a `clock` factory OR the module keeps a `SYSTEM_CLOCK` default; both fine. Follows T23-followup + T18 clock-injectable precedent for the un-probed Claude API fallback.
+4. **`api-server.ts` wiring** — reuse existing `healthRepo` (from T23-followup) if that PR landed to main; otherwise instantiate here. Register `channelHealthRoutes` under `gmAdminGuards`.
+5. **Unit tests** — 5-7 tests: composition happy (3 present) + Claude-missing → synthetic `last_check_at` + WA-missing → status=`healthy` fallback + PROVIDER_ORDER preserved + `IntegrationOverviewResponseSchema.parse` sibling (`HealthResponseSchema.parse`) assertion.
+6. **Integration tests** — 6 cases: 401 no-JWT + 403 wrong-role + 200 empty (no probes yet) + 200 with 3 seeded snapshots + status pass-through (seed a degraded row, verify response reflects) + x-correlation-id echo.
+
+**GAPs / questions**
+
+- **GAP T24fu-#1 — Scope split (READ only vs full)?** Full T24 followup would include probe adapters + worker cron. WA probe needs slot-B WA config integration; Claude probe needs AI SDK PO approval (5th cumulative package NOT yet granted); Telegram probe reuses T20-followup Bot API adapter (already exists). **My intent**: ship READ endpoint NOW as narrow followup; probe adapters + worker cron = separate T24-followup-B task. Sibling to T19-followup HC-stub composition strategy. Confirm.
+- **GAP T24fu-#2 — `last_message_at` composition deferred.** Spec §channel-health.schema.ts:11 mandates route-layer composition from `MAX(outbound_dispatch.sent_at)` / `MAX(webhook_events.received_at)`. Requires 4 extra DB reads per health poll (60s cadence — spec §2.2). **My intent**: MVP `null` for both channel fields (schema `.nullable().optional()` accommodates); a followup PR composes when performance testing justifies. Non-blocker.
+- **GAP T24fu-#3 — Claude `uptime_30d` / `avg_response_ms` deferred.** Requires aggregation query over 30-day snapshot window (spec §2.2 shows 99.7 / 1284). Schema `.optional()` accommodates. **My intent**: OMIT for MVP. Non-blocker.
+- **GAP T24fu-#4 — First-probe optimistic default.** Spec §2.2 doesn't spec what to show BEFORE any probe runs; T24 primitive's `currentStatusOr` returns `'healthy'` as optimistic default. **My intent**: adopt this default; ship. If FE wants a "no data yet" indicator, refactor is 1-line. Non-blocker.
+- **GAP T24fu-#5 — Clock for synthetic Claude `last_check_at`.** When no snapshot exists yet, Claude API's `last_check_at` (schema requires string) needs a value. **My intent**: use `clock.now().toISOString()` — same "synthetic-down + clock-injectable" pattern as T23-followup binding #3. Confirm.
+- **GAP T24fu-#6 — `.eslintrc.cjs` carry-over risk.** Same story as T20/T23/T19-followup. Non-blocker.
+
+**Awaiting PM C ACK** — especially GAP #1 (scope split confirms landing pattern) + GAP #2/#3 (deferred composition/aggregation for MVP).
+
 ---
 
 ## 3. Slot C open questions (mirror to PARENT §3)
