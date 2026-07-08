@@ -29,6 +29,8 @@ Pakai template di [0000-template.md](./0000-template.md). Filename: `<nomor-4-di
 | [0006](./0006-fastify-vs-express.md) | Fastify HTTP framework | accepted |
 | [0007](./0007-prisma-vs-alternatives.md) | Prisma ORM | accepted |
 | [0008](./0008-repo-scope-integration.md) | Repo scope = Integration / Channels service | accepted |
+| [0009](./0009-wa-integration-pure-boundary.md) | WA integration = pure integration layer (DND + quota di Hotel Core) | accepted |
+| [0010](./0010-wa-conversation-model.md) | WA conversation + message model (Integration owns storage) | accepted |
 
 ## Prinsip
 
