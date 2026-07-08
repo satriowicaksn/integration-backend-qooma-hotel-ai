@@ -29,6 +29,10 @@ import { TelegramWebhookEventsRepository } from '@modules/telegram/telegram-webh
 import { TelegramConfigRepository } from '@modules/telegram/telegram.repository.js';
 import { telegramRoutes } from '@modules/telegram/telegram.routes.js';
 import { TelegramConfigService } from '@modules/telegram/telegram.service.js';
+import { DepartmentTelegramReadStubAdapter } from '@modules/telegram-dept-routing/adapters/department-telegram-read-stub.adapter.js';
+import { DepartmentTelegramWriteStubAdapter } from '@modules/telegram-dept-routing/adapters/department-telegram-write-stub.adapter.js';
+import { telegramDeptRoutingRoutes } from '@modules/telegram-dept-routing/telegram-dept-routing.routes.js';
+import { TelegramDeptRoutingService } from '@modules/telegram-dept-routing/telegram-dept-routing.service.js';
 import { registerErrorHandler } from '@plugins/error-handler.plugin.js';
 import { registerWebhookRawBody, verifyWebhookSignature } from '@plugins/hmac-validator.plugin.js';
 import { jwtAuthGuard, requireRole } from '@plugins/jwt-auth.plugin.js';
@@ -106,6 +110,32 @@ export async function buildServer(): Promise<FastifyInstance> {
         secretResolver.resolveSecret({ hotelId: requireHotelIdForSecret(req.hotelId) }),
     }),
     logger,
+  });
+
+  // T18-followup: Per-dept Telegram routing write-through (spec §2.1 row 30).
+  // HC read/write adapters ship as stubs pending Q-OPS-06 + Q-CONTRACT-25
+  // (PLAN GAP #1). Env `TELEGRAM_DEPT_ROUTING_MAP` seeds the dept→hotel
+  // lookup; the write stub NEVER touches HC's `departments` table.
+  const deptReadStub = new DepartmentTelegramReadStubAdapter(
+    config.TELEGRAM_DEPT_ROUTING_MAP ?? '',
+  );
+  const deptWriteStub = new DepartmentTelegramWriteStubAdapter(logger);
+  const deptRoutingService = new TelegramDeptRoutingService(
+    { deptRead: deptReadStub, deptWrite: deptWriteStub },
+    logger,
+  );
+  await app.register(telegramDeptRoutingRoutes, {
+    service: deptRoutingService,
+    guards: gmAdminGuards,
+  });
+
+  // Loud startup signal: this deployment carries stubbed HC adapters.
+  // Ops should see this on every boot until Q-OPS-06 + Q-CONTRACT-25 land.
+  logger.warn({
+    msg: 'telegram_dept_routing.startup',
+    module: 'telegram-dept-routing',
+    hcAdapters: 'STUB',
+    ratifyQs: 'Q-OPS-06,Q-CONTRACT-25',
   });
 
   return app;
