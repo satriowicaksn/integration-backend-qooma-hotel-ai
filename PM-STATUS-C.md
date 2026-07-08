@@ -2375,6 +2375,58 @@ src/modules/integration-overview/__tests__/
 
 **Awaiting PM C ACK** — especially GAP #1 (hasAccessToken semantics) + GAP #5 (cross-module adapter imports, precedented by T20-followup).
 
+##### PM C ACK T23-followup — PLAN APPROVED, proceed to coding (H23, 2026-07-08)
+
+**Executive**: PLAN is faithful to spec §2.1 row 27, respects the T23 primitive freeze (§3 files-not-touched list is correct), and mirrors the T20-followup composition pattern cleanly (reader adapter + entrypoint wiring + integration test with buildServer). Cross-checked all 4 source-module repositories exist on main and their return shapes (`WhatsappConfigRepository.findByHotelId → WaConfig | null`; `TelegramConfigRepository.findByHotelId → TelegramConfigDomain | null`; `QrStateRepository.findByHotelId → QrDomain | null`; `ChannelHealthRepository.findLatestByHotelProvider(hotelId, provider) → ChannelHealthDomain | null`). Also cross-checked `jwt-auth.plugin.ts:173` — `req.hotelId = payload.hotel_id` populates the field per Q-C-04 tenancy binding, so the route's `req.hotelId` extraction is correct.
+
+**GAP resolutions**
+- **GAP #1 (`hasAccessToken`/`hasBotToken` = presence check)** — ACK option (a): `accessTokenEnc.length > 0` / `botTokenEnc.length > 0`. Presence check is stable, resistant to future refactors that might null out `verifiedAt`, and matches primitive schema semantics. Non-blocker.
+- **GAP #2 (missing-snapshot per-provider `down` fallback at adapter)** — ACK option (a). Adapter-local fallback keeps the service's binding #11 wholesale `syntheticHealthDown()` for port-throws, while giving FE a stable shape for per-provider misses. Clock must be injectable at the health adapter (mirror service's clock discipline) so the fallback `lastCheckAt` is testable. **Binding**: no wall-clock `new Date()` at runtime — inject a `HealthReadClock` interface with `SYSTEM_CLOCK` default.
+- **GAP #3 (Q-C-11 open, ship primitive schema unchanged)** — ACK. 1-file schema refactor when FE contract lands; T23-followup schema-freeze is a documented pending-Q. Non-blocker.
+- **GAP #4 (omit `uptime_30d` / `avg_response_ms`)** — ACK. Schema `.optional()` accommodates. Aggregation query lands with Q-C-11 resolution. Non-blocker.
+- **GAP #5 (cross-module adapter imports)** — ACK. Precedent from T20-followup adapter → `@modules/telegram/telegram.repository.js`. Reader-port's whole point. Adapters MAY import `@modules/{whatsapp,telegram,qr-provisioning,channel-health}/*.repository.js`; primitive service + ports remain zero cross-module imports.
+
+**Binding conditions (T23-followup scope — all MUST be honored on SUBMIT)**
+
+1. **Adapter → view mapping is TOTAL** — for each of WA/Telegram/QR: if `repo.findByHotelId(hotelId) === null` → adapter returns `null`. Explicit null-passthrough test per adapter. PLAN step 1-3 didn't state this explicitly — codify.
+2. **Health adapter always returns a non-null `HealthOverviewView`** — 3 parallel `Promise.all([WA, Telegram, claude_api])` calls; missing snapshot per provider → `{ status: 'down' }` (for WA/Telegram: omit `lastMessageAt`) OR `{ status: 'down', lastCheckAt: clock.now().toISOString() }` (Claude, since `lastCheckAt` is required by `ClaudeApiHealthPill`). Present snapshot → real status + `checkedAt.toISOString()`. Dedicated tests: all-present, one-missing-per-provider (×3), all-missing.
+3. **Health adapter clock injection** — optional `clock?: { now(): Date }` ctor arg; `SYSTEM_CLOCK` default; dedicated test uses injected fixture clock. Mirrors T20 primitive binding #10.
+4. **Health adapter parallel calls (not sequential)** — use `Promise.all`, NOT sequential await chain. Dedicated test asserts parallelism (e.g. `expect(order).toEqual(['start-wa', 'start-tg', 'start-claude', 'resolve-*', 'resolve-*', 'resolve-*'])` or spy call-timing).
+5. **Zero cross-module import at primitive layer sustained** — `grep -rn "^import.*@modules/" src/modules/integration-overview/` = **only inside `adapters/**` and `__tests__/**`**. Primitive service.ts / types.ts / schema.ts / ports/**/*.ts MUST remain 0 cross-module imports. Codified via drift-scan on SUBMIT.
+6. **`.js` extension discipline** — 0 `.ts` import extensions across all new files.
+7. **`.strict()` snake_case wire on response** — `IntegrationOverviewResponseSchema` from primitive is authoritative. The `toResponseDto` helper in `integration-overview.routes.ts` MUST produce output that `parse()` cleanly against the schema (dedicated integration test case: `IntegrationOverviewResponseSchema.parse(res.json())` succeeds on happy path).
+8. **`toResponseDto` = pure + colocated + reversible** — pure function in `integration-overview.routes.ts`; camelCase domain → snake_case wire; mirrors T25 primitive's `toWirePayload` helper. NO side effects; NO logger; NO clock.
+9. **Route auth composition** — `preHandler = [...guards]` receives `jwtAuthGuard` + `requireRole('gm_admin')` composed at api-server wiring. Route plugin auth-agnostic per T17-followup + T20-followup precedent. Integration test asserts 401 (no JWT), 403 (wrong role), 200 (gm_admin).
+10. **`hotelId` extraction from `req.hotelId`** — populated by JWT plugin at `jwt-auth.plugin.ts:173`. NEVER trust body / query / header for `hotel_id`. Integration test asserts a JWT with `hotel_id: X` returns X's data (and NOT another hotel's, if seeded).
+11. **Zero `@prisma/client` at primitive layer sustained** — adapters MAY import from Prisma types (via source-module repos); primitive layer must remain Prisma-free.
+12. **Adapter test coverage ≥ 90%** stmt/branch/func/line per adapter. Health adapter needs the most branches — expect ≥ 6 tests (not 4 as PLAN suggested; upgrade to cover per-provider fallback × 3 + parallelism + happy).
+13. **Adapter unit test count target** — WA/Telegram/QR: 3 tests each (null passthrough + domain→view + edge case). Health: ~6 tests (see #12). Total ~15 unit tests. ±3 acceptable.
+14. **Integration test count target** — 6 cases minimum: 401 no-JWT + 403 wrong-role + 200 all-configured + 200 nothing-configured (all null except health) + 200 partial-configured + x-correlation-id echo. Additional case (200 with only WA configured, verify per-subsystem nullability) welcomed. Skip-without-DATABASE_URL per T17-followup precedent.
+15. **Barrel discipline** — `index.ts` barrel MAY export adapters + route registrar; primitive types/service/ports/schemas remain exported as before.
+16. **Scope containment** — zero touches to `src/entrypoints/worker.ts`, `src/plugins/**`, `src/core/**`, `prisma/**`, `package.json`, `src/core/config/env.ts`, `.eslintrc.cjs`, other modules. Verify via `git status --short` on SUBMIT. (Existing `.eslintrc.cjs` entrypoint override from T20-followup already covers adapter imports at entrypoints — no additional eslint change needed.)
+17. **`make check` PASS** + module coverage ≥ 90%.
+18. **`pnpm add` queue UNCHANGED** — T23-followup adds ZERO new deps (no S3 SDK, no HTTP client — everything reads from local Prisma).
+19. **Test naming** — `should <expected> when <condition>` throughout.
+20. **Rebase discipline** — this branch (`feat/integration-overview-followup`) forks from main post-T18 merge; before opening PR, verify `git log main..HEAD` is clean of any drift from upstream conflict.
+
+**Carry-over from prior VERDICTs (still in effect)**
+- **`throw new Error(` at entrypoint boot-guard** — carry-over tolerated deviation from T20-followup. If T23-followup wiring adds another boot-guard (unlikely — no new env), plain `Error` at entrypoint remains accepted pending shared `BootstrapError extends AppError` future chore. Do NOT introduce `throw new Error(` in any adapter or route file.
+- **INTERNAL_RPC_SECRET fixture-alignment** — not relevant to T23-followup (JWT-guarded, not RPC).
+
+**Minor housekeeping note (3rd occurrence)** — the PLAN insert accidentally removed the `## 3. Slot C open questions` heading (append-only violation per PM-AGENT §0.4) for the 3rd consecutive followup PLAN (T18, T20-followup, T23-followup). Restored below. **Executor please add the `## 3.` heading back after your `Awaiting PM C ACK` line in future PLAN inserts — appending your PLAN block should not disturb prior section headings.**
+
+**PM-side housekeeping owed** (batched — will do during SUBMIT-validation cycle or a follow-up housekeeping commit)
+- Retro-post VERDICT for FOUNDATION FIX Q-C-01+Q-C-05 (§2 block).
+- Close Q-C-01/02/03/05 in §3 to reflect PR #25/#26 merge.
+- Raise `INTERNAL_RPC_SECRET` fixture-alignment sync note at PARENT §3.
+- Raise `BootstrapError extends AppError` chore note.
+
+Proceed to coding on branch `feat/integration-overview-followup`. Post SUBMIT when: `make check` green + drift-scans clean + all 20 bindings honored + null-passthrough tests present (WA/TG/QR) + health per-provider fallback tests present (×3) + parallelism test present + `IntegrationOverviewResponseSchema.parse(res.json())` integration assertion present + integration test covers 401/403/200-all/200-none/200-partial/correlation-id.
+
+---
+
+## 3. Slot C open questions (mirror to PARENT §3)
+
 > PM C catat di sini ketika executor C raise `GAP` atau `BLOCKED`. Setelah resolve atau eskalasi ke Parent PM, update status. Parent PM consolidate ke `PM-STATUS-PARENT.md §3`.
 
 | ID            | Question | Source         | Status | Resolution |
