@@ -37,7 +37,7 @@
 | T21 | OTA email IMAP poller + parser pipeline + HC pending-visit RPC                   | approved (primitive) | PM C (H17, a1) | Primitive shipped: 2 per-OTA parsers (Booking.com + Agoda) + dispatcher + Prisma-direct repo + poll orchestrator (per-mailbox try/catch, UID-advance-on-{ok,conflict,unrecognized}, freeze-on-error, max-UID computation) + 2 type-only ports + 51 unit tests (exceeds ~40 target), 100% cov on 5 files + 98.64% stmt on service, drift clean, make check green on PM rerun. All 13 ACK binding conditions honored — notable: `imap_password_enc` never decrypted in primitive (0 `decrypt(` calls; drift-scan verified). Cron worker + IMAP + HC adapters + integration = T21-followup on Q-C-01/02/09 + `imap-simple` PO approval. Branch `feat/ota-email-poller`, PR #20 open |
 | T22 | QR generation + download (1024×1024 PNG, object storage)                         | approved (primitive) | PM C (H18, a1) | Primitive shipped: `wa.me` URL builder (module-private, digit-strip + URL-encode + omit `?text=` when empty) + 2 type-only ports (QR renderer + object storage) + Prisma-direct repo (`QrState` upsert; clock-injectable `generatedAt` bump on update) + service orchestrator (build URL → validate ≤500 → render → upload → upsert → return `{url, pngUrl, generatedAt}`; error mapping to ExternalServiceError/ValidationError/NotFoundError) + zod schemas + 28 unit tests (matches ACK target). All 15 ACK binding conditions honored. Router + `pnpm add qrcode` + `pnpm add @aws-sdk/client-s3` + adapters + integration = T22-followup on Q-C-01/02/03/10 + PO package approvals. Branch `feat/qr-generation`, PR #21 open |
 | T23 | Integration overview endpoint (`GET /api/integrations`)                          | approved (primitive) | PM C (H19, a1) | Primitive shipped: 4 reader-port interfaces + aggregator service (parallel Promise.all + per-subsystem silent-null-on-throw + synthetic-down health on read-fail, clock-injectable) + zod IntegrationOverviewResponseSchema (`.strict()` + snake_case + per-subsystem-nullable-except-health) + 17 unit tests (matches ACK ~15-20 target). **All 17 ACK binding conditions honored — cleanest slot-C primitive to date** (zero `@prisma/client`, zero cross-module imports, zero decrypt/maskToken, zero `.ts`-extension nit, zero deviations flagged). Reader-port pattern executes as designed. Router + `gm_admin` + reader-port adapters + integration = T23-followup on Q-C-02/03/11. Branch `feat/integration-overview`, PR #22 open |
-| T24 | Channel health probes + snapshots + 2-poll debounce                              | approved (primitive) | PM C (H16, a1) | Primitive shipped: pure 2-poll debounce state-machine + 3 type-only provider ports + Prisma-direct repo + service (probes → debounce → per-poll persist → transition-gated HealthChangedEvent[]) + 29 unit tests, 100% cov all 4 runtime files, drift clean, make check green on PM rerun. All 9 ACK binding conditions honored. Router+worker cron+probe adapters+integration = T24-followup on Q-C-01/02/03/05/08 + AI SDK PO approval. Branch `feat/channel-health-probes @ d84c8cc`, PR #19 open |
+| T24 | Channel health probes + snapshots + 2-poll debounce                              | approved (primitive + followup) | PM C (H16 primitive a1; H23 followup a1) | Primitive (PR #19 pending): pure 2-poll debounce state-machine + 3 type-only provider ports + Prisma-direct repo + service (probes→debounce→per-poll persist→transition-gated HealthChangedEvent[]) + 29 unit tests. **All 9 primitive bindings honored.** **T24-followup APPROVED H23 a1 — SMALLEST + CLEANEST followup in the wave**: narrow READ endpoint `GET /api/integrations/health` (gm_admin) + pure `toHealthResponseDto` helper (consumes primitive `PROVIDER_ORDER` + `currentStatusOr` + `HealthResponseSchema`) + `api-server.ts` wiring + 11 unit + 6 integration tests. **4 files, 544 insertions total; route coverage 100% stmt/branch/func/line; drift clean; ZERO tolerated deviations flagged**. **First followup to skip `.eslintrc.cjs` carry-over** (no adapter imports needed). `HealthResponseSchema.parse(res.json())` applied 4× (1 unit + 3 integration) — strongest schema/wire drift defense in the wave. Uses `AuthError` at defensive fallback (NOT `throw new Error`). **⚠ Architectural note (Q-C-08/11 sync)**: T24-fu optimistic-`healthy` default for missing snapshots contradicts T23-fu's pessimistic-`down` fallback — refactor to either = 1-file change; reconciliation deferred to FE-team + PO sync. Probes + worker cron = T24-followup-B queued behind Claude AI SDK PO approval. Branch `feat/channel-health-followup @ ad0d8e6` (rebase needed after T20-fu + T23-fu + T19-fu merge). |
 | T25 | `integration:health_changed` socket emits                                        | approved (primitive) | PM C (H20, a1) | Primitive shipped: type-only SocketPublisherPort + `HealthChangedPublisherService.publishAll` (per-event try/catch, aggregate never throws) + `toWirePayload` camelCase→snake_case conversion + local type mirror + zod schema + `HEALTH_CHANGED_EVENT_NAME` constant + 17 unit tests (exceeds ACK ~13 target). **All 17 ACK binding conditions honored — 2nd consecutive slot-C primitive with ZERO deviations** (after T23). PublishSummary extended to `{ published, failures, errorCodes }` for cron alerting. Adapter + worker cron composition = T25-followup on Q-C-02/12. Branch `feat/integration-health-socket-emit`, PR #23 open |
 
 ---
@@ -2489,6 +2489,82 @@ Notes / open items
 - Branch: `feat/channel-health-followup @ 42ade60`; pushed after this commit. PR to be opened post-VERDICT.
 
 Requesting PM C VERDICT.
+
+##### VERDICT T24-followup — APPROVED (attempt 1) by PM C (H23, 2026-07-08)
+
+**Result**: APPROVED with **ZERO tolerated deviations flagged**. **Smallest, cleanest followup in the wave** — 4 files, 544 insertions total, 100% coverage across all 4 metrics on the route file. First followup to skip the `.eslintrc.cjs` carry-over (no adapter imports needed). Zero net-new tolerated deviations introduced.
+
+Independent PM verification (branch `feat/channel-health-followup @ ad0d8e6`)
+- **`make check` on my rerun**: PASS (`lint` 0/0, `format-check` clean, `typecheck` strict OK, `test-unit` **618 tests / 61 suites; 5 skipped suites + 17 skipped tests** — matches SUBMIT).
+- **Route coverage on my rerun** (`pnpm test:coverage --collectCoverageFrom='src/modules/channel-health/channel-health.routes.ts'`): **100% stmt / 100% branch / 100% func / 100% line**.
+- **Drift scans on my rerun** (`src/modules/channel-health/channel-health.routes.ts`): 0 hits across all categories.
+- **Scope containment**: 4 files as declared — `channel-health.routes.ts` + 2 test files + `api-server.ts` wiring (+11 lines). Zero touches to worker.ts / plugins / core (except entrypoint) / prisma / env / package.json / eslint / other modules.
+- **Cumulative pnpm queue**: UNCHANGED at 5.
+
+Binding-by-binding audit
+- **#1 (zero primitive touches)** ✓ Verified: only 3 new files under `src/modules/channel-health/**` + 1 `api-server.ts` modification. Primitive `service.ts` / `.debounce.ts` / `.types.ts` / `.schema.ts` / `.repository.ts` / `ports/**` / existing tests untouched.
+- **#2 (consume primitive exports only)** ✓ Route imports `PROVIDER_ORDER` + `currentStatusOr` from `./channel-health.service.js`; `HealthResponseDto` + `ClaudeApiHealthDto` from `./channel-health.schema.js`. **Zero re-implementation** of ordering, fallback, or wire schema.
+- **#3 (`toHealthResponseDto` pure + colocated + reversible)** ✓ Pure function at `channel-health.routes.ts:73-88`. No logger, no side effects. Colocated `toClaudeDto` helper at line 90-98 also pure. Clock passed explicitly as arg.
+- **#4 (clock injectable + `SYSTEM_CLOCK` default)** ✓ `ChannelHealthRoutesClock` type + `SYSTEM_CLOCK` module-const + optional `opts.clock`. Injected clock in unit tests; `SYSTEM_CLOCK` exercised by dedicated bracket test.
+- **#5 (parallel `Promise.all`)** ✓ `channel-health.routes.ts:44-48` — `Promise.all(PROVIDER_ORDER.map(...))`. Same weak-parallelism-note carry-over as T23-fu: proves call-count + args + order; code visibly parallel.
+- **#6 (`PROVIDER_ORDER` preserved test)** ✓ Dedicated test at `channel-health.routes.test.ts:172` asserts calls array `['whatsapp', 'telegram', 'claude_api']` matching `PROVIDER_ORDER`. **Locks in primitive ordering contract**.
+- **#7 (`HealthResponseSchema.parse(res.json())` integration assertion)** ✓ **Applied 3 times** in the integration test (lines 105 empty, 128 fully-seeded, 165 latest-only). Also applied in unit test at line 108 (`HealthResponseSchema.parse(dto)` on the pure helper output). Strongest possible schema/wire drift defense.
+- **#8 (route auth-agnostic + 401/403 assertions)** ✓ `preHandler = [...opts.guards]`; integration test cases 1-2 assert 401 (no JWT) + 403 (staff role).
+- **#9 (`hotelId` from `req.hotelId`)** ✓ `requireHotelId(req.hotelId)` at line 43 + defensive `AuthError` throw (NOT `throw new Error`). Integration test JWT payload `hotel_id: HOTEL_ID`.
+- **#10 (zero `@prisma/client` at route)** ✓ Route imports only relative types and `AuthError`. No Prisma at route layer.
+- **#11 (`.js` extension discipline)** ✓ 0 hits.
+- **#12 (`SYSTEM_CLOCK` bracket test)** ✓ Route test at line 205 uses `before`/`after` Date bracket.
+- **#13 (scope containment)** ✓ Verified.
+- **#14 (`pnpm add` queue UNCHANGED)** ✓ `package.json` untouched.
+- **#15 (`api-server.ts` wiring — T23-fu not on main)** ✓ Executor correctly instantiated own `healthRepo` here. When both T23-fu + T24-fu PRs merge, textual dedupe handles it.
+- **#16 (`.eslintrc.cjs` NOT touched)** ✓ **FIRST followup in the wave to skip the eslint carry-over entirely** — route imports no `@modules/*/adapters/*` paths. Cleanest possible outcome.
+- **#17 (test count target)** ✓ Actual = 11 unit + 6 integration = 17. Unit exceeds upper bound (7) upward for binding #6 + #12 + defensive-branch coverage. Positive overshoot.
+- **#18 (route coverage ≥ 90%)** ✓ **100% stmt / 100% branch / 100% func / 100% line**.
+- **#19 (test naming)** ✓ `should <expected> when <condition>` throughout.
+- **#20 (`make check` PASS)** ✓.
+
+**Zero NET-new tolerated deviations introduced**. The single `as [T, T, T]` tuple cast at line 49-53 is a TypeScript inference workaround (`.map()` returns `T[]` not `[T, T, T]`) — disclosed by executor in drift-scan notes; NOT a `<any>` cast; not a drift concern. Cleanest possible followup outcome.
+
+Shared-infra edit audit
+- **`src/entrypoints/api-server.ts`** — adds 11 lines (2 imports + 8-line register block + 1 comment). Uses existing `gmAdminGuards`. Correct architectural boundary per CLAUDE.md §4.
+- **`.env.example`, `env.ts`, `.eslintrc.cjs`, `package.json`, `prisma/**`, `worker.ts`, `plugins/**`** — ALL zero-touched. Cleanest shared-infra footprint in the wave.
+
+Security floor
+- **JWT gm_admin guard enforced** via `gmAdminGuards`. Integration test covers 401/403.
+- **Tenant scope from `req.hotelId`** (Q-C-04 resolved). `requireHotelId` throws `AuthError` if missing.
+- **Zero decrypt / zero secret handling** — endpoint reads only aggregate status pills.
+- **`AuthError` at route defensive fallback** — NOT `throw new Error` (unlike T20-fu / T19-fu entrypoint boot-guards). Continuing the AppError-preferred discipline where possible.
+- **Zero new package / env / secret.**
+
+Architectural strengths
+- **Route is thin** — pure `toHealthResponseDto` + `toClaudeDto` helpers with single-responsibility conversion. Route handler is ~10 lines of orchestration only.
+- **Primitive contract respected** — `currentStatusOr` + `PROVIDER_ORDER` re-used verbatim. Any change to the primitive's ordering or optimistic default propagates automatically.
+- **`HealthResponseSchema.parse` applied 4x total** (1 unit + 3 integration) — the wire shape is authoritatively checked at every happy-path boundary. Strongest schema/wire drift discipline in the wave.
+- **Clock injection preserved** — `SYSTEM_CLOCK` default + optional `opts.clock`; unit test brackets real wall-clock; integration test uses SYSTEM_CLOCK path.
+- **First followup to skip eslint carry-over** — no adapter imports needed, so the `no-restricted-imports` override doesn't fire. Marks a new cleanliness benchmark for the wave.
+
+Weak-point notes (all non-blocking)
+- **Parallelism test proves call-count/args/order, not strict parallel-vs-sequential timing** — same carry-over as T23-fu binding #4. Code visibly uses `Promise.all`.
+- **T24-followup ships optimistic-`healthy` for missing snapshots** while T23-followup ships pessimistic-`down` for the same case. Cross-endpoint semantic inconsistency flagged at ACK; **reconciliation deferred to Q-C-08 / Q-C-11 sync with FE-team + PO**. Not blocking this SUBMIT; refactor to either direction is 1-file change (either T23-fu adapter or T24-fu route's use of `currentStatusOr`).
+- **`api-server.ts` merge risk** — same story as T20/T23/T19-followup: multiple pending followups add wiring blocks. Textual merge resolves; T24-fu's block is 8 lines and additive.
+
+Followup guidance
+- **Rebase advisory**: this branch is off origin/main pre-T20-fu / T23-fu / T19-fu. When those land, rebase will re-apply T24-fu's api-server.ts wiring block. All 4 followups' wiring is additive; no semantic conflicts.
+- **T24-followup-B queued behind AI SDK PO approval** — probe adapters (Claude API + WA + Telegram probes) + worker cron composition + slot-B WA config integration. Separate task; not blocking this READ endpoint landing.
+- **Q-C-08 / Q-C-11 reconciliation** — the optimistic-vs-pessimistic default mismatch between T24-fu and T23-fu should be raised at Parent PM/PO sync when Q-C-08 / Q-C-11 come up.
+
+Executor next actions
+- Open PR `feat/channel-health-followup → main` post-VERDICT (rebase advisory: wait for T20-fu + T23-fu + T19-fu to land first, or accept trivial merge conflicts on `api-server.ts`).
+- Next followup: T18-fu (blocked Q-OPS-06), T21-fu (blocked Q-C-09 + `imap-simple`), T22-fu (blocked Q-C-10 + `qrcode` + `@aws-sdk/client-s3`), T25-fu (blocked Q-C-12 + socket lib). All parked pending cross-service Qs + PO package approvals.
+
+PM C follow-up actions (batched in this commit)
+- Update §1 tracker T24 row → `approved (primitive + followup)`.
+- Update PARENT §1 T24 row.
+- Post 1-line roll-up to PARENT §2.
+
+**🎯 Slot C followup wave: 5 / 9 approved** (T17-fu merged PR #27; T20-fu + T23-fu + T19-fu + T24-fu APPROVED, all pending PR merge). 4 remaining parked pending cross-service Qs + PO package approvals. **T24-fu marks the wave's cleanest attempt to date — 4 files, 100% coverage, zero tolerated deviations, zero shared-infra edits beyond entrypoint wiring**.
+
+→ §1 task tracker updated. Row mirrored to PARENT §1. Roll-up posted to PARENT §2.
 
 ---
 
