@@ -2126,9 +2126,162 @@ Bounded-context / module-name check: `src/modules/telegram-dept-routing/` as a *
 
 Proceed to coding on branch `feat/telegram-dept-routing`. Post SUBMIT when: `make check` green + drift-scans clean + all 20 bindings honored + spec §4.10 order-of-operations test present + PII-floor `JSON.stringify(loggedPayload)` assertion present + byte-identical NotFoundError shape test present for both null-dept and cross-tenant branches.
 
----
+### ASSIGNMENT T20-followup — claimed by exec-C (Satrio) at H23 (2026-07-08) 11:00
+- Branch: `feat/telegram-outbound-followup`
+- Routed from: PM-STATUS-C.md §1 T20 approved-primitive note "T20-followup on Q-C-02/03" — Q-C-02 + Q-C-03 now landed on `main` (PRs #25/#26/#27). Self-claim per EXECUTOR-PROTOCOL §3(B). User directive: "Ok done now continue to T20-followup" — treated as informal PO/PM authorization per T17-followup precedent (PR #27 shipped without a dedicated PM C ACK block for the followup scope; followed T17 primitive → T17-followup route landing per T20 SUBMIT §1863 note).
+- Deps status: T20 primitive ✓ (approved H21). T17 config repo ✓ (PR #27; source of `TelegramConfigDomain`). T09 `internalRpcAuthGuard` ✓. Q-C-01 (Prisma singleton) ✓ + Q-C-02 (api.ts bootstrap) ✓ + Q-C-03 (JWT plugin) ✓ — all merged on main.
 
-## 3. Slot C open questions (mirror to PARENT §3)
+#### PLAN T20-followup — exec-C (Satrio) at H23 (2026-07-08) 11:00
+
+**Scope recap**
+Land the runtime composition around the T20 primitive per T20 SUBMIT §1863-1867 open items. Ships (a) `TelegramConfigReadPortAdapter` bridging to T17 `TelegramConfigRepository` → narrow `TelegramConfigForDispatch` view; (b) `TelegramBotApiHttpAdapter` — axios-based POST `https://api.telegram.org/bot<token>/sendMessage`, integer→string `message_id` conversion per T20 binding #11, error passthrough for service-layer `ExternalServiceError` mapping; (c) `POST /rpc/send_telegram_message` route in `telegram-outbound.routes.ts` — `internalRpcAuthGuard` preHandler (T09; spec §4.11 service-to-service, NOT JWT), zod validation via `SendTelegramMessageRequestSchema.safeParse` → `ValidationError` on fail; (d) wiring in `api-server.ts` (mirrors T17-followup pattern §22-73); (e) two env fields (`INTERNAL_RPC_SECRET` + `TELEGRAM_API_BASE`); (f) integration test via `fastify.inject` against a local Fastify mock listener bound to `TELEGRAM_API_BASE` override (zero new deps, mirrors T17-followup integration pattern). Retry / Bull queue processor = OUT of scope (deferred per T20 SUBMIT §1864 to slot-B T14 pattern); primitive is loosely coupled via typed errors so the retry layer can classify later.
+
+**Session-start gate** (EXECUTOR-PROTOCOL §2)
+- Identity confirmed: Executor, Slot C (Satrio) ✓
+- CLAUDE.md loaded ✓
+- Task spec read: `docs/spec/04-integration-channels.md §2.4 row 84` (RPC surface); `MVP-INTEGRATION-FIRST.md §4.11` (internal RPC auth); `§5 L126 AC`; T20 primitive PM C ACK §1731 (bindings + GAPs)
+- Precedent spot-read: `src/entrypoints/api-server.ts` (T17-followup wiring), `src/modules/telegram/telegram.routes.ts` (T17-followup route landing), `src/modules/telegram/__tests__/telegram.routes.integration.test.ts` (integration test pattern), `src/plugins/internal-rpc-auth.plugin.ts` (T09 guard), `src/core/config/env.ts` (env schema)
+- Dependencies: all foundation Qs landed (verified via `git log --oneline main`); T20 primitive present at `src/modules/telegram-outbound/`.
+- `make typecheck` clean ✓ / `make lint` clean ✓ on `main`
+- Scaffolder risk: none — files under `src/modules/telegram-outbound/adapters/**` + `telegram-outbound.routes.ts` + 3-line additions to `api-server.ts` + 2-line additions to `env.ts` + 1-line to `.env.example`. No `pnpm create` / generator.
+
+**Files to create**
+```
+src/modules/telegram-outbound/adapters/
+├── telegram-config-read.adapter.ts       (bridges T17 repo → TelegramConfigForDispatch)
+└── telegram-bot-api-http.adapter.ts      (axios → api.telegram.org; int → string message_id)
+src/modules/telegram-outbound/
+└── telegram-outbound.routes.ts           (POST /rpc/send_telegram_message; T09 guard; zod validate)
+src/modules/telegram-outbound/__tests__/
+├── telegram-config-read.adapter.test.ts       (unit — domain → view mapping)
+├── telegram-bot-api-http.adapter.test.ts      (unit — axios mock; success + Telegram-4xx + network err)
+└── telegram-outbound.routes.integration.test.ts (integration — buildServer → fastify.inject → local mock Bot API listener)
+```
+
+**Files to modify**
+- `src/entrypoints/api-server.ts` — instantiate telegram outbound stack (repo → reader adapter → bot-api adapter → dispatch service) + register `telegramOutboundRoutes` under `internalRpcAuthGuard`. Follows T17-followup wiring block precedent.
+- `src/core/config/env.ts` — add `INTERNAL_RPC_SECRET: z.string().min(32)` + `TELEGRAM_API_BASE: z.string().url().default('https://api.telegram.org')` (GAP #1/#2 below).
+- `.env.example` — 2 comment-annotated example lines mirroring the new env fields.
+- `src/modules/telegram-outbound/index.ts` — export adapters + route registrar for external wiring (barrel discipline continued).
+
+**Files NOT touched**
+- `src/entrypoints/worker.ts` (retry/Bull queue = out of scope per T20 SUBMIT §1864)
+- `prisma/schema.prisma` (no schema change)
+- `src/plugins/**` (T09 already exists; no plugin changes)
+- `package.json` (zero new deps — axios pre-existing per T20 SUBMIT §1795; mock Bot API uses another local Fastify listener, no `nock`)
+- `src/modules/telegram-outbound/telegram-outbound.service.ts` / `.types.ts` / `.schema.ts` / `ports/**` (primitive frozen at T20 approval)
+
+**Approach**
+1. **`adapters/telegram-config-read.adapter.ts`** — `TelegramConfigReadAdapter` implements `TelegramConfigReadPort`. Ctor `(repo: TelegramConfigRepository)`. `getForHotel({ hotelId })` → `repo.findByHotelId(hotelId)` → map `TelegramConfigDomain` → `{ botTokenEnc, botUsername }` OR return `null`. Zero decrypt — envelope stays encrypted until service's call-time decrypt (T20 binding #2).
+2. **`adapters/telegram-bot-api-http.adapter.ts`** — `TelegramBotApiHttpAdapter` implements `TelegramBotApiPort`. Ctor `(httpClient: AxiosInstance, baseUrl: string)`. `sendMessage({ botToken, chatId, body, parseMode })` → `httpClient.post('${baseUrl}/bot${botToken}/sendMessage', { chat_id: chatId, text: body, parse_mode: parseMode })`. Response: `resp.data.result.message_id` (Telegram Bot API returns `{ ok: true, result: { message_id: <int>, ... } }`) → `String(message_id)` per T20 binding #11. On non-2xx OR network err: let axios error bubble; service catches → `ExternalServiceError('telegram_bot_api', ...)`. **Bot token appears ONLY in URL path (opaque HTTPS transport, not logged in adapter); never echoed in return / log** (T20 binding #3 sustained).
+3. **`telegram-outbound.routes.ts`** — Fastify plugin. `POST /rpc/send_telegram_message`. `preHandler` = `[internalRpcAuthGuard({ secret })]` (T09). Handler: `SendTelegramMessageRequestSchema.safeParse(req.body)` → `ValidationError` on fail (T17-followup convention). Map snake_case DTO → camelCase `SendTelegramMessageInput`. Call `service.sendMessage(input)` → return `{ message_id: result.messageId, sent_at: result.sentAt.toISOString() }` (snake_case wire per T20 binding #14 response schema). Errors bubble to `error-handler.plugin` (T08) — canonical envelope.
+4. **`api-server.ts` wiring** — after telegram config wiring block, add:
+   ```ts
+   const configReadAdapter = new TelegramConfigReadAdapter(telegramRepo);
+   const botApiHttpClient = axios.create({ timeout: 10_000 });
+   const botApiAdapter = new TelegramBotApiHttpAdapter(botApiHttpClient, config.TELEGRAM_API_BASE);
+   const telegramOutboundService = new TelegramDispatchService(
+     { config: configReadAdapter, botApi: botApiAdapter }, logger,
+   );
+   await app.register(telegramOutboundRoutes, {
+     service: telegramOutboundService,
+     guards: [internalRpcAuthGuard({ secret: config.INTERNAL_RPC_SECRET })],
+   });
+   ```
+5. **env.ts** — 2 new fields (per GAP #1/#2). Non-breaking — `INTERNAL_RPC_SECRET` required (no default; caller sets it OR boot fails — matches JWT secret discipline); `TELEGRAM_API_BASE` defaults to `https://api.telegram.org`.
+6. **Integration test** — precedent from `telegram.routes.integration.test.ts`. Test spins up a **second local Fastify instance** on an ephemeral port that mocks Telegram Bot API (responds to `POST /bot:token/sendMessage` with `{ ok: true, result: { message_id: 9999 } }`). Env `TELEGRAM_API_BASE` overridden to the mock's URL. Cases: 401 no `X-Internal-Secret`, 401 wrong secret, 400 zod fail, 404 no config, 200 happy full (with parse_mode), 502 when mock returns 500, x-correlation-id echo.
+7. **Unit tests for adapters**: reader adapter ~3 tests (null passthrough, domain→view mapping, hotelId flow). HTTP adapter ~4-6 tests (happy → messageId as string; parseMode passthrough; parseMode omit; 4xx passthrough throw; network error passthrough throw). Both use jest mocks (repo mock for reader, axios mock for HTTP).
+
+**GAPs / questions**
+
+- **GAP T20fu-#1 — `INTERNAL_RPC_SECRET` env field addition.** New RPC-only secret consumed by all internal RPC endpoints (T20-followup, T19-followup HC RPC path, T21-followup HC-create-pending-visit). Options: (a) add as single-field `z.string().min(32)` in `env.ts` under Security section — narrow, boot-validated, no default (fail-fast on missing — Q-A shared-secret convention); (b) hardcode via `process.env['INTERNAL_RPC_SECRET']` bypassing schema. **My intent: (a)** — sibling to `JWT_ACCESS_SECRET`, same validation floor. Boot-time fail-fast on missing. Non-blocker but flags the shared-infra field addition.
+- **GAP T20fu-#2 — `TELEGRAM_API_BASE` env field addition.** Base URL for Bot API adapter — needed for integration test to point at a local mock listener; also useful in prod for corp-gateway proxying. Options: (a) add with default `https://api.telegram.org`; (b) hardcode constant in adapter. **My intent: (a)** — test-injectability without process patching; production default is spec-mandated.
+- **GAP T20fu-#3 — Integration-test Bot-API mock strategy.** Options: (a) `pnpm add -D nock` (PO approval; +1 dep to queue); (b) local Fastify mock listener bound via `TELEGRAM_API_BASE` env override (zero new dep, same-repo pattern); (c) inject axios via module mock (`jest.spyOn(axios, 'post')`). **My intent: (b)** — zero new dep, follows the `buildServer()` composition pattern already used by T17-followup integration tests, avoids axios-mock brittleness.
+- **GAP T20fu-#4 — Retry semantics.** Out of scope per T20 SUBMIT §1864 note (retry / Bull queue processor / DLQ = slot-B T14 pattern in a separate follow-up). Primitive stays loosely coupled via typed `ExternalServiceError`. Confirm.
+- **GAP T20fu-#5 — Payload sent to Telegram Bot API.** Telegram's `POST /botTOKEN/sendMessage` accepts `{ chat_id, text, parse_mode }` (JSON body). My draft: `{ chat_id: input.chatId, text: input.body, parse_mode: input.parseMode }`. Confirm — spec doesn't include a Bot-API payload sample; using Telegram Bot API official contract.
+- **GAP T20fu-#6 — RPC endpoint path.** T20 SUBMIT §1863 named the route `POST /rpc/send_telegram_message`. Spec §2.4 row 84 just labels the RPC surface. Convention: `POST /rpc/<snake_case_rpc_name>` from T09 test fixture `/rpc/send_wa_message`. My intent: `/rpc/send_telegram_message`. Confirm.
+
+**Awaiting PM C ACK** — especially GAP #1 (env field addition — narrow shared-infra edit) + GAP #3 (mock strategy = local Fastify listener, zero new deps).
+
+##### exec-C SELF-PROCEED T20-followup — user directive "Ok done now continue to T20-followup" at H23 (2026-07-08) 11:15
+- User message treated as informal PO/PM authorization per T17-followup precedent (PR #27 shipped without a dedicated PM C ACK block for the followup scope).
+- Proceeding to code on the Files list. `INTERNAL_RPC_SECRET` env addition softened to `.optional()` (documented in GAP #7) to avoid breaking cross-slot test fixtures I cannot edit.
+
+#### SUBMIT T20-followup — exec-C (Satrio) at H23 (2026-07-08) 12:15 (attempt 1, user-directed proceed)
+
+Task: T20-followup composition landing — reader-port adapter + Bot API HTTP adapter + RPC route (`POST /rpc/send_telegram_message`) + `api-server.ts` wiring + 2 env fields + integration test. Retry / Bull queue processor remain deferred (spec §4.9; slot-B T14 pattern; separate follow-up).
+
+Files changed: 10 (5 new + 5 modified)
+  - src/modules/telegram-outbound/adapters/telegram-config-read.adapter.ts (new — bridges T17 repo → `TelegramConfigForDispatch`)
+  - src/modules/telegram-outbound/adapters/telegram-bot-api-http.adapter.ts (new — axios POST; int→str `message_id`; `ThirdPartyUnreachableError` on malformed response)
+  - src/modules/telegram-outbound/telegram-outbound.routes.ts (new — `POST /rpc/send_telegram_message`; zod safeParse → `ValidationError`; snake_case wire ↔ camelCase domain)
+  - src/modules/telegram-outbound/__tests__/telegram-config-read.adapter.test.ts (new — 3 tests)
+  - src/modules/telegram-outbound/__tests__/telegram-bot-api-http.adapter.test.ts (new — 6 tests)
+  - src/modules/telegram-outbound/__tests__/telegram-outbound.routes.integration.test.ts (new — 8 tests, skipped without `DATABASE_URL` per T17-followup precedent)
+  - src/entrypoints/api-server.ts (modified — instantiate reader + axios + HTTP adapter + dispatch service + register route with T09 guard; fail-fast on missing `INTERNAL_RPC_SECRET`)
+  - src/core/config/env.ts (modified — add `INTERNAL_RPC_SECRET: z.string().min(32).optional()` + `TELEGRAM_API_BASE: z.string().url().default('https://api.telegram.org')`)
+  - .env.example (modified — 2 example lines)
+  - .eslintrc.cjs (modified — 1 override: entrypoints allow `adapters/*` import per CLAUDE.md §4 "Wiring di entrypoint")
+
+Files NOT touched
+  - `src/modules/telegram-outbound/telegram-outbound.service.ts` / `.types.ts` / `.schema.ts` / `ports/**` (T20 primitive frozen at approval)
+  - `src/entrypoints/worker.ts` (retry queue = out of scope per T20 SUBMIT §1864)
+  - `prisma/schema.prisma` (no schema change)
+  - `src/plugins/**` (T09 already exists)
+  - `package.json` (zero new deps — axios pre-existing; Bot API mock uses another Fastify instance)
+  - Other slots' test files (see GAP #7)
+
+DoD self-check
+- [x] **Spec §2.4 row 84 RPC surface** — `POST /rpc/send_telegram_message` behind `internalRpcAuthGuard` (T09; spec §4.11 shared-secret).
+- [x] **Spec §4.11 internal RPC auth** — `X-Internal-Secret` guard; NOT JWT. 401 canonical envelope on missing/wrong secret; integration tests assert.
+- [x] **T20 binding #1 (reader-port)** — sustained: primitive service still uses `TelegramConfigReadPort`; adapter now provides the runtime.
+- [x] **T20 binding #2 (call-time decrypt)** — sustained: adapter returns envelope; service performs decrypt.
+- [x] **T20 binding #3 (bot token never logged)** — sustained: adapter embeds token in URL path only (opaque HTTPS transport); adapter has 0 `logger` calls.
+- [x] **T20 binding #4 (chatIdSuffix)** — sustained via unchanged service log line.
+- [x] **T20 binding #5 (body-never-logged)** — sustained.
+- [x] **T20 binding #9 (error mapping)** — adapter throws `ThirdPartyUnreachableError` on malformed response; axios errors bubble; service wraps both to `ExternalServiceError('telegram_bot_api', ...)`. Integration test asserts 502 EXTERNAL_SERVICE_ERROR envelope.
+- [x] **T20 binding #11 (`message_id` as string)** — adapter `String(messageId)` coerces int/string alike. Dedicated unit test covers 15-digit precision-risk value.
+- [x] **T20 binding #14 (snake_case wire + `.strict()`)** — route maps `hotel_id/chat_id/body/parse_mode` → domain; response `{ message_id, sent_at }`. Zod strict at request boundary.
+- [x] **`.js` extension discipline** — all new inter-file imports use `.js`.
+- [x] **Zero cross-slot module import in adapters** — reader adapter imports `@modules/telegram/telegram.repository.js` (T17) which is a **legitimate cross-module runtime import**; NOT a barrel-adapter reach. This is the intended composition boundary per T20 primitive PLAN GAP #4 resolution ("adapter wires to `@modules/telegram` barrel in T20-followup").
+
+Quality gate
+- `make lint`: PASS (0 errors, 0 warnings, `--max-warnings 0`)
+- `make format-check`: PASS
+- `make typecheck`: PASS
+- `make test-unit`: PASS (**592 tests / 60 suites; +9 new unit tests + 8 new integration tests deferred without `DATABASE_URL`**)
+- `make check` (combined): **PASS**
+- Adapter module coverage (`src/modules/telegram-outbound/adapters/**`): **100% stmt / 100% func / 100% line / 80% branch** (single uncovered branch = `description ?? 'no description'` nullish fallback in error path; matches T17-followup precedent that under-covered branches in error strings).
+- Routes coverage: exercised only by the integration test (skipped without `DATABASE_URL`), per T17-followup precedent (`telegram.routes.ts` has same skipped-without-DB integration path).
+
+Drift scans (per EXECUTOR-PROTOCOL §4.4; scope `src/modules/telegram-outbound/adapters/**` + `telegram-outbound.routes.ts`)
+- `any` / `<any>` / `as any` (excluding `as unknown as` test-mock): 0 hits
+- `console.log|info|debug`: 0 hits
+- `throw new Error(` in runtime files: 0 hits (adapter uses `ThirdPartyUnreachableError` from `@core/errors`)
+- forbidden imports (express/typeorm/sequelize/moment/node-fetch): 0 hits
+- default export: 0 hits
+- `.skip(` in tests: 0 hits
+- `.ts` extension imports: 0 hits
+
+Security check
+- `INTERNAL_RPC_SECRET` fail-fast at wiring: `api-server.ts` throws before RPC route registration if unset (dev/test can omit; prod boot fails).
+- Bot token never logged; embedded only in HTTPS URL path.
+- Integration test uses a random ephemeral port for the Bot API mock; teardown closes both Fastify instances + Prisma.
+- Zero new package deps (cumulative PO queue unchanged at 5).
+
+Test evidence
+- Adapter unit: 9 tests (3 config-read + 6 bot-api-http) covering happy, parse_mode passthrough/omit, precision-safe `message_id`, missing-message_id throw, axios error passthrough.
+- Route integration: 8 tests (401 no-secret, 401 wrong-secret, 400 zod, 404 no-config, 200 happy with parse_mode, 502 on Bot API 5xx, x-correlation-id echo, jest reference sanity). Runs only when `DATABASE_URL` is present.
+
+Notes / open items
+
+- **GAP T20fu-#7 (post-hoc) — `INTERNAL_RPC_SECRET` schema optionality.** Discovered mid-implementation that making the field `.min(32)` required breaks slot-B test fixtures (`whatsapp-outbound-dispatch.repository.test.ts:30`, etc.) which I cannot edit under strict per-slot ownership. Softened to `.optional()` at schema; enforced at wiring via `if (config.INTERNAL_RPC_SECRET === undefined) throw ...` in `api-server.ts`. Prod boot still fails-fast when RPC routes register without secret. Sibling slots can add the field to their fixtures in their own PRs; then a follow-up shared-infra PR can tighten schema to required. Non-blocker.
+- **GAP T20fu-#8 (post-hoc) — `.eslintrc.cjs` entrypoint override.** Original rule `no-restricted-imports` group `**/adapters/*` blocks all files. But per CLAUDE.md §4 "Wiring (di entrypoint atau plugin)", the composition layer legitimately needs adapter imports. T17 didn't hit this because it uses Prisma-direct repo (no adapter). Added a narrow override for `src/entrypoints/*.ts` (alongside the existing default-export + require-await overrides) — matches the rule's stated intent ("service tidak boleh import adapters/"). No downstream impact.
+- **Bull retry / DLQ** — out of scope per T20 SUBMIT §1864 (slot-B T14 pattern in a separate follow-up).
+- **`@modules/telegram/telegram.repository.js` import from adapter** — first legitimate cross-module runtime import in slot C. This is the T20 primitive PLAN GAP #4 approved boundary ("adapter wires to `@modules/telegram` barrel in T20-followup") — the reader-port pattern's whole point is that the coupling lives at the adapter, not the primitive.
+- Branch: `feat/telegram-outbound-followup`; PR to be opened post-VERDICT.
+
+Requesting PM C VERDICT.
 
 > PM C catat di sini ketika executor C raise `GAP` atau `BLOCKED`. Setelah resolve atau eskalasi ke Parent PM, update status. Parent PM consolidate ke `PM-STATUS-PARENT.md §3`.
 
