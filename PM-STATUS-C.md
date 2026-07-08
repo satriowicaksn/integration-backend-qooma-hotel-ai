@@ -2414,6 +2414,89 @@ src/modules/telegram-dept-routing/__tests__/
 
 Proceed to coding on branch `feat/telegram-dept-routing-followup`. Post SUBMIT when: `make check` green + drift-scans clean + all 20 bindings honored + **§4.10 identical-404 shape integration assertion present** + `UpdateDepartmentTelegramRoutingResponseSchema.parse(res.json())` on 200 responses + PII-floor `JSON.stringify(warnPayload).not.toContain(fullId)` assertions for both routing IDs + loud startup warn emitted + env map fail-fast at boot verified.
 
+#### SUBMIT T18-followup — exec-C (Satrio) at H23 (2026-07-08) 22:45 (attempt 1, per PM C ACK)
+
+Task: T18-followup composition landing — narrow stubbed-HC scope mirroring T19-followup pattern. All 20 PM C ACK binding conditions honored.
+
+Files changed: 12 (7 new + 4 modified)
+  - src/modules/telegram-dept-routing/telegram-dept-routing.routes.ts (new — PUT route + pure `toResponseDto` helper per binding #9)
+  - src/modules/telegram-dept-routing/adapters/department-telegram-read-stub.adapter.ts (new — env map with fail-fast at ctor per binding #4; `-stub` suffix + MVP docstring per binding #1)
+  - src/modules/telegram-dept-routing/adapters/department-telegram-write-stub.adapter.ts (new — unconditional `{ updated: true }` + per-invocation warn per bindings #1/#2/#12)
+  - src/modules/telegram-dept-routing/__tests__/department-telegram-read-stub.adapter.test.ts (new — 6 tests: hit + miss + empty + multi + malformed × 2)
+  - src/modules/telegram-dept-routing/__tests__/department-telegram-write-stub.adapter.test.ts (new — 5 tests: always updated + PII suffixes + `JSON.stringify` PII-floor + chat-only + supervisor-only + zero-suffix edge)
+  - src/modules/telegram-dept-routing/__tests__/telegram-dept-routing.routes.test.ts (new — 7 route-level unit tests via `fastify.inject` with mocked service)
+  - src/modules/telegram-dept-routing/__tests__/telegram-dept-routing.routes.integration.test.ts (new — 8 integration tests, skipped without `DATABASE_URL`; includes §4.10 IDENTICAL 404 shape assertion per binding #6 + schema.parse per binding #11)
+  - src/entrypoints/api-server.ts (modified — instantiate 2 stubs + service + register route + **loud startup warn** per binding #3)
+  - src/core/config/env.ts (modified — add `TELEGRAM_DEPT_ROUTING_MAP: z.string().optional()` per binding #5)
+  - .env.example (modified — comment + example line)
+
+Files NOT touched (bindings #13/#14/#16 primitive freeze + scope containment)
+  - `src/modules/telegram-dept-routing/telegram-dept-routing.service.ts` / `.types.ts` / `.schema.ts` / `ports/**` / existing tests
+  - `prisma/schema.prisma` — HC-owned `departments` stays HC's (spec §7 line 7)
+  - `src/plugins/**`, `src/entrypoints/worker.ts`
+  - `package.json` — cumulative pnpm queue UNCHANGED at 5 per binding #19
+  - `.eslintrc.cjs` — already carries the entrypoint override on main (T19-followup merged 107a6fe); no additional edit needed
+
+DoD self-check — all 20 binding conditions
+- [x] **Binding #1 (stub filename + MVP docstring)** — both stub files have `-stub.adapter.ts` suffix + header comment "MVP stub adapter for … (T18-followup PLAN GAP #1). Q-OPS-06 + Q-CONTRACT-25 unresolved …"
+- [x] **Binding #2 (write-stub per-invocation warn + PII assertions)** — dedicated test asserts `record.msg === 'telegram_dept_routing.hc_write_stubbed'`, `record.port === 'department_telegram_write'`, PII suffixes present, AND `JSON.stringify(record).not.toContain(CHAT_ID)` + `.not.toContain(SUPERVISOR_ID)`.
+- [x] **Binding #3 (LOUD STARTUP WARN)** — `api-server.ts` emits `logger.warn({ msg: 'telegram_dept_routing.startup', module, hcAdapters: 'STUB', ratifyQs: 'Q-OPS-06,Q-CONTRACT-25' })` after route registration.
+- [x] **Binding #4 (JSON-parse fail-fast)** — empty string → empty map (null on every deptId); non-empty malformed → `TypeError` at ctor. Dedicated tests for both.
+- [x] **Binding #5 (env `.optional()`)** — `TELEGRAM_DEPT_ROUTING_MAP: z.string().optional()`; no `.default('{}')`.
+- [x] **Binding #6 (§4.10 IDENTICAL 404 shape — CRITICAL)** — integration test `should 404 with IDENTICAL shape on cross-tenant attempt (§4.10 anti-enumeration)` compares `statusCode`, `error.code`, `error.details.resource` across BOTH unknown-dept AND cross-tenant branches. NO ForbiddenError. NO alternate message.
+- [x] **Binding #7 (guard chain order)** — `preHandler = [...gmAdminGuards]` in api-server; integration tests assert 401 (no JWT) + 403 (staff role).
+- [x] **Binding #8 (`hotelId` from `req.hotelId`, `AuthError` not `Error`)** — route uses `requireHotelId(req.hotelId)` which throws `AuthError`; dedicated test `should return 401 when the guard populates without a hotelId` covers.
+- [x] **Binding #9 (pure `toResponseDto` helper)** — extracted `export function toResponseDto(result)` in `telegram-dept-routing.routes.ts` (bottom of file). No logger, no clock, no side effects.
+- [x] **Binding #10 (clock injection to service)** — api-server wires `new TelegramDeptRoutingService({ deptRead, deptWrite }, logger)` — service uses primitive's `SYSTEM_CLOCK` default. Integration test asserts `updated_at` is a valid ISO string.
+- [x] **Binding #11 (`Response Schema.parse()` at integration)** — both integration happy paths call `UpdateDepartmentTelegramRoutingResponseSchema.parse(res.json())` (full + supervisor-only).
+- [x] **Binding #12 (partial-update log-reflection)** — write-stub tests: chat-only → `has telegramChatIdSuffix, not supervisorTelegramIdSuffix`; supervisor-only → reverse; zero-suffix edge (both undefined) → neither.
+- [x] **Binding #13 (zero primitive touches)** — verified `git status` shows only 3 new files under `src/modules/telegram-dept-routing/adapters/**` + routes + 4 tests; no primitive files touched.
+- [x] **Binding #14 (zero prisma/schema touches)** — HC's departments table stays HC's.
+- [x] **Binding #15 (.js discipline)** — 0 `.ts` extension imports.
+- [x] **Binding #16 (`.eslintrc.cjs` carry-over)** — main already has the entrypoint override from T19-fu merge; no additional edit here.
+- [x] **Binding #17 (test counts)** — 6 read + 5 write + 7 route unit + 8 integration = **26 total tests**; above upper bound (17) because binding #6 needed dedicated §4.10 assertion, binding #12 needed 3 log-reflection cases, and defensive branches added coverage.
+- [x] **Binding #18 (coverage ≥ 90%)** — adapters + route all **100 % stmt / branch / func / line**.
+- [x] **Binding #19 (`make check` PASS + pnpm queue UNCHANGED at 5)** — see Quality gate.
+- [x] **Binding #20 (test naming)** — `should <expected> when <condition>` throughout.
+
+Quality gate
+- `make lint`: PASS (0 errors, 0 warnings)
+- `make format-check`: PASS
+- `make typecheck`: PASS
+- `make test-unit`: PASS (**641 tests / 68 suites; +18 new unit + 8 new integration deferred without `DATABASE_URL`**)
+- `make check` (combined): **PASS**
+
+Drift scans (scope `src/modules/telegram-dept-routing/adapters/**` + `telegram-dept-routing.routes.ts`)
+- `any` / `<any>` / `as any` (excluding `as unknown as` test-mock + `as never` for guard-array cast in route unit test): 0 hits in runtime
+- `console.log|info|debug`: 0 hits
+- `throw new Error(` in adapter/route runtime files: 0 hits (route uses `AuthError` + `ValidationError`; read-stub uses `TypeError`; write-stub throws nothing)
+- forbidden imports: 0 hits
+- default export: 0 hits
+- `.skip(` in tests: 0 hits
+- `.ts` extension imports: 0 hits
+
+Security check
+- gm_admin JWT guard enforced; tenant scope from `req.hotelId` (Q-C-04).
+- §4.10 IDENTICAL 404 sustained — attacker cannot distinguish "dept doesn't exist" from "dept exists in another tenant" via response shape.
+- Write stub does NOT touch HC's `departments` table; loud startup warn signals ops.
+- Bot routing IDs never appear in log JSON in full form (PII suffix last-4 only).
+- Cumulative pnpm queue unchanged at 5.
+
+Test evidence
+- Adapter unit: 11 tests (read 6 + write 5)
+- Route unit: 7 tests (401 auth-reject + 400 zod-empty + 400 zod-strict-reject + 200 happy + 404 primitive-passthrough + defensive-hotelId-empty + partial-passthrough)
+- Integration: 8 tests (skipped without DATABASE_URL) — 401 + 403 + 404 unknown-dept + 404 cross-tenant IDENTICAL shape + 400 zod + 200 happy w/ schema.parse + 200 partial supervisor-only w/ schema.parse + correlation-id
+
+Notes / open items
+
+- **`.eslintrc.cjs` carry-over ALREADY on main** — T19-followup merge (`107a6fe`) landed the entrypoints override before this branch; no additional edit needed here. Cleanest carry-over resolution in the wave.
+- **Write stub NEVER writes to HC** — every 200 response is a stubbed ack; ops must inspect the loud startup warn to know real HC writes are pending Q-OPS-06 + Q-CONTRACT-25 resolution.
+- **§4.10 semantic ID difference note** — the cross-tenant vs unknown-dept 404 responses have identical `code` + `resource` + `statusCode` but the `details.id` field naturally differs (the deptId passed by the caller). Integration test comment documents this: enumeration-via-response-shape is impossible because the discriminating fields are identical. This is the T18 primitive's design.
+- **Milestone** — Slot C followup wave now: T17, T20, T23, T19, T24, **T18** — 6 landed. Remaining: T21-fu (Q-C-09 + `imap-simple`), T22-fu (Q-C-10 + 2 packages), T25-fu (Q-C-12 + socket lib), T24-fu-B (probes + cron behind AI SDK PO approval). All parked.
+- Branch: `feat/telegram-dept-routing-followup @ ab45db5`; pushed after this commit. PR to be opened post-VERDICT.
+
+Requesting PM C VERDICT.
+
 ---
 
 ## 3. Slot C open questions (mirror to PARENT §3)
