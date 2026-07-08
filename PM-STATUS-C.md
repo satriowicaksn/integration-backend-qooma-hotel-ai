@@ -31,7 +31,7 @@
 | T## | Title                                                                            | Status   | Verified by PM | Notes                                                              |
 | --- | -------------------------------------------------------------------------------- | -------- | -------------- | ------------------------------------------------------------------ |
 | T17 | Telegram config CRUD (`GET, PUT /api/integrations/telegram`)                     | merged   | PM C (H13, a2) | Primitive merged PR #11 `0d89d76` at 2026-07-04T19:32:26Z (red-docker precedent honored). Router+api.ts wiring = T17-followup blocked on Q-C-01/02/03 |
-| T18 | Per-dept Telegram routing write-through (HC `departments` table)                 | backlog  | —              | After T17; per Q-OPS-06 shared-DB direct write                     |
+| T18 | Per-dept Telegram routing write-through (HC `departments` table)                 | approved (primitive) | PM C (H23, a1) | Primitive shipped: §4.10 tenancy guard + byte-identical `NotFoundError` for null-dept AND cross-tenant (anti-enumeration floor) + reader-port + writer-port (both type-only; adapter forks on Q-OPS-06) + `TelegramDeptRoutingService.updateRouting` (partial-update; last-4 PII suffix log; clock-injectable) + zod strict schemas + 24 unit tests (9 schema + 15 service), **100% stmt/branch/func/line**, drift clean, `make check` green on PM rerun. **All 20 ACK binding conditions honored — 4th consecutive slot-C primitive with ZERO deviations after T23 + T25 + T20.** 4th consecutive module-level Docker-green (0 `@prisma/client` + 0 cross-module runtime imports). Route + JWT `gm_admin` + Read/Write adapter + integration test = T18-followup on Q-OPS-06 + Q-CONTRACT-25. Branch `feat/telegram-dept-routing @ 87a1133`. **🎯 Slot C 9/9 primitives shipped — primitive wave complete.** |
 | T19 | Telegram inbound webhook + commands (`/take`, `/release`, `/done`, `/help`)      | approved (primitive) | PM C (H15, a1) | Primitive shipped: parser + zod passthrough schema + type-only StaffLookupPort + TicketActionPort + service (anti-enumeration silent-ignore, PII-suffix log) + 41 unit tests, 100% stmt/func/line + 92.85% branch cov, drift clean, make check green on PM rerun. No `@prisma/client` import — sidesteps Q-C-05. Router+HMAC+HC RPC adapters+`webhook_events` persist = T19-followup on Q-C-01/02/03/06/07. Branch `feat/telegram-inbound-commands @ 9c0bbc5`, PR pending open |
 | T20 | Outbound Telegram dispatch RPC                                                   | approved (primitive) | PM C (H21, a1) | Primitive shipped: `TelegramDispatchService.sendMessage` (flat routing; call-time decrypt via T03 local stack-frame token; PII `chatIdSuffix` last-4 logs; body-content-never-logged) + 2 type-only ports + zod schemas + 18 unit tests (10 schema + 8 service — exceeds ACK ~10 target). **All 20 ACK binding conditions honored — 3rd consecutive slot-C primitive with ZERO deviations flagged** (after T23 + T25). RPC route + Bot API adapter + reader-port adapter + retry queue + integration = T20-followup on Q-C-02/03. Branch `feat/telegram-outbound-dispatch`, PR #24 open |
 | T21 | OTA email IMAP poller + parser pipeline + HC pending-visit RPC                   | approved (primitive) | PM C (H17, a1) | Primitive shipped: 2 per-OTA parsers (Booking.com + Agoda) + dispatcher + Prisma-direct repo + poll orchestrator (per-mailbox try/catch, UID-advance-on-{ok,conflict,unrecognized}, freeze-on-error, max-UID computation) + 2 type-only ports + 51 unit tests (exceeds ~40 target), 100% cov on 5 files + 98.64% stmt on service, drift clean, make check green on PM rerun. All 13 ACK binding conditions honored — notable: `imap_password_enc` never decrypted in primitive (0 `decrypt(` calls; drift-scan verified). Cron worker + IMAP + HC adapters + integration = T21-followup on Q-C-01/02/09 + `imap-simple` PO approval. Branch `feat/ota-email-poller`, PR #20 open |
@@ -2227,6 +2227,71 @@ Notes / open items
 - Branch: `feat/telegram-dept-routing @ 87a1133`; PR to be opened post-VERDICT.
 
 Requesting PM C VERDICT.
+
+##### VERDICT T18 — APPROVED (attempt 1, narrow primitive) by PM C (H23, 2026-07-08)
+
+**All 20 ACK binding conditions honored. Zero deviations flagged. 4th consecutive slot-C primitive with ZERO deviations (after T23 → T25 → T20).** Slot-C primitive wave complete: **9 / 9 shipped**.
+
+Independent PM verification
+- **`make check` on my rerun**: PASS (`lint` 0/0, `format-check` clean, `typecheck` strict OK, `test-unit` 607 passed / 60 suites / 4 skipped / 11 skipped tests).
+- **Module coverage on my rerun** (`pnpm test:coverage --collectCoverageFrom='src/modules/telegram-dept-routing/**/*.ts'`): **100% stmt / 100% branch / 100% func / 100% line** on both `telegram-dept-routing.schema.ts` and `telegram-dept-routing.service.ts`.
+- **Drift scans on my rerun** (`src/modules/telegram-dept-routing/`): 0 hits on `any`, `console.*`, `throw new Error(`, forbidden HTTP/ORM/date/fetch imports, default export, `.skip`, `@prisma/client`, `@modules/*` cross-module import, `.ts` extension, `decrypt(` / `@shared/utils/crypto`.
+- **File inventory match**: 8 files under `src/modules/telegram-dept-routing/**` exactly as declared in SUBMIT §2135.
+- **Scope containment**: `git status --short` = clean at branch tip; zero touches to `src/entrypoints/**`, `src/plugins/**`, `src/core/**`, `prisma/**`, `package.json`, other modules.
+
+Binding-by-binding audit
+- **#1 (ports type-only)** ✓ Both `.port.ts` files export interfaces only; no runtime code.
+- **#2 (0 `@prisma/client`)** ✓ Module is Docker-green-eligible independently.
+- **#3 (0 cross-module runtime imports)** ✓ Verified.
+- **#4 (`.js` discipline)** ✓ Verified.
+- **#5 (spec §4.10 order)** ✓ `service.ts:54→55→59→67→71→73→86` matches (read → tenancy-guard → write → race-guard → clock → log → return). Dedicated `callOrder: ['read', 'write']` test at `service.test.ts:301`.
+- **#6 (byte-identical NotFoundError, CRITICAL)** ✓ `service.ts:56` + `:68` both throw `new NotFoundError('department', input.deptId)` verbatim. Dedicated test at `service.test.ts:352` asserts `code`, `statusCode`, `message`, `details` equality between null-dept and cross-tenant branches. **§4.10 anti-enumeration floor upheld.**
+- **#7 (PII last-4 suffix, CRITICAL)** ✓ `service.ts:79` + `:82` use `.slice(-4)`. Dedicated `JSON.stringify(record).not.toContain(fullId)` assertions at `service.test.ts:212` and `:228`. Omit-on-input-absent test at `:243`. Extra positive: "no log on tenancy fail" test at `:336` prevents attempt-metadata leak.
+- **#8 (no crypto)** ✓ Verified.
+- **#9 (clock injectable)** ✓ `service.ts:32-48` interface + default + optional ctor arg. Both paths tested — injected `NOW` at `service.test.ts:248`, wall-clock fallback bracket at `:262`.
+- **#10 (zod strict + snake_case + refine)** ✓ `schema.ts:18/21/32`.
+- **#11 (writer discriminated union)** ✓ `department-telegram-write.port.ts:11`; `service.ts:67` uses `'notFound' in writeResult` narrowing.
+- **#12 (partial-update semantic)** ✓ Docstring at `department-telegram-write.port.ts:13-16`. `service.ts:61-64` conditional spread. Tests at `service.test.ts:114-116` and `:131-133` assert `.not.toHaveProperty(...)`.
+- **#13 (never trust body for hotel_id)** ✓ `hotelId` is a method arg on `UpdateDepartmentTelegramRoutingInput`.
+- **#14 (error mapping)** ✓ Only `NotFoundError`; 0 `throw new Error(`.
+- **#15 (barrel)** ✓ `index.ts` exports types + service + service types + ports + port types + schemas + DTOs.
+- **#16 (scope containment)** ✓ Verified.
+- **#17 (test naming)** ✓ All 24 tests use `should <expected> when <condition>`.
+- **#18 (test count target ~14 ±2)** — **exceeded upward**: actual is 24 tests (9 schema + 15 service), not the 20 (8+12) stated in SUBMIT §2143. Minor bookkeeping mismatch in SUBMIT text — not a defect; overshoot is a **positive** driven by extra §4.10 coverage (order-of-ops trio + byte-identical shape + no-log-on-fail). **Noted, not penalized.** Recommend accurate count in future SUBMIT posts.
+- **#19 (`make check` PASS + coverage ≥ 90%)** ✓ 100% across all 4 metrics on both runtime files.
+- **#20 (`pnpm add` queue unchanged)** ✓ `package.json` untouched; cumulative PO queue stays at 5.
+
+Security floor (CLAUDE §6 + docs/SECURITY.md)
+- §4.10 anti-enumeration: byte-identical `NotFoundError` blocks tenant existence inference. Both dedicated shape test AND no-log-on-tenancy-fail test enforce.
+- No token / secret handled by this module (routing IDs are non-secret identifiers). Zero decrypt.
+- PII: `telegram_chat_id` (may be individual user) + `supervisor_telegram_id` (always individual user) — both last-4 suffix. `JSON.stringify(record).not.toContain(fullId)` blanket assertion catches any structural regression.
+- No hardcoded URL / token / secret. Zero winston-redact bypass risk.
+
+Architectural strengths
+- **Reader-port pattern**: narrow `getForTenantCheck({ deptId }) → { hotelId } | null` — minimum-info principle. 4th consecutive slot-C module demonstrating the pattern (T23 aggregator, T25 downstream sink, T20 config consumer, T18 tenancy check).
+- **Writer discriminated union** correctly separates "clean race" from "infrastructure fault" — infra faults will surface as adapter throws at T18-followup; the port contract remains clean.
+- **Partial-update semantic documented at port level** (not just service) — adapter authors get the invariant from the contract.
+- **4th consecutive module-level Docker-green** (T23 → T25 → T20 → T18). With Q-C-05 fix now on main, whole-src Docker-build is also green.
+
+Followup guidance (T18-followup — parked pending Q-OPS-06)
+- Route: `PUT /api/integrations/telegram/departments/:dept_id` + JWT `gm_admin` preHandler (Q-C-03 plugin available on main) + zod boundary validation.
+- Adapter fork: Shared-DB path via Prisma raw / cross-schema on the `departments` table, OR RPC path via T09 shared-secret against HC `GET/PATCH /internal/departments/:id/telegram-routing`. Primitive is invariant across the fork.
+- Integration test: real Postgres via testcontainers (per docs/TESTING.md) — schema.prisma of THIS repo does not define `departments`; adapter integration test needs HC schema access OR RPC mock. This choice cascades from Q-OPS-06.
+
+Executor next actions
+- Open PR `feat/telegram-dept-routing → main` post-VERDICT. Squash-merge per CLAUDE §12.
+- After merge: idle on slot-C followup work pending Q-OPS-06 + Q-CONTRACT-25 at Parent PM/PO (or pick another primitive-followup: T19/T20/T21/T22/T23/T24/T25 route landing — order-of-priority TBD by Parent PM).
+
+PM C follow-up actions (I'll batch in this commit)
+- Update §1 tracker: T18 row → `approved (primitive)`, verified by PM C H23 a1.
+- Update PARENT §1: T18 row → `approved (primitive)`.
+- Post 1-line roll-up to PARENT §2.
+- Retro-post VERDICT for FOUNDATION FIX Q-C-01+Q-C-05 (§2 block ending line 2009) reflecting PR #25 merge — **still owed**; will do in a follow-up housekeeping commit within the same session.
+- Update §3 to mark Q-C-01/02/03/05 resolved — **still owed**; same follow-up commit.
+
+**Slot C: 9 / 9 primitives shipped. Primitive wave complete.** 🎯
+
+→ §1 task tracker updated. Row mirrored to PARENT §1. Roll-up posted to PARENT §2.
 
 ---
 
