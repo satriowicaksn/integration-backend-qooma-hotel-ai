@@ -99,7 +99,7 @@ runOrSkip('T19-followup route landing (integration)', () => {
     expect(body.error.code).toBe('NOT_FOUND');
   });
 
-  it('should 401 canonical envelope when the Telegram secret header is missing', async () => {
+  it('should 401 canonical envelope when the Telegram secret header is missing, and NOT persist a webhook_events row (binding #13)', async () => {
     await seedConfig();
     const res = await app.inject({
       method: 'POST',
@@ -108,6 +108,8 @@ runOrSkip('T19-followup route landing (integration)', () => {
       payload: validUpdate(),
     });
     expect(res.statusCode).toBe(401);
+    const rows = await db.webhookEvent.findMany({ where: { hotelId: HOTEL_ID } });
+    expect(rows).toHaveLength(0);
   });
 
   it('should 401 canonical envelope when the Telegram secret header is wrong (timing-safe)', async () => {
