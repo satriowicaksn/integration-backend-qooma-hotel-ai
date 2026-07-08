@@ -2355,6 +2355,63 @@ src/modules/channel-health/
 
 **Awaiting PM C ACK** — especially GAP #1 (scope split confirms landing pattern) + GAP #2/#3 (deferred composition/aggregation for MVP).
 
+##### PM C ACK T24-followup — PLAN APPROVED, proceed to coding (H23, 2026-07-08)
+
+**Executive**: Cleanest-scope followup PLAN in the wave — narrow READ endpoint only, zero new adapters, zero new deps, zero new env, primitive freeze respected, reuses 3 primitive-exported helpers (`PROVIDER_ORDER`, `currentStatusOr`, `HealthResponseSchema`). Verified via `grep -n src/modules/channel-health/`:
+- `channel-health.schema.ts:32-36` — `HealthResponseSchema` mirrors spec §2.2 payload (`claude_api` + `whatsapp` + `telegram` at top level; snake_case; `last_message_at` nullable optional; `uptime_30d`/`avg_response_ms` optional).
+- `channel-health.service.ts:98-102` — `PROVIDER_ORDER = ['whatsapp', 'telegram', 'claude_api']`.
+- `channel-health.service.ts:108-110` — `currentStatusOr(null) → 'healthy'` with docstring "spec §2.2 badge assumes optimistic default until first probe lands" (primitive-anchored design decision, approved at T24 primitive VERDICT).
+
+**Scope-split decision (GAP #1) — ACK**: Ship READ endpoint now; probes + worker cron = separate T24-followup-B pending (a) AI SDK PO approval for Claude probe, (b) slot-B WA config integration + Meta health-endpoint contract, (c) Telegram probe reuses T20-followup Bot API adapter, (d) `worker.ts` bootstrap. This matches T19-followup's stubbed-HC composition strategy — land composition end-to-end while writes wait for contracts. Correct call.
+
+**GAP resolutions**
+- **GAP #1 (scope split)** — ACK; ship READ-only. Probe cron → T24-followup-B.
+- **GAP #2 (`last_message_at` = null MVP)** — ACK. Schema `.nullable().optional()` accommodates. Composition from `MAX(outbound_dispatch_queue.sent_at)` / `MAX(webhook_events.received_at)` deferred to performance-justified follow-up. Non-blocker.
+- **GAP #3 (`uptime_30d` / `avg_response_ms` omit)** — ACK. Schema `.optional()`. 30-day aggregation query deferred. Non-blocker.
+- **GAP #4 (first-probe optimistic-`healthy` default)** — ACK per T24 primitive's `currentStatusOr` design + docstring citing spec §2.2. **⚠ Cross-endpoint semantic inconsistency flagged (see architectural note below); not blocking**.
+- **GAP #5 (clock for synthetic `last_check_at`)** — ACK; use injected `clock.now().toISOString()`. Mirrors T23-followup binding #3 pattern.
+- **GAP #6 (`.eslintrc.cjs` carry-over)** — ACK. Same duplicate-with-T20/T23/T19-followup story. Merge-order dep; no-op rebase.
+
+**⚠ Architectural note (non-blocking, sync issue for Parent PM later)** — T24-followup's optimistic-healthy default (`currentStatusOr(null) → 'healthy'`) contradicts T23-followup's per-provider `down` fallback for the same underlying "no snapshot yet" case:
+- **T23-followup** (`GET /api/integrations`): missing snapshot → `{ status: 'down', lastMessageAt: null }` (adapter-local pessimistic fallback per T23-fu binding #2).
+- **T24-followup** (`GET /api/integrations/health`): missing snapshot → `{ status: 'healthy', last_message_at: null }` (primitive-exported optimistic default per T24 primitive design).
+
+Both are approved-in-context (each was defensible individually at its own VERDICT), but FE may show conflicting badges for the same subsystem. Reconciliation belongs at Q-C-08 (`degraded` semantics) / Q-C-11 (FE contract) — flag to Parent PM/PO but do NOT block this followup. Refactor to either direction is 1-file change.
+
+**Binding conditions (T24-followup scope — all MUST be honored on SUBMIT)**
+
+1. **Zero primitive touches** — `channel-health.service.ts` / `.debounce.ts` / `.types.ts` / `.schema.ts` / `.repository.ts` / `ports/**` / existing tests. Verify via `git status --short`.
+2. **Consume primitive exports only** — `PROVIDER_ORDER` + `currentStatusOr` + `HealthResponseSchema` imported from `@modules/channel-health` barrel. NO re-implementation of the ordering, fallback, or wire schema in the route file.
+3. **`toHealthResponseDto` = pure + colocated + reversible** — pure helper in `channel-health.routes.ts`; no logger, no clock (clock lives on the outer route handler), no side effects. Mirrors T23-followup binding #8.
+4. **Clock injectable** — `channel-health.routes.ts` accepts optional `clock?: { now(): Date }` (per T23-fu binding #3 precedent); `SYSTEM_CLOCK` default. Dedicated test uses injected fixture clock for `last_check_at`.
+5. **Parallel repo reads** — `Promise.all([WA, Telegram, claude_api])` via 3 `repo.findLatestByHotelProvider` calls. Same weak-parallelism-note carry-over as T23-fu binding #4: assert call-count + args, code visibly uses `Promise.all`.
+6. **`PROVIDER_ORDER` preserved test** — dedicated unit test asserts response fields appear in the order dictated by `PROVIDER_ORDER` — locks in the primitive's ordering contract.
+7. **`HealthResponseSchema.parse(res.json())` assertion at integration happy path** — mirrors T23-fu binding #7. Strongest possible schema/wire drift defense between primitive and followup.
+8. **Route auth-agnostic** — `preHandler = [...guards]`; api-server injects `[jwtAuthGuard, requireRole('gm_admin')]`. Integration test asserts 401 + 403.
+9. **`hotelId` from `req.hotelId`** — populated by JWT plugin at `jwt-auth.plugin.ts:173` (Q-C-04 resolved). Route handler uses `requireHotelId(req.hotelId)` pattern. Never trusts body/query/header.
+10. **Zero `@prisma/client` at route layer** — `channel-health.routes.ts` imports `ChannelHealthRepository` via `@modules/channel-health` barrel; no direct Prisma types in the route file.
+11. **`.js` extension discipline** — 0 `.ts` import extensions.
+12. **`SYSTEM_CLOCK` fallback branch tested** — bracket real wall-clock between `before`/`after` samples (T23-fu binding #3 precedent).
+13. **Scope containment** — zero touches to `src/entrypoints/worker.ts` (probes deferred), `prisma/**`, `package.json`, `src/core/config/env.ts`, `src/plugins/**`, other modules. Verify via `git status --short` on SUBMIT.
+14. **Cumulative `pnpm add` queue UNCHANGED** — T24-followup adds ZERO new deps (AI SDK still pending PO approval; not touched here).
+15. **`api-server.ts` wiring** — if T23-followup hasn't landed yet on main, executor instantiates `healthRepo` here (duplicate line resolves at merge). If it has landed, reuse. Either is fine; note in SUBMIT which state was found.
+16. **`.eslintrc.cjs` carry-over** — same duplicate-with-T20/T23/T19-followup story. Merge-order dep; no-op rebase.
+17. **Unit test count target ~5-7** + **integration test count = 6** (401 + 403 + 200-empty + 200-fully-seeded + status-passthrough-degraded + correlation-id). Skip-without-DATABASE_URL per T17/T20/T23/T19-followup precedent.
+18. **Adapter/route coverage ≥ 90%** stmt/branch/func/line. Route should hit 100% on the pure `toHealthResponseDto`.
+19. **Test naming** — `should <expected> when <condition>` throughout.
+20. **`make check` PASS**.
+
+**Zero net-new tolerated deviations expected**. This is a very clean composition; if executor honors bindings, this should be the smallest followup diff in the wave (fewer than T23-followup's 10 files) with 100% coverage attainable across the ~5 line pure helper.
+
+**Carry-over from prior VERDICTs (still in effect)**
+- `throw new Error(` at entrypoint tolerated (per T20-fu + T19-fu). Do NOT introduce in route file. If executor adds a new boot-guard or defensive throw at `api-server.ts`, plain `Error` at entrypoint remains accepted pending shared `BootstrapError extends AppError` (Q-C-15).
+- Winston logger no-op observation (Q-C-14) — contract tests for logger calls are structural, not behavioral.
+- `INTERNAL_RPC_SECRET.optional()` (Q-C-16) — not applicable to T24-followup (JWT gm_admin, not internal RPC).
+
+Proceed to coding on branch `feat/channel-health-followup`. Post SUBMIT when: `make check` green + drift-scans clean + all 20 bindings honored + `HealthResponseSchema.parse(res.json())` integration assertion present + `PROVIDER_ORDER` preserved test present + `SYSTEM_CLOCK` fallback bracket test present + clock-injected happy-path test present.
+
+**Followup wave milestone**: T24-followup APPROVAL will bring slot C to **5 / 9 followups approved** (T17-fu merged; T20-fu + T23-fu + T19-fu APPROVED; T24-fu will be #5). Remaining: T18-fu (blocked Q-OPS-06), T21-fu (blocked Q-C-09 + imap-simple), T22-fu (blocked Q-C-10 + 2 packages), T25-fu (blocked Q-C-12 + socket lib). T24-followup-B (probes + cron) queued behind Claude AI SDK PO approval.
+
 ---
 
 ## 3. Slot C open questions (mirror to PARENT §3)
