@@ -2293,9 +2293,87 @@ PM C follow-up actions (I'll batch in this commit)
 
 → §1 task tracker updated. Row mirrored to PARENT §1. Roll-up posted to PARENT §2.
 
----
+### ASSIGNMENT T23-followup — claimed by exec-C (Satrio) at H23 (2026-07-08) 13:30
+- Branch: `feat/integration-overview-followup`
+- Routed from: PM-STATUS-C.md §1 T23 approved-primitive note "Router + `gm_admin` + reader-port adapters + integration = T23-followup on Q-C-02/03/11." Q-C-02 (api.ts) ✓ + Q-C-03 (JWT) ✓ landed on `main`; Q-C-11 (FE-shape ratification) still open but per PM C ACK T23 §1258 the primitive schema is "1-file change" once Q-C-11 lands — non-blocking for the followup. User directive: "Ok now continue to the T23-followup Plan" — treated as informal PM authorization per T17-followup + T20-followup precedent.
+- Deps status: T23 primitive ✓ (approved H19, PR #22 open); T17 `TelegramConfigRepository` ✓ on main; T22 `QrStateRepository` ✓ on main; T24 `ChannelHealthRepository` ✓ on main; slot-B `WhatsappConfigRepository` ✓ on main.
 
-## 3. Slot C open questions (mirror to PARENT §3)
+#### PLAN T23-followup — exec-C (Satrio) at H23 (2026-07-08) 13:30
+
+**Scope recap**
+Land the runtime composition around the T23 primitive per spec `04-integration-channels.md §2.1 row 27` + MVP §1.3 C6. Ships (a) 4 reader-port adapters bridging T23 to the underlying module repositories: `WhatsappConfigReadAdapter` (slot-B `WhatsappConfigRepository` → `WhatsappOverviewView`), `TelegramConfigReadAdapter` (T17 `TelegramConfigRepository` → `TelegramOverviewView`), `QrStateReadAdapter` (T22 `QrStateRepository` → `QrOverviewView`), `ChannelHealthReadAdapter` (T24 `ChannelHealthRepository` → `HealthOverviewView`, per-provider latest snapshot; missing snapshot → `down`); (b) `GET /api/integrations` route in `integration-overview.routes.ts` behind `jwtAuthGuard` + `requireRole('gm_admin')` (same guard composition as T17-followup); (c) camelCase-domain → snake_case-wire mapping via a small `toResponseDto` helper in the route file; (d) wiring in `api-server.ts` (mirrors T17-followup + T20-followup wiring block); (e) 4 adapter unit tests + 1 integration test via `fastify.inject`.
+
+**Session-start gate** (EXECUTOR-PROTOCOL §2)
+- Identity confirmed: Executor, Slot C (Satrio) ✓
+- CLAUDE.md loaded ✓
+- Task spec read: `docs/spec/04-integration-channels.md §2.1 row 27` (endpoint purpose); `MVP-INTEGRATION-FIRST.md §1.3 C6`; T23 primitive PM C ACK §1258 (bindings + Q-C-11 stance); T23 primitive `service.ts` + 4 `ports/*.ts` + `types.ts` + `schema.ts` (already read this session)
+- Precedent spot-read: `src/entrypoints/api-server.ts` (composition), `src/modules/telegram/telegram.routes.ts` (T17-followup route landing), `src/modules/telegram-outbound/telegram-outbound.routes.ts` (T20-followup RPC pattern), `src/modules/telegram/__tests__/telegram.routes.integration.test.ts` (integration test pattern), source module repositories (`whatsapp-config.repository.ts`, `qr-provisioning.repository.ts`, `channel-health.repository.ts`, `telegram.repository.ts`), source module `types.ts` files
+- Dependencies: all foundation Qs landed; all 4 source-module primitives + T23 primitive present on main.
+- `make typecheck` clean ✓ / `make lint` clean ✓ on `main`
+- Scaffolder risk: none — new files under `src/modules/integration-overview/adapters/**` + `integration-overview.routes.ts` + `~15-line` addition to `api-server.ts`. No `pnpm create` / generator.
+
+**Files to create**
+```
+src/modules/integration-overview/adapters/
+├── whatsapp-config-read.adapter.ts       (WhatsappConfigRepository → WhatsappOverviewView)
+├── telegram-config-read.adapter.ts       (TelegramConfigRepository → TelegramOverviewView)
+├── qr-state-read.adapter.ts              (QrStateRepository → QrOverviewView)
+└── channel-health-read.adapter.ts        (ChannelHealthRepository → HealthOverviewView)
+src/modules/integration-overview/
+└── integration-overview.routes.ts        (GET /api/integrations; JWT + gm_admin; camel→snake wire)
+src/modules/integration-overview/__tests__/
+├── whatsapp-config-read.adapter.test.ts       (unit — 3 tests)
+├── telegram-config-read.adapter.test.ts       (unit — 3 tests)
+├── qr-state-read.adapter.test.ts              (unit — 3 tests)
+├── channel-health-read.adapter.test.ts        (unit — 4 tests: all providers healthy + one missing → down + all missing → all-down + ordering)
+└── integration-overview.routes.integration.test.ts (integration — 6 tests)
+```
+
+**Files to modify**
+- `src/entrypoints/api-server.ts` — instantiate `WhatsappConfigRepository`, `QrStateRepository`, `ChannelHealthRepository` (add `db` singleton dep); 4 adapters; service; register `integrationOverviewRoutes` under `gmAdminGuards`. Follows T17-followup + T20-followup wiring block precedent.
+
+**Files NOT touched**
+- `src/modules/integration-overview/integration-overview.service.ts` / `.types.ts` / `.schema.ts` / `ports/**` / existing tests (T23 primitive frozen at approval)
+- `src/entrypoints/worker.ts` (T23 is read-only endpoint; no worker)
+- `prisma/schema.prisma` (no schema change)
+- `src/plugins/**` (guards already exist)
+- `package.json` (zero new deps)
+- `src/core/config/env.ts` (no new env fields needed — T23 has no external IO)
+
+**Approach**
+1. **`adapters/whatsapp-config-read.adapter.ts`** — ctor `(repo: WhatsappConfigRepository)`. `getForHotel({ hotelId })` → `repo.findByHotelId(hotelId)` returns `WaConfig | null` (Prisma row). Map: `{ bsp, phoneNumber: row.phoneNumber, verifiedAt: row.verifiedAt?.toISOString() ?? null, hasAccessToken: row.accessTokenEnc.length > 0, webhookUrl: row.webhookUrl }`. Return `null` on missing.
+2. **`adapters/telegram-config-read.adapter.ts`** — ctor `(repo: TelegramConfigRepository)`. `getForHotel` → `repo.findByHotelId(hotelId)` returns `TelegramConfigDomain | null`. Map: `{ botUsername, hasBotToken: domain.botTokenEnc.length > 0, defaultChatId: domain.defaultChatId, webhookUrl: domain.webhookUrl }`.
+3. **`adapters/qr-state-read.adapter.ts`** — ctor `(repo: QrStateRepository)`. Map: `{ url: domain.waLink, pngUrl: domain.pngUrl, generatedAt: domain.generatedAt.toISOString() }`.
+4. **`adapters/channel-health-read.adapter.ts`** — ctor `(repo: ChannelHealthRepository)`. `getSnapshot({ hotelId })` fetches latest per provider (WA / Telegram / claude_api) in parallel via `Promise.all` — 3 calls to `repo.findLatestByHotelProvider`. Missing snapshot → `down` (with a `lastCheckAt = clock.now().toISOString()` for Claude — parity with `syntheticHealthDown`). Present snapshot → status + `lastMessageAt: domain.checkedAt.toISOString()` for WA/Telegram; Claude gets `lastCheckAt`. Optional `uptime30d` / `avgResponseMs` NOT populated in this primitive-adapter (Q-C-11 open — will land in a follow-up refactor once FE contract lands).
+5. **`integration-overview.routes.ts`** — Fastify plugin. `GET /api/integrations`. `preHandler` = injected guards (JWT + gm_admin at api-server wiring). Handler: extract `hotelId` from `req.hotelId` (populated by JWT guard); call `service.getForHotel(hotelId)`; convert domain camelCase → wire snake_case via a small pure `toResponseDto` function; return. No zod validation on request (GET with no body); response is authoritative via `IntegrationOverviewResponseSchema` at the type level.
+6. **`api-server.ts` wiring** — after existing wiring block:
+   ```ts
+   const waRepo = new WhatsappConfigRepository(db);
+   const qrRepo = new QrStateRepository(db);
+   const healthRepo = new ChannelHealthRepository(db);
+   const overviewService = new IntegrationOverviewService(
+     {
+       whatsapp: new WhatsappConfigReadAdapter(waRepo),
+       telegram: new TelegramConfigReadAdapter(telegramRepo),
+       qr: new QrStateReadAdapter(qrRepo),
+       health: new ChannelHealthReadAdapter(healthRepo),
+     },
+     logger,
+   );
+   await app.register(integrationOverviewRoutes, { service: overviewService, guards: gmAdminGuards });
+   ```
+7. **Unit tests** — 3-4 per adapter (null passthrough, mapping shape, edge cases). Health adapter has 4 tests (all-present, one-missing→down, all-missing→all-down default, per-provider parallel calls verified).
+8. **Integration test** — pattern mirrors `telegram.routes.integration.test.ts`: seed configs into Postgres, JWT-signed request, assert full JSON response shape. Cases: 401 no auth, 403 wrong role, 200 all-configured, 200 nothing-configured (all null except health), 200 partial-configured, x-correlation-id echo.
+
+**GAPs / questions**
+
+- **GAP T23fu-#1 — `hasAccessToken` / `hasBotToken` derivation.** Spec §2.1 row 27 doesn't spec these boolean flags — they're the T23-primitive schema's status pill signal. Options: (a) `accessTokenEnc.length > 0` — presence check (T23 primitive's binding #7 recommendation); (b) `verifiedAt !== null` — proxy for "config completed"; (c) always `true` when row exists. **My intent**: (a) — presence check. Matches primitive schema semantics + no proxy-guessing. Non-blocker.
+- **GAP T23fu-#2 — Missing health snapshot default.** When a provider has no snapshot row (first-poll not yet run, or cron never ran), the adapter must produce a default pill. Options: (a) `down` with synthetic `lastCheckAt = clock.now().toISOString()` (parity with T23 `syntheticHealthDown`); (b) omit `lastMessageAt` / `lastCheckAt`; (c) throw so service applies its own synthetic-down. **My intent**: (a) — adapter-local fallback keeps the service's binding #11 fallback for wholesale port throws while giving FE a stable shape for per-provider misses. Non-blocker.
+- **GAP T23fu-#3 — Q-C-11 (FE contract).** Still open at Parent PM. Per PM C ACK T23 §1258, refactor to matching FE shape is a 1-file schema change. **My intent**: ship the primitive's schema unchanged; T23-followup shape freezes only when Q-C-11 lands. Non-blocker.
+- **GAP T23fu-#4 — Optional `uptime_30d` / `avg_response_ms` for Claude.** T23 schema has these as `.optional()`. Primitive-adapter has no data source in this repo for uptime/latency aggregates. **My intent**: OMIT both fields in the adapter output — schema optional accommodates. Populating requires an aggregation query over health snapshots (future follow-up, likely part of Q-C-11 resolution). Non-blocker.
+- **GAP T23fu-#5 — Cross-module import discipline.** Adapters legitimately import `@modules/whatsapp/whatsapp-config.repository.js` + `@modules/telegram/telegram.repository.js` + `@modules/qr-provisioning/qr-provisioning.repository.js` + `@modules/channel-health/channel-health.repository.js`. This is the T23 primitive PLAN GAP resolution ("adapter wires to `@modules/*` barrels in T23-followup") — the reader-port pattern's whole point. Same precedent as T20-followup's `@modules/telegram` import from its adapter. Confirm.
+
+**Awaiting PM C ACK** — especially GAP #1 (hasAccessToken semantics) + GAP #5 (cross-module adapter imports, precedented by T20-followup).
 
 > PM C catat di sini ketika executor C raise `GAP` atau `BLOCKED`. Setelah resolve atau eskalasi ke Parent PM, update status. Parent PM consolidate ke `PM-STATUS-PARENT.md §3`.
 
