@@ -78,14 +78,20 @@ These endpoints receive callbacks from third parties. FE never calls them.
 
 ### 2.4 Internal RPC surface (called by other services)
 
+Transport: HTTP + `X-Internal-Secret` header (shared secret, `timingSafeEqual`). Path convention: `/internal/<domain>/<action>`. See T09 (internal-rpc-auth plugin) + ADR-0009.
+
 | RPC                                            | Caller     | Purpose                                                              |
 | ---------------------------------------------- | ---------- | -------------------------------------------------------------------- |
-| `send_wa_message(hotel_id, guest_id, body, template?, variables?)` | Hotel Core / AI | Dispatch outbound WA (DND + quota gating applied)          |
-| `send_telegram_message(chat_id, body, parse_mode?)`                | Hotel Core (escalation worker) | Dispatch escalation pings to dept staff + L2 |
-| `submit_wa_template_to_meta(template_id)`                          | Hotel Core | Relay POST `/api/wa-templates` to Meta                               |
-| `resubmit_wa_template_to_meta(template_id)`                        | Hotel Core | Relay `/resubmit` after edit                                         |
+| `POST /internal/wa/dispatch`                   | Hotel Core | Dispatch outbound WA (text or template). **Caller (HC) MUST run DND + quota check BEFORE calling** — Integration does NOT gate (ADR-0009). Body: `{ hotel_id, wa_config_id?, guest_id, guest_wa_phone, body?, template_ref?, template_variables?, correlation_id }`. Default `wa_config_id` = hotel's primary config (schema 1:1 for now, forward-compat multi-number). |
+| `POST /internal/wa/conversations.list`         | Hotel Core | List conversations per hotel dgn cursor pagination. Body: `{ hotel_id, cursor?, limit? }` → `{ items: [...], next_cursor? }`. ADR-0010 storage. |
+| `POST /internal/wa/messages.list`              | Hotel Core | List messages per conversation, cursor-paginated chronological. Body: `{ hotel_id, conversation_id, cursor?, limit? }` → `{ items: [...], next_cursor? }`. ADR-0010 storage. |
+| `POST /internal/telegram/dispatch`             | Hotel Core (escalation worker) | Dispatch escalation pings to dept staff + L2 (`chat_id`, `body`, `parse_mode?`) |
+| `POST /internal/wa-templates/submit`           | Hotel Core | Relay POST `/api/wa-templates` to Meta (`template_id` → returns Meta ref) |
+| `POST /internal/wa-templates/resubmit`         | Hotel Core | Relay `/resubmit` after edit |
 
-These are internal — never exposed to FE.
+These are internal — never exposed to FE. CRM staff-triggered send + inbox read go via Hotel Core public API, which calls these RPCs.
+
+**Superseded**: `send_wa_message(...)` / `send_telegram_message(...)` bare-function signatures dari revisi sebelumnya di-replace dgn HTTP RPC paths di atas per ADR-0009. Semantik payload sama, transport eksplisit.
 
 ---
 
@@ -93,17 +99,25 @@ These are internal — never exposed to FE.
 
 ### 3.1 WhatsApp Cloud API (via BSP, currently `1engage`)
 
-**Outbound flow** (Hotel Core / AI service → this service → WA Cloud → guest):
+**Outbound flow** (CRM → Hotel Core public API → this service internal RPC → WA Cloud → guest) — per ADR-0009 boundary:
 
-1. Caller invokes internal RPC `send_wa_message(hotel_id, guest_id, body, template?, language?)`.
-2. This service:
-   - Looks up the hotel's WA config from `wa_configs` table (BSP, access_token, phone_number).
-   - Checks DND window (hotel's `dnd` config from Auth's `hotels.dnd` — cross-table SELECT) — if in DND and not VVIP-exempt and not inbound-trigger, queue for after DND end OR drop, per `exception_*` flags.
-   - Checks outbound quota meter — RPC Hotel Core `check_and_reserve_outbound_quota(hotel_id)`; if at 100% for the month, refuse with `429 RATE_LIMIT`.
-   - Picks template (if provided) or sends raw text.
-   - Dispatches to WA Cloud API.
-   - On success, RPC Hotel Core `commit_outbound_quota_increment(hotel_id, 1)`; if 80% / 100% threshold crossed, HC emits `billing:threshold_reached`.
-   - Persists delivery receipt when WA Cloud webhook returns.
+1. CRM calls Hotel Core public API (`POST /api/hotels/:slug/wa-messages` or equivalent — HC-owned).
+2. **Hotel Core** (business layer, NOT Integration) performs:
+   - DND check against hotel's `dnd` policy (`hotels.dnd` in Auth) — VVIP-exempt + inbound-trigger flags.
+   - Outbound quota check + reserve (2-phase).
+   - Audit: which staff triggered send.
+3. Hotel Core calls `POST /internal/wa/dispatch` at this service with `{ hotel_id, wa_config_id?, guest_id, guest_wa_phone, body?, template_ref?, template_variables?, correlation_id }`.
+4. This service:
+   - Looks up WA config from `wa_configs` (BSP, access_token decrypted, phone_number).
+   - Picks template (if `template_ref`) or sends raw text (if `body`).
+   - Persists row to `outbound_dispatch_queue` (pending).
+   - Persists row to `messages` (`direction=outbound`, `status=pending`) per ADR-0010.
+   - Dispatches to WA Cloud API via BSP adapter.
+   - On BSP ack: mark `outbound_dispatch_queue` sent + update `messages.status=sent` + `external_message_id`.
+   - Reports outcome to caller (HC) — HC commits quota / rollback per its own state.
+5. **Delivery receipt path** (Meta → us webhook `POST /webhook/whatsapp/:hotel_slug`): T15 pipeline updates `messages.status` via `external_message_id` join.
+
+**DND + quota are NOT enforced by Integration** — Integration trusts caller (HC) already checked. T13 primitive's DND/quota ports retain as no-op passthrough for backward compat; Q-B-08 + Q-B-09 closed from Integration perspective.
 
 **Template approval flow**: CRUD endpoints in Hotel Core (`/api/wa-templates/*` per `02-hotel-core.md` §1.9). **Submit / resubmit relay handlers here**: on Hotel Core POST, Hotel Core RPCs this service which relays to Meta. Update template status via internal callback to HC when Meta webhooks back (`template:approved` / `template:rejected`).
 
@@ -113,9 +127,10 @@ These are internal — never exposed to FE.
 2. Verify signature (`X-Hub-Signature-256`).
 3. Persist raw payload to `webhook_events` (audit).
 4. For each message: identify or create guest (by WA phone) — RPC Hotel Core's `upsert_guest_by_wa_phone(hotel_id, wa_phone, name?)` → returns `guest_id`.
-5. RPC AI service: `inbound_wa_message(guest_id, body, hotel_id)`.
-6. AI processes (may create ticket via Hotel Core, may reply via this service's outbound).
-7. 200 to Meta within 10s (Meta retries on timeout).
+5. Upsert `conversations` (by `hotel_id + guest_wa_phone`) + insert `messages` (`direction=inbound`, `status=received`) per ADR-0010. Link `webhook_event_id` FK.
+6. RPC AI service: `inbound_wa_message(guest_id, body, hotel_id)`.
+7. AI processes (may create ticket via Hotel Core, may reply via this service's outbound).
+8. 200 to Meta within 10s (Meta retries on timeout).
 
 ### 3.2 Telegram Bot
 

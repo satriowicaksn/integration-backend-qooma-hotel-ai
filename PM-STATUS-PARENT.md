@@ -13,14 +13,16 @@
 ## 0. Current focus (global)
 
 - **Day**: H12+ (bootstrapped 2026-06-29 from core-backend infra; scope per H12 PO ruling; task tracker activated 2026-06-30)
-- **Phase**: Bootstrap / pre-T01 — authoritative spec live di [`docs/spec/MVP-INTEGRATION-FIRST.md`](./docs/spec/MVP-INTEGRATION-FIRST.md) (Slice 3 of 3 backend MVP slices — ship after Auth + HC)
+- **Phase**: G1 tail — foundation Q-C-01/05 resolved (PR #25 merged); Q-C-02/03 resolved on PR #26 (CI green, awaiting merge); T17-followup on PR #27. WA CRM surface (T26–T29) issued 2026-07-08 per PO ruling — all Slot C.
 - **Active gate**: G1 — Boilerplate + Prisma schema ready (kriteria default `PM-AGENT.md §5`; PO konfirmasi)
-- **Active devs**: A (Nathan) · B (Nanak) · C (Satrio) — **slot A foundation T01-T09 = 9/9 MERGED**; B (T10+) & C (T17+) unblocked, not yet started
-- **Progress (global)**: **9 / 25 merged** (T01-T09 slot A, all attempt 1) · 0 slot B · 0 slot C · T10-T25 backlog (T10-T16 = slot B · T17-T25 = slot C)
-- **Dependencies**: Auth + Hotel Core MUST be deployed first. Integration RPCs HC for guest upsert + quota two-phase + per-dept dept write-through; webhook routes look up `hotels.code → hotels.id` from Auth.
-- **Reading order untuk fresh dev**: `KICKOFF.md` → `docs/SERVICE-CHARTER.md` → `docs/spec/MVP-INTEGRATION-FIRST.md` → `docs/spec/04-integration-channels.md` (full DDL + RPC catalog + retry strategy) → `docs/spec/data-model.md` → `docs/spec/open-questions.md` → claim task di §1a
+- **Active devs**: A (Nathan) idle post-foundation · B (Nanak) idle — WA ownership transitioned to C per PO ruling 2026-07-08 (ADR-0009) · C (Satrio) active, WA CRM surface + Telegram followups
+- **Progress (global)**: **25 / 29 primitives merged** (T01–T25 all merged 2026-07-07; T18 backlog; T26–T29 backlog issued 2026-07-08). Followups (route landing + adapters) not started — depends on PR #26/#27 land + HC/AI RPC contract Qs.
+- **Dependencies**: Auth + Hotel Core MUST be deployed first. Per ADR-0009: HC owns DND + quota checks, not Integration. Integration exposes internal RPC for HC to call; CRM never talks to Integration directly for send / conversation read.
+- **Reading order untuk fresh dev**: `KICKOFF.md` → `docs/SERVICE-CHARTER.md` → `docs/spec/MVP-INTEGRATION-FIRST.md` → `docs/spec/04-integration-channels.md` (full DDL + RPC catalog + retry strategy) → `docs/spec/data-model.md` → `docs/spec/open-questions.md` → `docs/decisions/0009` + `0010` (WA CRM boundary + conversation model) → claim task di §1a
 
-> **H12 PO rulings baked in (2026-06-29)**: Integration owns ALL `/api/integrations/*` (config CRUD + actions) + webhook ingress + outbound dispatch. Q-OPS-03 RESOLVED (dispatch owned here). Q-CONTRACT-25 + Q-OPS-06 NEW (per-dept Telegram write-through — shared DB recommended; see `docs/spec/open-questions.md`).
+> **H12 PO rulings baked in (2026-06-29)**: Integration owns `/api/integrations/*` config CRUD + actions + webhook ingress. Outbound dispatch owned here (Q-OPS-03 resolved).
+>
+> **2026-07-08 PO ruling** (ADR-0009 + ADR-0010): send message + conversation read = **internal RPC only** (HC-facing), NOT public CRM API. HC owns DND + quota checks. WA ownership transitioned Slot B → Slot C. Q-B-08 (HC quota RPC caller) + Q-B-09 (HC DND RPC caller) closed from Integration side — HC-side concern.
 
 ---
 
@@ -57,6 +59,10 @@
 | T23 | Integration overview endpoint (`GET /api/integrations`)                          | C    | Satrio  | approved (primitive) | PM C (H19, a1) | Primitive: 4 reader-port interfaces + aggregator (parallel Promise.all + per-subsystem silent-null + synthetic-down on health-fail, clock-injectable) + zod schema (`.strict()`, snake_case, per-subsystem nullable except health) + 17 tests. **All 17 binding conditions honored — CLEANEST slot-C primitive to date, ZERO deviations flagged.** Reader-port pattern executes as designed: 0 `@prisma/client` + 0 cross-module imports at module level. Docker-build still red per Q-C-05 on pre-existing modules (T23 itself contributes zero to failure). Router + `gm_admin` + adapters + integration = T23-followup. Branch `feat/integration-overview`, PR #22 open |
 | T24 | Channel health probes + snapshots + 2-poll debounce                              | C    | Satrio  | approved (primitive) | PM C (H16, a1) | Primitive: pure 2-poll debounce state-machine + 3 type-only provider ports + Prisma-direct repo + service (probes→debounce→per-poll persist→transition-gated event) + 29 unit tests, 100% cov all 4 runtime files, drift clean, make check green on PM rerun. All 9 ACK binding conditions honored. Router+worker cron+probe adapters+integration = T24-followup on Q-C-01/02/03/05/08 + AI SDK PO approval. Branch `feat/channel-health-probes @ d84c8cc`, PR #19 open (CI 3/4 green + Docker-red per precedent) |
 | T25 | `integration:health_changed` socket emits                                        | C    | Satrio  | approved (primitive) | PM C (H20, a1) | Primitive: type-only SocketPublisherPort + `publishAll` service (per-event try-catch, aggregate never throws) + `toWirePayload` camelCase→snake_case conversion + local type mirror + zod schema + `HEALTH_CHANGED_EVENT_NAME` constant + 17 unit tests (exceeds ACK ~13 target). **All 17 binding conditions honored — 2nd consecutive ZERO deviations flagged after T23.** Case-conversion discipline verified. Adapter + worker cron = T25-followup on Q-C-02/12. Branch `feat/integration-health-socket-emit`, PR #23 open (CI 3/4 green + Docker-red on upstream Q-C-05) |
+| T26 | WA config CRUD route landing (`GET, PUT /api/integrations/whatsapp`)             | C    | Satrio  | backlog  | —           | PO ruling 2026-07-08: WA ownership → Slot C. Public `gm_admin` per H12 ruling stand (ADR-0009). Consumes T10 primitive service. Depends: PR #26 merge (Q-C-02 api.ts + Q-C-03 JWT). See §8 detail block |
+| T27 | WA inbound webhook route + forward to HC/AI internal RPC                          | C    | Satrio  | backlog  | —           | PO ruling 2026-07-08. Meta-facing `POST /webhook/whatsapp/:hotel_slug`. Composes T04 HMAC + T12 ingest + T15 receipts + ADR-0010 messages upsert. Depends: PR #26 merge + Q-A-04 (HMAC secret source) parked with placeholder + Q-B-04/05 (HC/AI RPC adapters, stub-OK for MVP land). See §8 |
+| T28 | WA outbound dispatch **internal RPC** landing (`POST /internal/wa/dispatch`)      | C    | Satrio  | backlog  | —           | PO ruling 2026-07-08 + ADR-0009: internal RPC only (HC caller). No public API from CRM. Consumes T13 + T14 + T16 primitives; DND/quota port supplied as passthrough (HC owns checks). Depends: PR #26 merge + T26 (share config repo wiring). See §8 |
+| T29 | WA conversation + message model + read internal RPC                              | C    | Satrio  | backlog  | —           | PO ruling 2026-07-08 + ADR-0010: new `conversations` + `messages` tables. Slot C authorized to touch `prisma/schema.prisma` + migrations for this task. Internal RPC `POST /internal/wa/conversations.list` + `messages.list`. Depends: PR #26 merge + T27 (webhook upsert messages inbound path). See §8 |
 
 ### 1a. Pre-G1 bootstrap queue (MIRRORED into §1 on 2026-06-30 — kept as spec-driven reference)
 
@@ -89,6 +95,10 @@
 | T23           | Integration overview endpoint (`GET /api/integrations`)                          | C    | C7                                                |
 | T24           | Channel health probes + snapshots + 2-poll debounce                              | C    | C8                                                |
 | T25           | `integration:health_changed` socket emits                                        | C    | C9                                                |
+| T26           | WA config CRUD route landing (`GET, PUT /api/integrations/whatsapp`)             | C    | ADR-0009; spec §2.1                               |
+| T27           | WA inbound webhook route + HC/AI forward + `messages` upsert                     | C    | ADR-0009 + ADR-0010; spec §2.3 + §3.1 Inbound     |
+| T28           | WA outbound dispatch internal RPC (`POST /internal/wa/dispatch`)                 | C    | ADR-0009; spec §2.4 + §3.1 Outbound               |
+| T29           | WA conversation + message model + read internal RPC                              | C    | ADR-0010; spec §2.4                               |
 
 ---
 
@@ -174,7 +184,7 @@
 | Q-B-05 | **AI `inbound_wa_message` RPC endpoint contract (cross-service, AI-team + PO).** Spec `04 §3.1 L116` + `§3.2 L311` gives signature `inbound_wa_message(guest_id, body, hotel_id)` marked "opaque, RPC only, no DB FK" — no URL, no path, no response, no error catalog. **Options**: A) narrow port `AiInboundMessagePort` — adapter accepts `{ baseUrl, path, internalSecret }` at construction, PM/AI ratifies later [PM B keeps port TYPE-ONLY in T12 primitive; adapter deferred to T12-followup]; B) hard-code assumed `POST /internal/ai/inbound/wa-message` with `{ hotelId, guestId, body, messageId } → void`; C) block. Sibling to Q-B-04. Blocks T12-followup AI adapter. | PM B (Nanak) | spec §3.1 L116 + §3.2 L311; T12 PLAN GAP-#4 | open | — |
 | Q-B-06 | **`webhook_events.external_id` column addition — schema follow-up sibling to Q-A-04.** `MVP §4.6` mandates dedupe on `(provider, external_id)` for inbound webhooks. `04 §4.4 L221-232` DDL + Prisma model (schema.prisma:72-83) have **NO `external_id` column** on `webhook_events`. Pattern established elsewhere: `outbound_dispatch_queue.external_id VARCHAR(80) NULL` (§4.5 L251) + `delivery_receipts.external_id VARCHAR(80) NOT NULL` (§4.6 L267). **Options**: A) add `external_id VARCHAR(80) NULL` on `webhook_events` + partial unique index `WHERE external_id IS NOT NULL` — Nathan/T02 territory [T12 primitive assumes this + `isDuplicate` placeholder in wire schema always `false`]; B) JSON-path query on `payload->…->messages->0->id` — slow, write-throw when A lands; C) synthetic key at runtime — same cost; D) skip dedup in primitive (T16 modified-B precedent) [PM B default]. Slot A / Nathan land. Blocks T12-followup dedup semantics. | PM B (Nanak) | schema.prisma:72-83 + spec §4.4 vs §4.6 dedupe mandate; T12 PLAN GAP-#5 | open | — |
 | Q-B-07 | **`delivery_receipts` UNIQUE constraint on `(dispatch_id, external_id, status)` triple — OPTIONAL future enhancement (schema follow-up, sibling to Q-B-06 pattern).** `04 §4.6 L263-272` DDL has only status CHECK constraint; NO UNIQUE on triple. Multi-row per triple is NATIVE (status progression) but Meta CAN send duplicate status events on network retry, producing harmless duplicate rows. **Options**: A) add `UNIQUE (dispatch_id, external_id, status)` + `ON CONFLICT DO NOTHING` upsert semantic in T15-followup — Nathan/T02 territory [PM B default]; B) skip Q-B-07 entirely — accept duplicates as append-only audit noise; C) synthetic dedup key at runtime — polluting service logic. **NOT blocking T15 primitive** (multi-row accepted per DDL). Future enhancement scheduling. | PM B (Nanak) | schema.prisma:108-119 + spec §4.6 L263-272; T15 PLAN GAP-#5 | open | — |
-| Q-B-08 | **HC outbound quota RPC endpoint contract (cross-service, HC-team + PO).** Spec `MVP §4.5 L98` + `04 §3.1 L102/L105` mandate 2-phase: `check_and_reserve_outbound_quota(hotel_id)` + `commit_outbound_quota_increment(hotel_id, 1)` + implicit rollback endpoint per PM B GAP T13-#5 A. NO URL, NO path, NO payload/response, NO error catalog. `docs/spec/02-hotel-core.md` does NOT exist in repo. **Options**: A) narrow port `HotelCoreQuotaPort` with `checkAndReserve` + `commit` + `rollback` methods — adapter accepts `{ baseUrl, path, internalSecret }` at construction, PM/HC ratifies later [PM B keeps port TYPE-ONLY in T13 primitive; adapter deferred to T13-followup]; B) hard-code assumed endpoints; C) block T13. Sibling to Q-B-04. Blocks T13-followup HC quota adapter. | PM B (Nanak) | spec §4.5 + §3.1 vs missing `02-hotel-core.md`; T13 PLAN GAP-#1 | open | — |
+| Q-B-08 | **HC outbound quota RPC endpoint contract (cross-service, HC-team + PO).** Spec `MVP §4.5 L98` + `04 §3.1 L102/L105` mandate 2-phase: `check_and_reserve_outbound_quota(hotel_id)` + `commit_outbound_quota_increment(hotel_id, 1)` + implicit rollback endpoint per PM B GAP T13-#5 A. NO URL, NO path, NO payload/response, NO error catalog. `docs/spec/02-hotel-core.md` does NOT exist in repo. **Options**: A) narrow port `HotelCoreQuotaPort` with `checkAndReserve` + `commit` + `rollback` methods — adapter accepts `{ baseUrl, path, internalSecret }` at construction, PM/HC ratifies later [PM B keeps port TYPE-ONLY in T13 primitive; adapter deferred to T13-followup]; B) hard-code assumed endpoints; C) block T13. Sibling to Q-B-04. Blocks T13-followup HC quota adapter. | PM B (Nanak) | spec §4.5 + §3.1 vs missing `02-hotel-core.md`; T13 PLAN GAP-#1 | resolved | ADR-0009 (2026-07-08): HC owns quota check, NOT Integration. T28 supplies passthrough adapter. Q closed from Integration side. |
 | Q-C-06 | **StaffLookupPort HC RPC contract — cross-service, HC-team + PO.** Spec §3.2 "identify the staff Telegram user" — no URL, no path, no payload, no response shape, no error catalog for `lookupByTelegramUserId(hotelId, telegramUserId) → StaffIdentity \| null`. `docs/spec/02-hotel-core.md` does NOT exist. **Options**: A) narrow port type-only [T19 primitive default; adapter deferred to T19-followup]; B) hard-code assumed `POST /internal/hc/staff/lookup-by-telegram-id`; C) block T19-followup. Sibling to Q-B-04/05/08/09. Blocks T19-followup HC adapter. | PM C (Satrio) H15 (2026-07-06) | spec §3.2 vs missing `02-hotel-core.md`; T19 PLAN GAP-#4 | open | — |
 | Q-C-07 | **TicketActionPort HC RPC contract — cross-service, HC-team + PO.** Spec §3.2 "Hotel Core (for ticket status update)" — no URL/signature/response/error catalog for `take` / `release` / `markDone(hotelId, ticketId, staffId) → { ok \| not_found \| forbidden }`. Also unclear: is there a fourth action for AI handover (spec §3.2 mentions "RPC AI service (for handover)"), or does that flow via a separate `AiHandoverPort`? Sibling to Q-C-06 + Q-B-04. Blocks T19-followup HC adapter. HC-team + AI-team + PO ratify. | PM C (Satrio) H15 (2026-07-06) | spec §3.2 vs missing `02-hotel-core.md`; T19 PLAN GAP-#4 | open | — |
 | Q-C-08 | **`degraded` health status semantics — product/PO decision affecting FE badge.** Spec §7 says "2 consecutive failures → `down`" but doesn't define what `degraded` means. Enum listed in §2.2 + §4.7 CHECK + §9 (503 CHANNEL_DEGRADED). Options: **(A)** 1st consec fail = `degraded`, 2nd = `down` (SRE yellow→red progression; T24 ships this default); **(B)** `degraded` reserved for latency-based (probe OK but slow); 1st fail stays `healthy`. T24 primitive ships (A) — refactor to (B) is 1-file change in `channel-health.debounce.ts`, non-breaking. PO/FE ratify which drives user-facing behavior. | PM C (Satrio) H16 (2026-07-06) | spec §7 + §2.2 + §4.7 + §9; T24 PLAN GAP-#2 | open | — |
@@ -182,7 +192,7 @@
 | Q-C-10 | **Object storage adapter contract — cross-team, Infra/DevOps + PO; affects T22 + potentially T24-followup uptime history.** Spec §3.4 step 3 "upload to object storage" — no bucket naming, no region, no retention, no public-vs-signed URL, no CDN convention documented. **Options**: (A) port type-only `ObjectStoragePort.uploadPng({ key, bytes }) → { key, publicUrl }` + `.getPngStream({ key }) → Readable \| null` [T22 primitive default]; (B) hard-code assumed `s3://qooma-{env}-integration/qr/{hotelId}.png` w/ R2 credentials; (C) block. **Ratification needed**: bucket naming (per-env vs multi-tenant), key strategy (`qr/{hotelId}.png` deterministic overwrite — CONFIRMED for T22 primitive per ACK GAP #4), public vs signed vs proxied URL, retention/lifecycle policy, CDN convention (`https://cdn.qooma.io/qr/...`?), `pnpm add @aws-sdk/client-s3` PO approval. Blocks T22-followup storage adapter. | PM C (Satrio) H18 (2026-07-06) | spec §3.4 step 3; T22 PLAN GAP-#1 | open | — |
 | Q-C-11 | **FE `GET /api/integrations` overview response contract — cross-repo, FE-team + PO.** Spec §2.1 row 27 defines the endpoint purpose ("Full integration overview") but NO field-level shape. Spec §6 note says "FE MSW handlers are authoritative shape reference" — but those live in separate FE repo. T23 primitive ships PM C's + executor's best-effort inference (narrow status-oriented views + snake_case + per-subsystem-nullable-except-health-non-null with synthetic "down" on health-fail). Ratification needed before wire shape freezes at T23-followup route landing. Sibling to Q-C-06/07/09/10 + Q-B-04/05/08/09. Refactor to matching FE shape = 1-file change to schema. Blocks T23-followup schema freeze only. | PM C (Satrio) H19 (2026-07-07) | spec §2.1 row 27 + §6 note; T23 PLAN GAP-#1/#2 | open | — |
 | Q-C-12 | **Socket transport infrastructure — cross-team, Infra/DevOps + PO; affects T25-followup adapter.** Spec §5 defines `integration:health_changed` event name + trigger, but transport layer undefined. Candidates: (a) `socket.io` (`pnpm add socket.io`); (b) native WebSocket via `@fastify/websocket`; (c) SSE (Fastify builtin; 1-way + no rooms); (d) Redis pub/sub bridge → external gateway. **T25 primitive ships type-only `SocketPublisherPort`**; adapter deferred. Ratification needed: transport choice, connection-lifecycle (per-hotel room vs broadcast), socket-auth (JWT re-use per Q-C-03?), `pnpm add` PO approval, external gateway wire contract if (d). Sibling to Q-C-10/11 + Q-C-06/07/09 + Q-B-04/05/08/09. Blocks T25-followup adapter + worker cron composition (T24 → T25). | PM C (Satrio) H20 (2026-07-07) | spec §5 row 321; T25 PLAN GAP-#2 | open | — |
-| Q-B-09 | **HC DND RPC endpoint contract (cross-service, HC-team + PO).** Spec `MVP §4.4 L96` + `04 §3.1 L101` mandate DND cross-service check with VVIP-exempt + inbound-trigger flags. `hotels.dnd` lives in Auth per §4.4; whether HC exposes an RPC or shared-DB read is HC-team's call. NO URL, NO signature, NO response shape. **Options**: A) narrow port `HotelCoreDndPort` with `checkDnd(hotelId, guestId?)` returning `{inDnd: false} \| {inDnd: true, vvipExempt?: boolean, reason: string}` — adapter accepts `{ baseUrl, path, internalSecret }` at construction, PM/HC ratifies later [PM B keeps port TYPE-ONLY in T13 primitive; adapter deferred]; B) hard-code assumed endpoint; C) block T13. **PM B sub-decision**: separate ports (NOT combined precheck_outbound) — spec §3.1 sequences DND + quota separately + distinct error codes (DND_BLOCK 422 vs RATE_LIMIT 429). Sibling to Q-B-04/08. Blocks T13-followup HC DND adapter. | PM B (Nanak) | spec §4.4 + §3.1 vs missing `02-hotel-core.md`; T13 PLAN GAP-#2 | open | — |
+| Q-B-09 | **HC DND RPC endpoint contract (cross-service, HC-team + PO).** Spec `MVP §4.4 L96` + `04 §3.1 L101` mandate DND cross-service check with VVIP-exempt + inbound-trigger flags. `hotels.dnd` lives in Auth per §4.4; whether HC exposes an RPC or shared-DB read is HC-team's call. NO URL, NO signature, NO response shape. **Options**: A) narrow port `HotelCoreDndPort` with `checkDnd(hotelId, guestId?)` returning `{inDnd: false} \| {inDnd: true, vvipExempt?: boolean, reason: string}` — adapter accepts `{ baseUrl, path, internalSecret }` at construction, PM/HC ratifies later [PM B keeps port TYPE-ONLY in T13 primitive; adapter deferred]; B) hard-code assumed endpoint; C) block T13. **PM B sub-decision**: separate ports (NOT combined precheck_outbound) — spec §3.1 sequences DND + quota separately + distinct error codes (DND_BLOCK 422 vs RATE_LIMIT 429). Sibling to Q-B-04/08. Blocks T13-followup HC DND adapter. | PM B (Nanak) | spec §4.4 + §3.1 vs missing `02-hotel-core.md`; T13 PLAN GAP-#2 | resolved | ADR-0009 (2026-07-08): HC owns DND check, NOT Integration. T28 supplies passthrough adapter. Q closed from Integration side. |
 | Q-A-07 | **Outbound retry count — spec self-contradicts; affects slot B (T14).** spec §7 L344 "3 retries (1s,5s,30s)" vs §7 L345 "after 3 attempts→failed" vs MVP §4.9 "3-attempt". 3 total attempts (30s delay unused) or 3 retries=4 attempts (30s used)? **T07 ships default `attempts=3` (restrictive per CLAUDE §14, per-job configurable) + `[1s,5s,30s]` strategy** → not blocked. PO: ratify + fix spec §7 wording before B builds T14 outbound retry queue. | PM A (Nathan) | spec §7 L344-345 vs MVP §4.9 | open | — |
 | Q-C-03 | **Session/JWT auth plugin — cross-service contract w/ Auth svc repo; blocks all `gm_admin` CRUD (spec §2.1).** `src/plugins/` has hmac+tenant+internal-rpc-auth+error-handler only; no session/JWT. `env.ts:36-39` declares `JWT_ACCESS_SECRET`/refresh secrets, no consumer. Auth svc = separate repo (KICKOFF §1 L11) — Integration verifies JWTs. **Cross-service Qs**: (a) verification method — JWKS URL fetch vs HS256 shared secret? (b) JWT payload shape — `{ sub, hotel_id, role, exp }`? (c) refresh-token relevance (Integration doesn't issue)? Preferred MVP: HS256 shared secret + `{ sub, hotel_id, role }` + verify-only plugin. Blocks T10 (B), T17 route (C), T18-T20, T23. | PM C (Satrio) H13 | KICKOFF §1 L11; env.ts:36-39; src/plugins/*; T17 PLAN GAP-#3 | open | — |
 
@@ -214,7 +224,9 @@
 | Tanggal    | Doc / lokasi                                                       | Perubahan singkat                                                                                 | Driver task    | Disetujui oleh |
 | ---------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- | -------------- | -------------- |
 | 2026-06-12 | docker-compose.yml, .env.example, README.md, .claude/settings.json | Shift host port Postgres 5432→5433 & Redis 6379→6380 untuk hindari bentrok dengan service lokal | (pre-T01 fix)  | PO             |
-| —          | —                                                                  | —                                                                                                 | —              | —              |
+| 2026-07-08 | docs/decisions/0009-wa-integration-pure-boundary.md (baru); docs/spec/04-integration-channels.md §2.4 + §3.1 Outbound/Inbound | WA integration = pure integration layer. DND + quota di HC (bukan Integration). Send + conversation read = internal RPC only. Config CRUD tetap public `gm_admin` di Integration (H12 stand). Q-B-08 + Q-B-09 closed from Integration side. | T26–T29 issued 2026-07-08 | PO |
+| 2026-07-08 | docs/decisions/0010-wa-conversation-model.md (baru); docs/spec/04-integration-channels.md §2.4 + §3.1 Inbound step 5 | New `conversations` + `messages` tables (ADR-0010 DDL). Integration owns storage, HC exposes public read to CRM via internal RPC. Realtime + attachment = phase 2. | T29 | PO |
+| 2026-07-08 | PM-STATUS-PARENT.md §0 + §1 (T26–T29 rows) + §1a (spec-driven ref) + §8 (queue detail) | Task tracker + queue extended untuk 4 task WA CRM surface baru, semua ke Slot C. WA ownership transisi Slot B → Slot C. | T26–T29 | PO |
 
 ---
 
@@ -301,7 +313,160 @@ Dev C (Satrio) — belum onboard, awaiting kickoff
 
 > Parent PM rewrite list ini ketika roadmap berubah. Each task **wajib** kolom Slot (A/B/C) untuk routing. PM A/B/C baca queue ini untuk lihat upcoming work — PM A/B/C tidak edit queue.
 
-_(belum ada — tunggu PO post task / roadmap awal)_
+### T26 — WA config CRUD route landing
+
+- **Slot**: C (Satrio)
+- **Owner**: TBD (PM C pick up via PM-STATUS-C.md §2 ASSIGNMENT)
+- **Started**: —
+- **Status**: queued (issued 2026-07-08)
+
+#### Scope
+Land HTTP routes yang consume T10 primitive service (already merged). Endpoint: `GET /api/integrations/whatsapp` (return single config, decrypt+mask token) + `PUT /api/integrations/whatsapp` (upsert config, encrypt token via T03). Auth `gm_admin` via T09/Q-C-03 JWT plugin (session claim `hotel_id` for tenant resolution per Q-C-04). Composes T10 module barrel.
+
+#### Files yang harus dibuat
+- `src/modules/whatsapp/whatsapp-config.routes.ts` — thin route, validate → call service → return
+- `src/modules/whatsapp/__tests__/whatsapp-config.routes.integration.test.ts` — Fastify inject, real DB via testcontainers
+
+#### Files yang akan dimodifikasi
+- `src/entrypoints/api.ts` — register routes + wiring service instance (Prisma singleton dari Q-C-01, sudah merged PR #25)
+- `src/modules/whatsapp/index.ts` — export barrel (jangan expose repository)
+
+#### T26 DoD
+- [ ] `GET /api/integrations/whatsapp` returns 200 with masked token when config exists; 404 NotFoundError when no config
+- [ ] `PUT /api/integrations/whatsapp` accepts full config body, encrypts `access_token` via T03 helper, upserts row
+- [ ] Auth: request without valid JWT → 401; JWT without `gm_admin` role → 403
+- [ ] Tenant: `hotel_id` from JWT claim (Q-C-04 resolution) — never trust body
+- [ ] Zod schemas + `.strict()` on request bodies
+- [ ] Integration tests min. 6: get-found, get-notfound, put-create, put-update, auth-401, auth-403
+- [ ] `make check` green; drift scans clean; module coverage ≥ 80%
+
+#### Parent PM notes untuk PM C
+- Rasionalisasi slot pick: PO ruling 2026-07-08 transitioned WA ownership Slot B → Slot C.
+- Dependency: PR #26 merge (Q-C-02 api.ts + Q-C-03 JWT). Cannot land route without api.ts wired.
+- Shared-infra risk: routes.ts pattern — first Slot C to wire a public `gm_admin` route via new JWT plugin. Follow T09 shared-secret pattern for internal RPC guard as reference; JWT verify = separate.
+- Coordination needed with: none direct — Nanak's T10 primitive is stable.
+
+---
+
+### T27 — WA inbound webhook route + HC/AI forward
+
+- **Slot**: C (Satrio)
+- **Owner**: TBD
+- **Started**: —
+- **Status**: queued (issued 2026-07-08)
+
+#### Scope
+Meta-facing webhook route `POST /webhook/whatsapp/:hotel_slug`. Composes T04 HMAC plugin + T05 tenant resolver + T12 `ingestSync` + T15 delivery receipts + ADR-0010 `messages` upsert (via T29 tables — depends on T29 schema landing). Async processing via BullMQ (T07). Placeholder adapters for HC guest-upsert (Q-B-04) + AI inbound (Q-B-05) — log + no-op for MVP; wire real adapters in follow-up when HC/AI RPCs ratified.
+
+#### Files yang harus dibuat
+- `src/modules/whatsapp/whatsapp-webhook.routes.ts` — mount HMAC plugin + tenant resolver preHandler + delegate ke ingest service
+- `src/modules/whatsapp/adapters/hc-guest-upsert.stub-adapter.ts` — TYPE-ONLY consumer of `HotelCoreGuestUpsertPort` (Q-B-04), stub log + return synthetic guest_id
+- `src/modules/whatsapp/adapters/ai-inbound.stub-adapter.ts` — same pattern for `AiInboundMessagePort` (Q-B-05)
+- `src/modules/whatsapp/whatsapp-inbound.jobs.ts` — BullMQ processor calling `processEvent`
+- `src/modules/whatsapp/__tests__/whatsapp-webhook.routes.integration.test.ts` — signed payload flow
+
+#### Files yang akan dimodifikasi
+- `src/entrypoints/api.ts` — register webhook route (no JWT, HMAC only) + workers
+- `src/modules/whatsapp/whatsapp-inbound-ingest.service.ts` — extend to call `conversations.upsert` + `messages.insert` per T29
+- `src/entrypoints/worker.ts` — register inbound processor
+
+#### T27 DoD
+- [ ] `POST /webhook/whatsapp/:hotel_slug` with valid Meta signature → 200 within 500ms sync path
+- [ ] Invalid signature → 401, no DB insert (proven via test)
+- [ ] Unknown slug → 404
+- [ ] Raw payload persisted to `webhook_events` regardless of downstream success
+- [ ] Each message → `conversations` upsert + `messages` insert (direction=inbound, status=received, `webhook_event_id` FK)
+- [ ] Async job forwards to HC stub + AI stub, logs `external_call` per adapter
+- [ ] Idempotency: same `wamid` twice → single `messages` row (external_id partial unique)
+- [ ] Integration tests min. 8 including signature-fail, unknown-slug, dedupe, multi-message payload
+- [ ] `make check` green; coverage ≥ 80%
+
+#### Parent PM notes untuk PM C
+- Dependency: PR #26 merge + T29 (needs `conversations` + `messages` tables). If T29 not yet done, PM C can post GAP or sequence T29 before T27 impl.
+- Q-A-04 (HMAC secret source): T04 plugin already secret-agnostic via injected `resolveSecret`. Use `wa_configs.webhook_verify_token` per MVP §4.2 as interim; note in code with Q-A-04 reference.
+- Q-B-04 + Q-B-05: adapters TYPE-ONLY + stub. Do NOT block on HC/AI contract ratification.
+- Shared-infra risk: first webhook route landing in repo; will inform T19-followup (Telegram webhook) shape.
+
+---
+
+### T28 — WA outbound dispatch internal RPC
+
+- **Slot**: C (Satrio)
+- **Owner**: TBD
+- **Started**: —
+- **Status**: queued (issued 2026-07-08)
+
+#### Scope
+Internal RPC route `POST /internal/wa/dispatch` per ADR-0009 spec §2.4. Composes T13 dispatch service + T16 template relay + T14 retry queue. Auth via T09 internal-rpc-auth plugin (`X-Internal-Secret`). Insert to `messages` (direction=outbound, status=pending) per ADR-0010, link `dispatch_id` FK. DND + quota ports supplied as **passthrough adapters** (return `allow` always) — HC caller is responsible for gating (ADR-0009).
+
+#### Files yang harus dibuat
+- `src/modules/whatsapp/whatsapp-dispatch.routes.ts` — internal RPC route, mount internal-rpc-auth plugin
+- `src/modules/whatsapp/adapters/hc-quota-passthrough.adapter.ts` — implements `HotelCoreQuotaPort` (from T13), always `{allow: true}`, log noop
+- `src/modules/whatsapp/adapters/hc-dnd-passthrough.adapter.ts` — implements `HotelCoreDndPort`, always `{inDnd: false}`, log noop
+- `src/modules/whatsapp/__tests__/whatsapp-dispatch.routes.integration.test.ts`
+
+#### Files yang akan dimodifikasi
+- `src/entrypoints/api.ts` — register `/internal/wa/dispatch` route with internal-rpc-auth guard
+- `src/modules/whatsapp/whatsapp-outbound-dispatch.service.ts` — insert `messages` row after `outbound_dispatch_queue` persist
+- `src/modules/whatsapp/index.ts` — export new adapter classes for wiring only
+
+#### T28 DoD
+- [ ] `POST /internal/wa/dispatch` without `X-Internal-Secret` → 401
+- [ ] Valid secret + valid body (text) → 200 + dispatch persisted + `messages` row inserted
+- [ ] Valid body (template) → template payload flows through T16 relay
+- [ ] `wa_config_id` optional; when missing → resolve hotel's config (single per hotel schema)
+- [ ] Passthrough adapters never throw, log noop with correlation_id
+- [ ] Retry queue enqueue on BSP failure (T14 flow intact)
+- [ ] Integration tests min. 8: auth-fail, text-send, template-send, missing-config, BSP-fail-retry, missing-guest-fields
+- [ ] `make check` green; coverage ≥ 80%
+
+#### Parent PM notes untuk PM C
+- Dependency: PR #26 merge + T26 (share config repo + wiring). Can start after T26 approved.
+- Q-B-08 + Q-B-09 now closed from Integration side per ADR-0009. Passthrough adapters are the permanent MVP shape (not stub).
+- Shared-infra risk: first internal-RPC route landing that consumes T09 plugin. Sets pattern for T29 conversations.list.
+
+---
+
+### T29 — WA conversation + message model + read internal RPC
+
+- **Slot**: C (Satrio)
+- **Owner**: TBD
+- **Started**: —
+- **Status**: queued (issued 2026-07-08)
+
+#### Scope
+New `conversations` + `messages` tables per ADR-0010 DDL. Slot C is authorized to touch `prisma/schema.prisma` + `prisma/migrations/` for this task (deviation from default rule "schema = Slot A"). Repo + service + zod schemas + internal RPC routes `POST /internal/wa/conversations.list` + `POST /internal/wa/messages.list` with cursor pagination.
+
+#### Files yang harus dibuat
+- `prisma/migrations/<ts>_wa_conversations_messages/migration.sql` — DDL from ADR-0010
+- `src/modules/whatsapp/whatsapp-conversations.repository.ts` — direct Prisma
+- `src/modules/whatsapp/whatsapp-conversations.service.ts` — upsert on inbound/outbound, list with cursor
+- `src/modules/whatsapp/whatsapp-conversations.schema.ts` — zod strict
+- `src/modules/whatsapp/whatsapp-conversations.types.ts`
+- `src/modules/whatsapp/whatsapp-conversations.routes.ts` — internal RPC list endpoints
+- `src/modules/whatsapp/__tests__/whatsapp-conversations.service.test.ts`
+- `src/modules/whatsapp/__tests__/whatsapp-conversations.repository.integration.test.ts`
+- `src/modules/whatsapp/__tests__/whatsapp-conversations.routes.integration.test.ts`
+
+#### Files yang akan dimodifikasi
+- `prisma/schema.prisma` — add `Conversation` + `Message` models per ADR-0010 spec
+- `src/modules/whatsapp/index.ts` — export public API (conversations service for wiring)
+- `src/entrypoints/api.ts` — register list endpoints under internal-rpc-auth guard
+
+#### T29 DoD
+- [ ] Prisma migration applies clean on fresh DB; `pnpm prisma migrate deploy` green
+- [ ] `conversations` unique `(hotel_id, guest_wa_phone)` + index `(hotel_id, last_message_at DESC)` present
+- [ ] `messages` partial unique on `external_message_id WHERE NOT NULL`; index `(conversation_id, created_at DESC)`
+- [ ] `POST /internal/wa/conversations.list` cursor pagination (default limit 50, max 200), `X-Internal-Secret` guard
+- [ ] `POST /internal/wa/messages.list` cursor pagination per conversation, `X-Internal-Secret` guard
+- [ ] Upsert conversation semantics: idempotent by (hotel_id, phone); updates `last_message_at` + preview + increments unread on inbound
+- [ ] Integration tests min. 10: migration smoke, upsert dedupe, list-cursor, list-empty, auth-fail
+- [ ] `make check` green; coverage ≥ 80%; drift scans clean
+
+#### Parent PM notes untuk PM C
+- Rasionalisasi slot pick: PO explicit approval 2026-07-08 for Slot C to own schema for this task. Coordinate with Slot A (Nathan) as courtesy notification (post to PM-STATUS-PARENT.md §10 cross-dev coord), no ACK needed.
+- Dependency: PR #26 merge. T27 consumes `conversations` + `messages` in inbound path, T28 consumes in outbound path — sequencing: T29 before T27/T28 impl OR ship T27/T28 without messages upsert then follow-up. Recommend **T29 first** to avoid T27/T28 revisit.
+- Coordination needed with: Nathan (courtesy heads-up on schema touch). No dependency block.
 
 <!-- TEMPLATE — copy untuk task baru di queue:
 
