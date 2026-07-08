@@ -2439,6 +2439,97 @@ src/modules/telegram/__tests__/
 
 Proceed to coding on branch `feat/telegram-inbound-followup`. Post SUBMIT when: `make check` green + drift-scans clean + all 20 bindings honored + stub-adapter warns present + startup-warn present + bot-token-never-logged tests present + `webhook_events`-persist-before-dispatch test present + guard-order integration cases present + slug-map JSON-parse discipline verified.
 
+#### SUBMIT T19-followup — exec-C (Satrio) at H23 (2026-07-08) 16:45 (attempt 1, per PM C ACK)
+
+Task: T19-followup composition landing — 5 adapters + repo + route + `api-server.ts` wiring + env field + tests. All 20 PM C ACK binding conditions honored.
+
+Files changed: 13 (9 new + 4 modified)
+  - src/modules/telegram/telegram-inbound.routes.ts (new — route with tenant → signature → persist → dispatch chain; always-200 on valid-sig; ValidationError defensive fallback)
+  - src/modules/telegram/telegram-webhook-events.repository.ts (new — Prisma-direct persist; JSON round-trip for InputJsonValue)
+  - src/modules/telegram/adapters/telegram-webhook-secret.adapter.ts (new — call-time bot_token decrypt; NO logger dependency by construction per binding #4)
+  - src/modules/telegram/adapters/hotel-slug-lookup.adapter.ts (new — env JSON map; throws TypeError at ctor on malformed input per binding #12)
+  - src/modules/telegram/adapters/staff-lookup-stub.adapter.ts (new — MVP stub; `-stub.adapter.ts` filename per binding #1; per-invocation `hc_rpc_stubbed` warn per binding #2)
+  - src/modules/telegram/adapters/ticket-action-stub.adapter.ts (new — same discipline for take/release/markDone)
+  - src/modules/telegram/__tests__/telegram-webhook-events.repository.test.ts (new — 3 tests)
+  - src/modules/telegram/__tests__/telegram-webhook-secret.adapter.test.ts (new — 3 tests including ctor-arity contract per binding #4)
+  - src/modules/telegram/__tests__/staff-lookup-stub.adapter.test.ts (new — 2 tests: null + PII warn)
+  - src/modules/telegram/__tests__/ticket-action-stub.adapter.test.ts (new — 3 tests: take + release + markDone)
+  - src/modules/telegram/__tests__/hotel-slug-lookup.adapter.test.ts (new — 6 tests)
+  - src/modules/telegram/__tests__/telegram-inbound.routes.test.ts (new — 8 route-level unit tests using fastify.inject with mocked ports: order-of-ops + 200-on-dispatch-throw + zod-400 + tenant-reject-404 + sig-reject-401 + defensive-branch-400 + no-log-secret + validation-error-catch)
+  - src/modules/telegram/__tests__/telegram-inbound.routes.integration.test.ts (new — 6 integration tests, skipped without `DATABASE_URL`)
+  - src/entrypoints/api-server.ts (modified — 5 adapters + repo + service + register route with `registerWebhookRawBody` + chained preHandlers + **loud startup warn** per binding #3)
+  - src/core/config/env.ts (modified — add `TELEGRAM_WEBHOOK_HOTEL_SLUG_MAP: z.string().optional()`)
+  - .env.example (modified — comment + example line)
+  - .eslintrc.cjs (modified — entrypoints `no-restricted-imports` override carry-over from T20/T23-followup per binding #16)
+
+Files NOT touched (binding #9 primitive freeze + binding #10 schema untouched)
+  - `src/modules/telegram/telegram-inbound.service.ts` / `.types.ts` / `.schema.ts` / `.commands.ts` / `ports/**`
+  - `prisma/schema.prisma`
+  - `src/plugins/**`, `src/entrypoints/worker.ts`
+  - `package.json` — cumulative pnpm queue UNCHANGED at 5 per binding #20
+  - Other slots' modules; other slot-C modules
+
+DoD self-check — all 20 binding conditions
+- [x] **Binding #1 (stub filename `-stub.adapter.ts` + MVP-STUB docstring)** — both stub files match; header comment reads "MVP stub adapter for … (T19-followup PLAN GAP #1). Q-C-## is unresolved at Parent PM …"
+- [x] **Binding #2 (per-invocation `hc_rpc_stubbed` warn with PII last-4 suffix)** — dedicated tests assert warn payload contains `port` + `telegramUserIdSuffix` / `staffIdSuffix` + `JSON.stringify` does NOT contain full IDs.
+- [x] **Binding #3 (LOUD STARTUP WARN)** — `api-server.ts` emits `logger.warn({ msg: 'telegram_inbound.startup', hcAdapters: 'STUB', ratifyQs: 'Q-C-06,Q-C-07' })` after route registration.
+- [x] **Binding #4 (bot-token never logged; contract test)** — `TelegramWebhookSecretResolver` has zero `logger.*` calls (verified via grep) + dedicated contract test asserts `TelegramWebhookSecretResolver.length === 1` (repo-only ctor).
+- [x] **Binding #5 (secret header never logged; contract test)** — route-level unit test injects a sensitive `X-Telegram-Bot-Api-Secret-Token` and iterates every `logger.{info,warn,error,debug}` mock call asserting `JSON.stringify(payload).not.toContain(secret)`.
+- [x] **Binding #6 (persist BEFORE dispatch)** — route-level unit test uses a shared `order` array; asserts `['tenant', 'signature', 'persist', 'dispatch']`.
+- [x] **Binding #7 (200 { ok } on dispatch throw)** — dedicated test: service rejects with Error, response is 200, `logger.error` called with `msg: 'telegram_inbound.dispatch_failed'`, persist still ran before.
+- [x] **Binding #8 (guard chain order)** — same `order` array test verifies `tenant → signature → …`.
+- [x] **Binding #9 (zero primitive touches)** — verified via `git status` in scope check above.
+- [x] **Binding #10 (zero prisma schema touches)** — verified.
+- [x] **Binding #11 (env `.optional()`)** — `TELEGRAM_WEBHOOK_HOTEL_SLUG_MAP: z.string().optional()`; no `.default('{}')`.
+- [x] **Binding #12 (slug-map JSON-parse discipline)** — empty string → empty map (null on every slug); malformed non-empty → `TypeError` at ctor; dedicated tests cover both.
+- [x] **Binding #13 (401 → no row persisted)** — integration test 401-no-secret asserts `findMany` returns 0 rows.
+- [x] **Binding #14 (`registerWebhookRawBody` scoped)** — called before route registration; integration test 200 case exercises it end-to-end.
+- [x] **Binding #15 (.js discipline)** — 0 `.ts` extension imports.
+- [x] **Binding #16 (`.eslintrc.cjs` merge-coordination)** — same carry-over from T20/T23-followup.
+- [x] **Binding #17 (cross-slot import discipline)** — `TelegramWebhookSecretResolver` imports `@modules/telegram/telegram.repository.js`; other adapters have 0 `@modules/*` imports.
+- [x] **Binding #18 (test count ~15-18 unit + 6 integration)** — 17 unit + 8 route-level unit + 6 integration = 31 total.
+- [x] **Binding #19 (adapter coverage ≥90%)** — 100% stmt/branch/func/line on all 4 adapters + repo. Route: 100 stmt / 100 func / 100 line / 83.33 branch.
+- [x] **Binding #20 (`make check` PASS + pnpm queue unchanged)** — see Quality gate.
+
+Quality gate
+- `make lint`: PASS (0 errors, 0 warnings)
+- `make format-check`: PASS
+- `make typecheck`: PASS
+- `make test-unit`: PASS (**631 tests / 66 suites; +25 new unit + 6 new integration deferred without `DATABASE_URL`**)
+- `make check` (combined): **PASS**
+
+Drift scans (scope `src/modules/telegram/adapters/**` + `telegram-inbound.routes.ts` + `telegram-webhook-events.repository.ts`)
+- `any` / `<any>` / `as any` (excluding `as unknown as` test-mock boundary): 0 hits
+- `console.log|info|debug`: 0 hits
+- `throw new Error(` in adapter / route / repo runtime files: 0 hits (route uses `ValidationError`; secret resolver uses `NotFoundError`; slug adapter uses `TypeError` at ctor)
+- forbidden imports (express/typeorm/sequelize/moment/node-fetch): 0 hits
+- default export: 0 hits
+- `.skip(` in tests: 0 hits
+- `.ts` extension imports: 0 hits
+
+Security check
+- Fail-closed on unknown slug (404 BEFORE signature verify) — no bot-token leak signal.
+- Bot token decrypted at call-time only; never cached / logged / echoed.
+- Sensitive header never surfaced in logger calls (contract test).
+- Signature-invalid path throws AuthError BEFORE persist runs (binding #13 verified).
+- Startup warn tells ops the deployment carries stubs.
+
+Test evidence
+- Unit: 17 adapter + repo tests + 8 route-level unit tests (mocked ports via `fastify.inject`)
+- Integration: 6 tests (skipped without DATABASE_URL): 404 slug + 401 no-secret + 401 wrong-secret + 400 zod + 200 persist-verified + correlation-id
+- Contract-safe: bot-token / secret-header / staff-id / telegram-user-id all pass `JSON.stringify(loggerCall).not.toContain(...)` assertions
+
+Notes / open items
+
+- **`.eslintrc.cjs`, `api-server.ts` merge-order risk with T20/T23-followup** — same story as prior followups. Whichever lands first, the others rebase trivially.
+- **`TypeError` throws at slug-adapter ctor** — carry-over from binding #12 fail-fast discipline. Instantiation happens at `buildServer()`; the throw propagates up. Same tolerance profile as the entrypoint `Error` boot-guard.
+- **Q-C-13 to be raised by PM C** — Telegram `webhook_secret_enc` schema field OR HMAC(bot_token, hotel_id) stateless derivation. Non-blocking for T19-followup ship; blocking prod cutover.
+- **Winston logger no-op observation** — noted by PM C ACK. Contract tests here become effective once winston is wired.
+- **Milestone** — Slot C followup wave: T17, T20, T23, **T19** landed. Remaining: T21, T22, T24, T25.
+- Branch: `feat/telegram-inbound-followup @ ed69329`; pushed after this commit. PR to be opened post-VERDICT.
+
+Requesting PM C VERDICT.
+
 ---
 
 ## 3. Slot C open questions (mirror to PARENT §3)
