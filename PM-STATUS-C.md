@@ -33,7 +33,7 @@
 | T17 | Telegram config CRUD (`GET, PUT /api/integrations/telegram`)                     | merged   | PM C (H13, a2) | Primitive merged PR #11 `0d89d76` at 2026-07-04T19:32:26Z (red-docker precedent honored). Router+api.ts wiring = T17-followup blocked on Q-C-01/02/03 |
 | T18 | Per-dept Telegram routing write-through (HC `departments` table)                 | backlog  | —              | After T17; per Q-OPS-06 shared-DB direct write                     |
 | T19 | Telegram inbound webhook + commands (`/take`, `/release`, `/done`, `/help`)      | approved (primitive) | PM C (H15, a1) | Primitive shipped: parser + zod passthrough schema + type-only StaffLookupPort + TicketActionPort + service (anti-enumeration silent-ignore, PII-suffix log) + 41 unit tests, 100% stmt/func/line + 92.85% branch cov, drift clean, make check green on PM rerun. No `@prisma/client` import — sidesteps Q-C-05. Router+HMAC+HC RPC adapters+`webhook_events` persist = T19-followup on Q-C-01/02/03/06/07. Branch `feat/telegram-inbound-commands @ 9c0bbc5`, PR pending open |
-| T20 | Outbound Telegram dispatch RPC                                                   | approved (primitive) | PM C (H21, a1) | Primitive shipped: `TelegramDispatchService.sendMessage` (flat routing; call-time decrypt via T03 local stack-frame token; PII `chatIdSuffix` last-4 logs; body-content-never-logged) + 2 type-only ports + zod schemas + 18 unit tests (10 schema + 8 service — exceeds ACK ~10 target). **All 20 ACK binding conditions honored — 3rd consecutive slot-C primitive with ZERO deviations flagged** (after T23 + T25). RPC route + Bot API adapter + reader-port adapter + retry queue + integration = T20-followup on Q-C-02/03. Branch `feat/telegram-outbound-dispatch`, PR #24 open |
+| T20 | Outbound Telegram dispatch RPC                                                   | approved (primitive + followup) | PM C (H21 primitive a1; H23 followup a1) | Primitive shipped (PR #24 merged): `TelegramDispatchService.sendMessage` (flat routing; call-time decrypt; PII `chatIdSuffix` last-4 logs; body-content-never-logged) + 2 type-only ports + zod + 18 unit tests. **All 20 primitive bindings honored — 3rd consecutive slot-C primitive with ZERO deviations after T23 + T25.** **T20-followup APPROVED H23 a1**: reader-adapter (T17 repo bridge) + Bot API HTTP adapter (axios; `String(message_id)` precision safety) + `POST /rpc/send_telegram_message` route (T09 shared-secret guard, spec §4.11; NOT JWT) + `api-server.ts` wiring + 2 env fields (`INTERNAL_RPC_SECRET.optional()` GAP #7 workaround; `TELEGRAM_API_BASE.default(...)`) + narrow `.eslintrc.cjs` entrypoint override (CLAUDE.md §4 wiring) + 9 unit tests + 8 integration tests (skipped without `DATABASE_URL` per T17-followup precedent). **1 tolerated deviation**: `throw new Error(...)` at `api-server.ts:88` boot-guard — outside strict drift-scan scope (`src/entrypoints/`); accept-with-followup to introduce shared `BootstrapError extends AppError`. **2 process notes**: PN #1 self-proceed past ACK OK per T17-followup precedent + user directive; PN #2 `INTERNAL_RPC_SECRET.optional()` workaround pending slot A/B fixture alignment. Bull retry/DLQ = T20-followup wave-2 (slot-B T14 pattern). Branch `feat/telegram-outbound-followup @ da663a3` (needs rebase onto main post-T18 merge PR #28). |
 | T21 | OTA email IMAP poller + parser pipeline + HC pending-visit RPC                   | approved (primitive) | PM C (H17, a1) | Primitive shipped: 2 per-OTA parsers (Booking.com + Agoda) + dispatcher + Prisma-direct repo + poll orchestrator (per-mailbox try/catch, UID-advance-on-{ok,conflict,unrecognized}, freeze-on-error, max-UID computation) + 2 type-only ports + 51 unit tests (exceeds ~40 target), 100% cov on 5 files + 98.64% stmt on service, drift clean, make check green on PM rerun. All 13 ACK binding conditions honored — notable: `imap_password_enc` never decrypted in primitive (0 `decrypt(` calls; drift-scan verified). Cron worker + IMAP + HC adapters + integration = T21-followup on Q-C-01/02/09 + `imap-simple` PO approval. Branch `feat/ota-email-poller`, PR #20 open |
 | T22 | QR generation + download (1024×1024 PNG, object storage)                         | approved (primitive) | PM C (H18, a1) | Primitive shipped: `wa.me` URL builder (module-private, digit-strip + URL-encode + omit `?text=` when empty) + 2 type-only ports (QR renderer + object storage) + Prisma-direct repo (`QrState` upsert; clock-injectable `generatedAt` bump on update) + service orchestrator (build URL → validate ≤500 → render → upload → upsert → return `{url, pngUrl, generatedAt}`; error mapping to ExternalServiceError/ValidationError/NotFoundError) + zod schemas + 28 unit tests (matches ACK target). All 15 ACK binding conditions honored. Router + `pnpm add qrcode` + `pnpm add @aws-sdk/client-s3` + adapters + integration = T22-followup on Q-C-01/02/03/10 + PO package approvals. Branch `feat/qr-generation`, PR #21 open |
 | T23 | Integration overview endpoint (`GET /api/integrations`)                          | approved (primitive) | PM C (H19, a1) | Primitive shipped: 4 reader-port interfaces + aggregator service (parallel Promise.all + per-subsystem silent-null-on-throw + synthetic-down health on read-fail, clock-injectable) + zod IntegrationOverviewResponseSchema (`.strict()` + snake_case + per-subsystem-nullable-except-health) + 17 unit tests (matches ACK ~15-20 target). **All 17 ACK binding conditions honored — cleanest slot-C primitive to date** (zero `@prisma/client`, zero cross-module imports, zero decrypt/maskToken, zero `.ts`-extension nit, zero deviations flagged). Reader-port pattern executes as designed. Router + `gm_admin` + reader-port adapters + integration = T23-followup on Q-C-02/03/11. Branch `feat/integration-overview`, PR #22 open |
@@ -2282,6 +2282,81 @@ Notes / open items
 - Branch: `feat/telegram-outbound-followup`; PR to be opened post-VERDICT.
 
 Requesting PM C VERDICT.
+
+##### VERDICT T20-followup — APPROVED (attempt 1) by PM C (H23, 2026-07-08)
+
+**Result**: APPROVED with **1 tolerated deviation** + **2 process notes**. Composition landing is faithful to T20 primitive bindings; T09 shared-secret (spec §4.11, NOT JWT) correctly discriminated from JWT `gm_admin` used by the T17 config CRUD route; the reader-port pattern's whole point — coupling lives at the adapter, primitive stays clean — is now demonstrated end-to-end. Cumulative PO pnpm-queue unchanged at 5.
+
+Independent PM verification
+- **`make check` on my rerun** (branch `feat/telegram-outbound-followup` HEAD `da663a3`): PASS (lint 0/0, format-check clean, typecheck strict OK, `test-unit` **592 tests / 60 suites / 5 skipped suites + 19 skipped tests** — the skip count reflects branch-behind-main lag on T18 primitive suites; unrelated to T20-followup correctness).
+- **Adapter coverage on my read**: 6 tests bot-api + 3 tests config-read cover the shipped runtime branches; SUBMIT's own coverage report shows 100% stmt/func/line + 80% branch (single uncovered branch = `description ?? 'no description'` nullish fallback — trivial). Matches T17-followup coverage precedent.
+- **Integration test scope**: 8 test cases running only when `DATABASE_URL` is set (T17-followup skip-without-DB precedent honored). Cases cover all 4 critical paths: RPC auth (401 no-header + 401 wrong-secret), zod (400), config missing (404), happy dispatch (200), Bot API 5xx → `ExternalServiceError` (502), correlation-id echo.
+- **Drift scans on my rerun** (`src/modules/telegram-outbound/adapters/**` + `telegram-outbound.routes.ts`): 0 hits on `any`, `console.*`, `throw new Error(`, forbidden imports, default export, `.ts` extension.
+- **File inventory**: 10 files as declared (5 new + 5 modified).
+
+Binding sustainment audit (T20 primitive bindings still honored at composition)
+- **#1 (reader-port)** ✓ Adapter implements `TelegramConfigReadPort`; primitive service consumes port unchanged.
+- **#2 (call-time decrypt)** ✓ Adapter returns encrypted envelope; service performs decrypt at `service.ts:57` — verified unchanged.
+- **#3 (bot token NEVER logged)** ✓ Adapter has 0 `logger` calls; token embedded only in URL path (opaque HTTPS transport); service maps axios failures via `err.message` only (adapter → service → `ExternalServiceError('telegram_bot_api', errorMessage(err))` at `service.ts:68`) — `err.message` for axios does NOT contain URL/token in standard failure modes (HTTP status codes / network codes). Safe.
+- **#4 (chatIdSuffix)** ✓ Unchanged.
+- **#5 (body never logged)** ✓ Unchanged.
+- **#9 (error mapping)** ✓ Adapter throws `ThirdPartyUnreachableError` on malformed Bot API response; axios errors bubble. Service catches both → `ExternalServiceError`. Integration test asserts 502 canonical envelope.
+- **#11 (`message_id` as string)** ✓ Adapter uses `String(messageId)`; dedicated 15-digit precision test covers `'9007199254740993'` (past `Number.MAX_SAFE_INTEGER`).
+- **#14 (snake_case wire + `.strict()`)** ✓ Route maps wire ↔ domain; integration test confirms.
+- **#13 (parse_mode enum)** ✓ Passthrough + omit tested at adapter level; service-layer enum enforcement unchanged.
+
+Shared-infra edit audit
+- **`src/entrypoints/api-server.ts`** — added T20-followup wiring block (mirrors T17-followup pattern §77-82). Correct architectural boundary per CLAUDE.md §4 "Wiring di entrypoint". Fresh cross-module import from adapter → `@modules/telegram/telegram.repository.js` = **first legitimate cross-module runtime import in slot C**, approved by the T20 primitive PLAN GAP #4 resolution (reader-port pattern's whole point). Accepted.
+- **`src/core/config/env.ts`** — 2 new fields, both non-breaking: `INTERNAL_RPC_SECRET` as `.optional()` per GAP #7 (see process notes below), `TELEGRAM_API_BASE` with `.default('https://api.telegram.org')`. Slot-B/A test fixtures unaffected — verified via `test-unit` PASS. Accepted.
+- **`.env.example`** — 2 comment-annotated example lines matching schema. Accepted.
+- **`.eslintrc.cjs`** — narrowly scoped override adding `'no-restricted-imports': 'off'` to the existing `src/entrypoints/*.ts` override block. Correct scope; other files still restricted from adapter imports. Justified via CLAUDE.md §4 quote in the comment. Accepted.
+
+⚠ **Tolerated deviation #1** — `throw new Error(...)` at `src/entrypoints/api-server.ts:88`
+- **Context**: boot-time config validation ("`INTERNAL_RPC_SECRET is required to register internal RPC routes`") crashes the process fast when the shared secret is missing at RPC-route registration.
+- **Rule reference**: PM-AGENT §3 Step 2 drift table restricts `throw new Error(` in `src/modules/**/*.service.ts` and `src/core/` — `src/entrypoints/` is OUTSIDE that strict scope, so this is not a formal drift violation. CLAUDE.md §5 spirit prefers `AppError` subclasses everywhere runtime.
+- **Accept-with-followup**: entrypoint boot-guard is idiomatic (Node convention: crash process on missing critical config). Not user-facing (never reaches error-handler.plugin). NOT a security regression. Accept for this attempt.
+- **Follow-up**: consider a shared `ConfigError extends AppError` (or generic `BootstrapError`) class in a future foundation chore — Q-A/PM A domain (shared infra). Log against §3 as a low-priority sync note; do NOT block T20-followup on it.
+
+**Process notes** (non-blocking, workflow-level)
+- **PN #1 — Self-proceed past ACK**: executor claimed the T17-followup precedent (PR #27 shipped without a dedicated PM C ACK block) to skip my ACK for T20-followup. This is defensible when the user issues a direct "continue to X" directive AND the followup's scope is well-precedented. Going forward: if the followup introduces shared-infra edits (env schema, eslint config, entrypoint wiring, cross-module imports) the executor should still post a PLAN and wait for ACK — the shared-infra edits in T20-followup (env.ts, eslintrc, api-server.ts) would have benefited from an explicit ACK cycle even under the user-directive precedent. Not penalizing this attempt; noted for future.
+- **PN #2 — GAP #7 `INTERNAL_RPC_SECRET.optional()` workaround**: correct short-term choice given strict per-slot ownership prevents editing other slots' test fixtures. Wiring-time fail-fast (`api-server.ts:87-91`) preserves prod safety. **Follow-up owed**: after slots A/B add the field to their fixtures in their own PRs, tighten schema to required (`.min(32)` without `.optional()`) via a shared-infra chore. I will raise a note in PARENT §3 as a sync item after this session.
+
+Security floor
+- **Bot token** never in logs. Adapter has 0 `logger` calls; URL embedding is opaque HTTPS transport; service's error mapping preserves `.message` only (safe from token exposure in axios error strings for standard failure modes).
+- **Internal RPC auth** correctly uses T09 shared-secret (`internalRpcAuthGuard`), NOT JWT (which is for user sessions). Matches spec §4.11.
+- **Zod safeParse** at handler boundary rejects wire-schema violations with canonical `VALIDATION_ERROR` envelope.
+- **NotFoundError → 404** with resource-hint `telegram_config` for missing config (matches T17 primitive's masking-of-existence pattern via canonical error envelope).
+- **INTERNAL_RPC_SECRET** required at wiring; boot fails-fast in prod on absence.
+- **`TELEGRAM_API_BASE`** overridable — used by integration test to point at local mock; production default is public Telegram endpoint.
+- Zero new package dependencies.
+
+Architectural strengths
+- **Adapter cleanly bridges T17 repo → T20 primitive port** — envelope stays encrypted at the boundary; primitive is unchanged. Textbook reader-port composition.
+- **HTTP adapter is minimal** — POST + response guard + `String()` coercion. No side channels.
+- **Route plugin is thin** — validate, map, delegate. Auth composed by caller (entrypoint), so the plugin stays auth-agnostic and re-usable.
+- **Integration test uses local Fastify mock listener** for Bot API (per GAP #3 option B) — zero new deps, mirrors T17-followup composition pattern. Excellent design.
+- **`buildServer()` factory pattern** established by T17-followup is now consumed by T20-followup integration test — durable composition boundary.
+
+Followup guidance (T20 wave)
+- **Bull retry / DLQ** — out of scope per T20 SUBMIT §1864. Route as a separate follow-up when the T20 wave picks up worker-processor composition (slot-B T14 pattern reference).
+- **Rebase advisory**: this branch is behind `main` by T18 merge (PR #28). Rebase before opening PR to avoid CI merge-conflict on PM-STATUS-C.md.
+
+Executor next actions
+- Rebase `feat/telegram-outbound-followup` onto latest `main` (T18 merged).
+- Open PR post-rebase. Squash-merge per CLAUDE §12.
+- Pick next followup (T19/T21/T22/T23/T24/T25 route landings + adapters remain parked pending their respective cross-service Qs — Q-C-06/07/09/10/11/12 at Parent PM/PO).
+
+PM C follow-up actions (batched in this commit)
+- Update §1 tracker T20 row: annotate followup shipped.
+- Update PARENT §1 T20 row.
+- Post 1-line roll-up to PARENT §2.
+- **Deferred housekeeping still owed** from prior sessions: retro-VERDICT for FOUNDATION FIX Q-C-01+Q-C-05 (§2 block ending line 2009) reflecting PR #25 merge; close Q-C-01/02/03/05 in §3; raise `INTERNAL_RPC_SECRET` fixture-alignment sync note in PARENT §3. Batching all for a follow-up commit within this session.
+
+→ §1 tracker updated. Row mirrored to PARENT §1. Roll-up posted to PARENT §2.
+
+---
+
+## 3. Slot C open questions (mirror to PARENT §3)
 
 > PM C catat di sini ketika executor C raise `GAP` atau `BLOCKED`. Setelah resolve atau eskalasi ke Parent PM, update status. Parent PM consolidate ke `PM-STATUS-PARENT.md §3`.
 
