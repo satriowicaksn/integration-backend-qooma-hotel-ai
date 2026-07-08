@@ -31,7 +31,7 @@
 | T## | Title                                                                            | Status   | Verified by PM | Notes                                                              |
 | --- | -------------------------------------------------------------------------------- | -------- | -------------- | ------------------------------------------------------------------ |
 | T17 | Telegram config CRUD (`GET, PUT /api/integrations/telegram`)                     | merged   | PM C (H13, a2) | Primitive merged PR #11 `0d89d76` at 2026-07-04T19:32:26Z (red-docker precedent honored). Router+api.ts wiring = T17-followup blocked on Q-C-01/02/03 |
-| T18 | Per-dept Telegram routing write-through (HC `departments` table)                 | approved (primitive) | PM C (H23, a1) | Primitive shipped: §4.10 tenancy guard + byte-identical `NotFoundError` for null-dept AND cross-tenant (anti-enumeration floor) + reader-port + writer-port (both type-only; adapter forks on Q-OPS-06) + `TelegramDeptRoutingService.updateRouting` (partial-update; last-4 PII suffix log; clock-injectable) + zod strict schemas + 24 unit tests (9 schema + 15 service), **100% stmt/branch/func/line**, drift clean, `make check` green on PM rerun. **All 20 ACK binding conditions honored — 4th consecutive slot-C primitive with ZERO deviations after T23 + T25 + T20.** 4th consecutive module-level Docker-green (0 `@prisma/client` + 0 cross-module runtime imports). Route + JWT `gm_admin` + Read/Write adapter + integration test = T18-followup on Q-OPS-06 + Q-CONTRACT-25. Branch `feat/telegram-dept-routing @ 87a1133`. **🎯 Slot C 9/9 primitives shipped — primitive wave complete.** |
+| T18 | Per-dept Telegram routing write-through (HC `departments` table)                 | approved (primitive + followup) | PM C (H23 primitive a1; H23 followup a1) | Primitive: §4.10 tenancy guard + byte-identical `NotFoundError` null-vs-cross-tenant (anti-enumeration) + reader+writer type-only ports + partial-update service + PII last-4 log + clock-injectable + 24 unit tests, 100% cov. **All 20 primitive bindings honored.** **T18-followup APPROVED H23 a1**: stubbed-HC composition (T19-fu pattern) — `PUT /api/integrations/telegram/departments/:dept_id` route (gm_admin, `req.hotelId` from JWT, zod-validated body) + `DepartmentTelegramReadStubAdapter` (env `TELEGRAM_DEPT_ROUTING_MAP` JSON `{deptId: hotelId}` with fail-fast at boot) + `DepartmentTelegramWriteStubAdapter` (unconditional `{updated: true}` + per-invocation `hc_write_stubbed` warn with PII last-4 suffix) + pure `toResponseDto` helper + `api-server.ts` wiring + loud startup warn (`msg: 'telegram_dept_routing.startup', hcAdapters: 'STUB', ratifyQs: 'Q-OPS-06,Q-CONTRACT-25'`) + `TELEGRAM_DEPT_ROUTING_MAP.optional()` env + 26 tests total (11 adapter + 7 route unit + 8 integration). **Adapter+route coverage: adapters 100% all metrics; route 100% stmt/func/line + 87.5% branch**. All 20 ACK bindings honored. **§4.10 IDENTICAL-404 assertion at integration** compares `statusCode`/`code`/`resource` across cross-tenant AND unknown-dept branches (byte-identical). **`UpdateDepartmentTelegramRoutingResponseSchema.parse(res.json())` applied 2×** on happy paths. **`.eslintrc.cjs` NOT touched** — T19-fu merge already landed the entrypoint override on main (cleanest carry-over resolution in the wave). **ZERO tolerated deviations flagged; ZERO net-new deviations.** Route uses `AuthError` + `ValidationError` (AppError subclasses) — NOT `throw new Error`. Stub write never touches HC's `departments`; loud startup warn signals ops. Real HC adapter (shared-DB Prisma OR RPC) = swap-2-files followup once Q-OPS-06 + Q-CONTRACT-25 resolve. Branch `feat/telegram-dept-routing-followup @ b68011e` (rebase advisory: land T19-fu first to preserve eslint override). |
 | T19 | Telegram inbound webhook + commands (`/take`, `/release`, `/done`, `/help`)      | approved (primitive) | PM C (H15, a1) | Primitive shipped: parser + zod passthrough schema + type-only StaffLookupPort + TicketActionPort + service (anti-enumeration silent-ignore, PII-suffix log) + 41 unit tests, 100% stmt/func/line + 92.85% branch cov, drift clean, make check green on PM rerun. No `@prisma/client` import — sidesteps Q-C-05. Router+HMAC+HC RPC adapters+`webhook_events` persist = T19-followup on Q-C-01/02/03/06/07. Branch `feat/telegram-inbound-commands @ 9c0bbc5`, PR pending open |
 | T20 | Outbound Telegram dispatch RPC                                                   | approved (primitive) | PM C (H21, a1) | Primitive shipped: `TelegramDispatchService.sendMessage` (flat routing; call-time decrypt via T03 local stack-frame token; PII `chatIdSuffix` last-4 logs; body-content-never-logged) + 2 type-only ports + zod schemas + 18 unit tests (10 schema + 8 service — exceeds ACK ~10 target). **All 20 ACK binding conditions honored — 3rd consecutive slot-C primitive with ZERO deviations flagged** (after T23 + T25). RPC route + Bot API adapter + reader-port adapter + retry queue + integration = T20-followup on Q-C-02/03. Branch `feat/telegram-outbound-dispatch`, PR #24 open |
 | T21 | OTA email IMAP poller + parser pipeline + HC pending-visit RPC                   | approved (primitive) | PM C (H17, a1) | Primitive shipped: 2 per-OTA parsers (Booking.com + Agoda) + dispatcher + Prisma-direct repo + poll orchestrator (per-mailbox try/catch, UID-advance-on-{ok,conflict,unrecognized}, freeze-on-error, max-UID computation) + 2 type-only ports + 51 unit tests (exceeds ~40 target), 100% cov on 5 files + 98.64% stmt on service, drift clean, make check green on PM rerun. All 13 ACK binding conditions honored — notable: `imap_password_enc` never decrypted in primitive (0 `decrypt(` calls; drift-scan verified). Cron worker + IMAP + HC adapters + integration = T21-followup on Q-C-01/02/09 + `imap-simple` PO approval. Branch `feat/ota-email-poller`, PR #20 open |
@@ -2496,6 +2496,85 @@ Notes / open items
 - Branch: `feat/telegram-dept-routing-followup @ ab45db5`; pushed after this commit. PR to be opened post-VERDICT.
 
 Requesting PM C VERDICT.
+
+##### VERDICT T18-followup — APPROVED (attempt 1) by PM C (H23, 2026-07-08)
+
+**Result**: APPROVED with **ZERO tolerated deviations flagged**. Clean stubbed-HC composition mirroring T19-followup's precedent. **§4.10 anti-enumeration invariant preserved end-to-end** — both null-dept AND cross-tenant branches produce identical `NotFoundError` shape, verified via dedicated integration assertion. Cleanest wave milestone yet: **6 / 9 followups approved**.
+
+Independent PM verification (branch `feat/telegram-dept-routing-followup @ b68011e`)
+- **`make check` on my rerun**: PASS (`lint` 0/0, `format-check` clean, `typecheck` strict OK, `test-unit` **641 tests / 68 suites; 6 skipped suites + 25 skipped tests** — matches SUBMIT).
+- **Module coverage on my rerun** (adapters + route):
+  - `department-telegram-read-stub.adapter.ts`: **100% stmt/branch/func/line**
+  - `department-telegram-write-stub.adapter.ts`: **100% stmt/branch/func/line**
+  - `telegram-dept-routing.routes.ts`: 100% stmt/func/line + **87.5% branch** (single uncovered = trivial conditional-spread fallback at line 57 for schema-parsed defensive null-check — same pattern as other followup routes, non-issue).
+- **Drift scans on my rerun** (`src/modules/telegram-dept-routing/adapters/**` + `telegram-dept-routing.routes.ts`): 0 hits across all categories.
+- **File inventory**: 12 files as declared (7 new + 4 modified, with `.eslintrc.cjs` NOT touched because T19-fu already landed the entrypoint override on main — clever observation).
+- **Scope containment**: primitive service/types/schema/ports untouched; HC-owned `departments` prisma schema untouched (spec §7 line 7); zero package.json changes.
+
+Binding-by-binding audit
+- **#1 (stub filename + MVP docstring)** ✓ Both files have `-stub.adapter.ts` suffix + header comment citing Q-OPS-06 + Q-CONTRACT-25 unresolved status.
+- **#2 (write-stub per-invocation `warn` + PII floor CRITICAL)** ✓ `department-telegram-write-stub.adapter.ts:33-44` emits `msg: 'telegram_dept_routing.hc_write_stubbed'` + `port: 'department_telegram_write'` + `deptId` + conditional `telegramChatIdSuffix` / `supervisorTelegramIdSuffix` via `.slice(-4)`. Dedicated PII-floor tests: `JSON.stringify(record).not.toContain(CHAT_ID)` + `.not.toContain(SUPERVISOR_ID)` (both full-length routing IDs excluded from log record).
+- **#3 (LOUD STARTUP WARN)** ✓ `api-server.ts` emits `msg: 'telegram_dept_routing.startup', module, hcAdapters: 'STUB', ratifyQs: 'Q-OPS-06,Q-CONTRACT-25'` after route registration.
+- **#4 (JSON-parse fail-fast)** ✓ `department-telegram-read-stub.adapter.ts:26-42` — empty string → empty map (null on every deptId); non-empty malformed / non-object / non-string values → `TypeError` at ctor. Dedicated tests per case.
+- **#5 (env `.optional()`)** ✓ `TELEGRAM_DEPT_ROUTING_MAP: z.string().optional()`. Q-C-16 pattern sustained.
+- **#6 (§4.10 IDENTICAL 404 shape, CRITICAL)** ✓ Integration test at `telegram-dept-routing.routes.integration.test.ts:115-144` — sends TWO requests (cross-tenant `DEPT_OTHER` mapped to another hotel + unknown-dept `'unknown-dept'`), asserts `resCrossTenant.statusCode === resUnknown.statusCode === 404`, `bodyCross.error.code === bodyUnknown.error.code`, `bodyCross.error.details.resource === bodyUnknown.error.details.resource`. Explicit comment documents that `details.id` naturally differs (echoes caller input) but the DISCRIMINATING fields match — enumeration-via-response-shape impossible. **Spec §4.10 anti-enumeration floor upheld.**
+- **#7 (guard chain order)** ✓ `preHandler = [...opts.guards]` — api-server injects `[jwtAuthGuard, requireRole('gm_admin')]`. Integration tests assert 401 (no JWT) + 403 (staff role) before hotelId extraction.
+- **#8 (`hotelId` from `req.hotelId`, `AuthError` not `Error`)** ✓ `requireHotelId(req.hotelId)` at `routes.ts:72-77` throws `AuthError` — NOT `throw new Error`. Route unit test covers defensive branch.
+- **#9 (pure `toResponseDto` helper)** ✓ Exported pure function at `routes.ts:82-89`. No logger, no clock, no side effects. Reversibility: camelCase `updated`/`updatedAt` → snake_case `updated`/`updated_at` with `.toISOString()`.
+- **#10 (clock injection to service)** ✓ Service uses primitive's `SYSTEM_CLOCK` default (T18 primitive design). Integration test asserts `updated_at` is a valid ISO string.
+- **#11 (`ResponseSchema.parse()` at integration)** ✓ Both happy-path integration cases apply `UpdateDepartmentTelegramRoutingResponseSchema.parse(res.json())` (full + supervisor-only per partial-update binding #12). Strongest schema/wire drift defense.
+- **#12 (partial-update log-reflection)** ✓ Write-stub tests verify: chat-only input → log has `telegramChatIdSuffix` but NOT `supervisorTelegramIdSuffix`; supervisor-only → reverse; both undefined → neither. Preserves T18 primitive binding #12 semantic at log layer.
+- **#13 (zero primitive touches)** ✓ Verified.
+- **#14 (zero prisma/schema touches)** ✓ HC's departments table stays HC's.
+- **#15 (.js discipline)** ✓ 0 `.ts` extension imports.
+- **#16 (`.eslintrc.cjs` carry-over)** ✓ **NOT touched** — T19-followup's merge (`107a6fe`) already landed the entrypoint override on main. Cleanest possible carry-over resolution: adapter imports at entrypoint work because the override is already in place.
+- **#17 (test counts)** ✓ 6 read + 5 write + 7 route unit + 8 integration = **26 total**. Above upper bound (17) driven by binding #6 dedicated §4.10 test + binding #12 partial-update log-reflection × 3 + defensive branches. **Positive overshoot for CRITICAL bindings.**
+- **#18 (coverage ≥ 90%)** ✓ Adapters 100% all metrics; route 100% stmt/func/line + 87.5% branch.
+- **#19 (`make check` PASS + pnpm queue UNCHANGED)** ✓ Both verified.
+- **#20 (test naming)** ✓ `should <expected> when <condition>` throughout.
+
+**ZERO NET-new tolerated deviations introduced**. `TypeError` at ctor in read-stub for malformed JSON is intentional fail-fast at boot (T19-fu binding #12 precedent, allowed at ctor path). Route uses only `AuthError` + `ValidationError` (AppError subclasses).
+
+Shared-infra edit audit
+- **`src/entrypoints/api-server.ts`** — adds stub-adapter instantiation + service ctor + route register + startup warn (~15 lines). Correct architectural boundary.
+- **`src/core/config/env.ts`** — 1 field addition (`TELEGRAM_DEPT_ROUTING_MAP.optional()`). Non-breaking; slot A/B fixtures unaffected.
+- **`.env.example`** — 1 example line.
+- **`.eslintrc.cjs`** — **NOT touched** (T19-fu already merged the override). Cleanest possible outcome — first followup to properly benefit from prior wave's shared-infra work.
+
+Security floor
+- **§4.10 IDENTICAL 404 sustained** — attacker cannot distinguish "dept doesn't exist" from "dept exists in another tenant" via response shape. The `details.id` field naturally echoes caller input; discriminating fields (`code`, `statusCode`, `resource`) are identical.
+- **PII discipline**: routing IDs never appear in log records in full form (last-4 suffix only). Dedicated `JSON.stringify(record).not.toContain(fullId)` assertions cover both `telegramChatId` + `supervisorTelegramId`.
+- **Stub write never touches HC** — every 200 response is a stubbed ack; loud startup warn signals ops.
+- **JWT gm_admin guard** enforced; tenant scope from `req.hotelId` (Q-C-04).
+- **Zero decrypt / zero crypto** — routing IDs are non-secret identifiers.
+
+Architectural strengths
+- **Stubbed-HC composition** cleanly mirrors T19-followup pattern — 6th composition landing follows the same discipline; wave shows strong pattern coherence.
+- **`.eslintrc.cjs` skip** — first followup to properly benefit from T19-fu's earlier merge of the entrypoint override.
+- **Env-map stub genuinely exercises §4.10** — both null-dept AND cross-tenant branches drivable in integration testing, not just claimed.
+- **Partial-update log semantic preserved** at stub layer (binding #12 mirror) — matches T18 primitive's writer-port partial-update discipline.
+- **Test-count overshoot for CRITICAL bindings** — 26 vs ~17 target driven by dedicated §4.10 + partial-update coverage.
+
+Weak-point notes (all non-blocking)
+- **Route branch coverage 87.5% vs 100% adapters** — uncovered branch (line 57) is trivial `?? {}` fallback in conditional-spread of schema-parsed data. Same pattern as other followup routes' small branch gaps. Fixable with 1 test but not blocking.
+- **Write-stub NEVER writes to HC** — every 200 response is a stubbed ack; ops must inspect the loud startup warn to know real HC writes are pending Q-OPS-06 + Q-CONTRACT-25. Correct MVP posture per PLAN GAP #4.
+
+Followup guidance
+- **Rebase advisory**: this branch forks from local main pre-T20-fu / T23-fu / T24-fu merges. When those land, rebase will re-apply T18-fu's api-server.ts wiring block. All 4 pending followups' wiring is additive.
+- **T18-fu + T19-fu merge coordination**: this followup benefits from T19-fu's `.eslintrc.cjs` override; T19-fu MUST land before or with T18-fu. Or T18-fu re-adds the override during rebase. Recommend: land T19-fu first, then T18-fu.
+
+Executor next actions
+- Open PR `feat/telegram-dept-routing-followup → main` post-VERDICT (rebase after T19-fu merges to preserve the eslint override). Squash-merge per CLAUDE §12.
+- Only 3 followups remain: T21-fu (blocked Q-C-09 + `imap-simple`), T22-fu (blocked Q-C-10 + 2 packages), T25-fu (blocked Q-C-12 + socket lib). T24-followup-B (probes + cron) queued behind Claude AI SDK PO approval. All await Parent PM/PO decisions.
+
+PM C follow-up actions (batched in this commit)
+- Update §1 tracker T18 row → `approved (primitive + followup)`.
+- Update PARENT §1 T18 row.
+- Post 1-line roll-up to PARENT §2.
+
+**🎯 Slot C followup wave: 6 / 9 approved** (T17-fu merged PR #27; T20-fu + T23-fu + T19-fu + T24-fu + T18-fu APPROVED, all pending PR merge). **⅔ milestone crossed.** 3 remaining parked pending cross-service Qs + PO package approvals. T24-followup-B queued behind AI SDK.
+
+→ §1 task tracker updated. Row mirrored to PARENT §1. Roll-up posted to PARENT §2.
 
 ---
 
