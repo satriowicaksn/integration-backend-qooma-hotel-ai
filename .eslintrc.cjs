@@ -104,6 +104,9 @@ module.exports = {
       rules: {
         'import/no-default-export': 'off',
         '@typescript-eslint/require-await': 'off',
+        // Composition layer: entrypoints intentionally import concrete
+        // adapters to wire services (CLAUDE.md §4 "Wiring di entrypoint").
+        'no-restricted-imports': 'off',
       },
     },
     {
