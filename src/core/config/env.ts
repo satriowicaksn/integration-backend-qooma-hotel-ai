@@ -44,6 +44,12 @@ const EnvSchema = z.object({
   // Empty → every slug 404s. A proper Auth-service RPC lookup replaces
   // this adapter once the Auth contract lands.
   TELEGRAM_WEBHOOK_HOTEL_SLUG_MAP: z.string().optional(),
+  // Dev/MVP dept → hotel_id map for the T18 per-dept Telegram routing
+  // stub adapter (`PUT /api/integrations/telegram/departments/:dept_id`).
+  // JSON blob `{ "dept-id": "<hotel-uuid>", ... }`. Empty → every dept
+  // 404s. Auth / HC RPC lookup replaces this once Q-OPS-06 +
+  // Q-CONTRACT-25 resolve.
+  TELEGRAM_DEPT_ROUTING_MAP: z.string().optional(),
 
   // Rate limit
   RATE_LIMIT_GLOBAL_PER_MIN: z.coerce.number().int().positive().default(100),
