@@ -2412,6 +2412,84 @@ Proceed to coding on branch `feat/channel-health-followup`. Post SUBMIT when: `m
 
 **Followup wave milestone**: T24-followup APPROVAL will bring slot C to **5 / 9 followups approved** (T17-fu merged; T20-fu + T23-fu + T19-fu APPROVED; T24-fu will be #5). Remaining: T18-fu (blocked Q-OPS-06), T21-fu (blocked Q-C-09 + imap-simple), T22-fu (blocked Q-C-10 + 2 packages), T25-fu (blocked Q-C-12 + socket lib). T24-followup-B (probes + cron) queued behind Claude AI SDK PO approval.
 
+#### SUBMIT T24-followup — exec-C (Satrio) at H23 (2026-07-08) 21:50 (attempt 1, per PM C ACK)
+
+Task: T24-followup composition landing — narrow READ route `GET /api/integrations/health` + pure `toHealthResponseDto` helper + `api-server.ts` wiring. All 20 PM C ACK binding conditions honored.
+
+Files changed: 4 (3 new + 1 modified) — **smallest followup diff in the wave** per PM C ACK expectation.
+  - src/modules/channel-health/channel-health.routes.ts (new — route + pure `toHealthResponseDto` + clock-injectable, `SYSTEM_CLOCK` default)
+  - src/modules/channel-health/__tests__/channel-health.routes.test.ts (new — 11 unit tests: pure composition × 4 + route × 7 including PROVIDER_ORDER preserved + SYSTEM_CLOCK bracket + defensive-branch)
+  - src/modules/channel-health/__tests__/channel-health.routes.integration.test.ts (new — 6 integration tests, skipped without `DATABASE_URL`)
+  - src/entrypoints/api-server.ts (modified — instantiate `ChannelHealthRepository` + register route with existing `gmAdminGuards`)
+
+Files NOT touched (binding #1 primitive freeze + binding #13 scope containment)
+  - `src/modules/channel-health/channel-health.service.ts` / `.debounce.ts` / `.types.ts` / `.schema.ts` / `.repository.ts` / `ports/**` / existing tests
+  - `src/entrypoints/worker.ts` (probes + cron deferred to T24-followup-B)
+  - `prisma/schema.prisma`, `src/core/config/env.ts`, `src/plugins/**`, `package.json`, `.eslintrc.cjs`
+  - `.env.example` — no new env
+  - Other slots' / other slot-C modules
+
+DoD self-check — all 20 binding conditions
+- [x] **Binding #1 (zero primitive touches)** — verified via `git status --short`: only 3 new files under `src/modules/channel-health/**` + 1 `api-server.ts` modification.
+- [x] **Binding #2 (consume primitive exports only)** — route imports `PROVIDER_ORDER` + `currentStatusOr` from `./channel-health.service.js` and `HealthResponseDto` + `ClaudeApiHealthDto` from `./channel-health.schema.js`. **No re-implementation** of ordering, fallback, or wire schema. Relative imports (route lives inside module) — same pattern as T17/T19/T20/T23-followup routes.
+- [x] **Binding #3 (`toHealthResponseDto` pure + colocated + reversible)** — pure function in `channel-health.routes.ts`; no logger, no side effects. `toHealthResponseDto(snapshots, clock)` signature makes the clock dependency explicit.
+- [x] **Binding #4 (clock injectable + `SYSTEM_CLOCK` default)** — `ChannelHealthRoutesClock` type + `SYSTEM_CLOCK` module-const; ctor arg `clock?`. Injected clock in unit tests; `SYSTEM_CLOCK` exercised by dedicated bracket test.
+- [x] **Binding #5 (parallel `Promise.all`)** — `Promise.all(PROVIDER_ORDER.map(provider => repo.findLatestByHotelProvider(hotelId, provider)))` at line 47-51.
+- [x] **Binding #6 (PROVIDER_ORDER preserved test)** — dedicated `should query providers in the order dictated by PROVIDER_ORDER (binding #6)` test asserts calls array `['whatsapp', 'telegram', 'claude_api']`.
+- [x] **Binding #7 (`HealthResponseSchema.parse(res.json())` integration assertion)** — integration happy path calls `HealthResponseSchema.parse(res.json())` on the response and reads back typed fields.
+- [x] **Binding #8 (route auth-agnostic + 401/403 assertions)** — `preHandler = [...opts.guards]`; integration test asserts 401 (no JWT) + 403 (staff role) + 200 (gm_admin).
+- [x] **Binding #9 (`hotelId` from `req.hotelId`)** — `requireHotelId(req.hotelId)` at line 46; NEVER trusts body/query/header. Integration test JWT carries `hotel_id: HOTEL_ID` per Q-C-04.
+- [x] **Binding #10 (zero `@prisma/client` at route)** — route imports `ChannelHealthRepository` type-only via relative path; no Prisma types touched at the route layer.
+- [x] **Binding #11 (.js discipline)** — 0 `.ts` extension imports (grep-verified).
+- [x] **Binding #12 (`SYSTEM_CLOCK` bracket test)** — dedicated `should fall back to SYSTEM_CLOCK when no clock is injected` test brackets result between `before` / `after` Date samples.
+- [x] **Binding #13 (scope containment)** — verified: 0 touches to worker.ts, plugins, core (except entrypoint wiring), prisma, env, package.json, other modules.
+- [x] **Binding #14 (`pnpm add` queue UNCHANGED at 5)** — `git status package.json` clean.
+- [x] **Binding #15 (`api-server.ts` wiring — T23-fu not on main; instantiate healthRepo here)** — T23-followup is on `feat/integration-overview-followup` branch, NOT merged to main yet. So I instantiated `const healthRepo = new ChannelHealthRepository(db)` in this branch's api-server.ts. When both PRs merge, the duplicate line resolves textually.
+- [x] **Binding #16 (`.eslintrc.cjs` carry-over)** — **NOT touched** — T24-followup route imports NO `@modules/*/adapters/*` paths, so the `no-restricted-imports` rule doesn't fire. First followup in the wave to skip the eslint carry-over entirely.
+- [x] **Binding #17 (unit count ~5-7 + integration 6)** — 11 unit + 6 integration = 17 total. Unit count is above upper bound (7) because I added the PROVIDER_ORDER preserved test (binding #6), the SYSTEM_CLOCK bracket test (binding #12), and a defensive-branch test to push route coverage to 100%. All named per binding #19.
+- [x] **Binding #18 (route coverage ≥ 90%)** — **100 % stmt / 100 % branch / 100 % func / 100 % line** on `channel-health.routes.ts`.
+- [x] **Binding #19 (test naming)** — `should <expected> when <condition>` throughout.
+- [x] **Binding #20 (`make check` PASS)** — see Quality gate.
+
+Quality gate
+- `make lint`: PASS (0 errors, 0 warnings)
+- `make format-check`: PASS
+- `make typecheck`: PASS
+- `make test-unit`: PASS (**618 tests / 61 suites; +11 new unit + 6 new integration deferred without `DATABASE_URL`**)
+- `make check` (combined): **PASS**
+
+Drift scans (scope `src/modules/channel-health/channel-health.routes.ts`)
+- `any` / `<any>` / `as any` (excluding `as unknown as` test-mock + a single `as [T, T, T]` at line 52 to typed-tuple the `Promise.all` results): the tuple assertion is unavoidable because `PROVIDER_ORDER.map(...)` returns `(T | null)[]` not `[T | null, T | null, T | null]`. Not a lint violation; not a drift concern.
+- `console.log|info|debug`: 0 hits
+- `throw new Error(` in runtime files: 0 hits (route uses `AuthError` from `@core/errors`)
+- forbidden imports: 0 hits
+- default export: 0 hits
+- `.skip(` in tests: 0 hits
+- `.ts` extension imports: 0 hits
+
+Security check
+- gm_admin JWT guard enforced; tenant scope from `req.hotelId` (Q-C-04 resolution).
+- Zero decrypt / secret handling — this endpoint reads only public status pills.
+- Response omits `last_message_at` per PLAN GAP #2 (spec `.nullable().optional()` accommodates).
+- Response omits `uptime_30d` / `avg_response_ms` for Claude per PLAN GAP #3 (spec `.optional()` accommodates).
+- Cumulative package-approval queue unchanged (5 packages).
+
+Test evidence
+- Unit (pure composition): 4 tests — full-map + un-probed-optimistic-healthy + Claude-no-snapshot-uses-clock + `HealthResponseSchema.parse()` round-trip
+- Unit (route + fastify.inject with mocked repo): 7 tests — 401 auth reject + 200 status-passthrough + parallel-call + PROVIDER_ORDER preserved + injected-clock-lastCheckAt + SYSTEM_CLOCK bracket + defensive-branch (guard returns without hotelId)
+- Integration (skipped without `DATABASE_URL`): 6 tests — 401 no-JWT + 403 staff-role + 200 empty (all-`healthy` + synthetic Claude last_check_at) + 200 fully-seeded (schema.parse assertion) + 200 latest-snapshot-only (multiple rows per provider) + correlation-id echo
+
+Notes / open items
+
+- **Architectural note (PM C ACK)** — T24-followup's optimistic-healthy default contradicts T23-followup's pessimistic-down fallback for the same "no snapshot yet" case. Both approved-in-context individually; reconciliation belongs at Q-C-08 / Q-C-11 with FE-team + PO. Not blocking this SUBMIT; flagged for future.
+- **First followup in the wave to skip the `.eslintrc.cjs` carry-over** — the route imports no adapter paths.
+- **`api-server.ts` merge risk** — same story as T20/T23/T19-followup: both this branch's wiring block and (potentially) T23-followup's wiring block instantiate `ChannelHealthRepository`. Textual merge resolves.
+- **T24-followup-B queued behind AI SDK PO approval** — probe adapters + worker cron require Claude API probe adapter + `worker.ts` bootstrap + slot-B WA config integration; separate task.
+- **Milestone** — slot C followup wave now: T17, T20, T23, T19, **T24**. Remaining: T18-fu, T21-fu, T22-fu, T25-fu.
+- Branch: `feat/channel-health-followup @ 42ade60`; pushed after this commit. PR to be opened post-VERDICT.
+
+Requesting PM C VERDICT.
+
 ---
 
 ## 3. Slot C open questions (mirror to PARENT §3)
