@@ -3164,6 +3164,262 @@ Proceed on the 4 branches. Post SUBMIT per followup when: PLAN corrections appli
 
 ---
 
+### ASSIGNMENT T29 — claimed by exec-C (Satrio) at H24 (2026-07-09) 00:45
+- Branch: `feat/wa-conversations-model`
+- Routed from: PM-STATUS-PARENT.md §8 T29 detail block (issued 2026-07-08 per PO ruling). ADR-0010. Slot C authorized to touch `prisma/schema.prisma` + `prisma/migrations/` for this task (deviation from "schema = Slot A" default). User directive (direct-post authorization for T29/T30/T26).
+- Deps status: all foundation Qs merged; T10 primitive on main (`WhatsappConfigRepository` already imported by T22-fu wiring in `api-server.ts`); T09 `internalRpcAuthGuard` on main.
+- Recommended sequence: **T29 before T27/T28 implementation** (per PARENT §8 T29 notes) so those don't ship without messages upsert then need revisit.
+
+#### PLAN T29 — exec-C (Satrio) at H24 (2026-07-09) 00:45
+
+**Scope recap**
+Ship WA conversation + message storage layer per ADR-0010: (a) Prisma migration adding `conversations` + `messages` tables with all indexes / partial unique / FKs specified by ADR-0010 DDL; (b) `WhatsappConversationsRepository` (Prisma-direct); (c) `WhatsappConversationsService` (`upsertOnInbound(...)`, `upsertOnOutbound(...)`, `listConversations(cursor)`, `listMessages(conversationId, cursor)`); (d) zod schemas for wire (`ConversationsListRequest/Response`, `MessagesListRequest/Response`); (e) internal-RPC routes `POST /internal/wa/conversations.list` + `POST /internal/wa/messages.list` behind `internalRpcAuthGuard` (T09; `X-Internal-Secret` header, spec §4.11); (f) wiring in `api-server.ts`; (g) unit + integration tests.
+
+**Files to create**
+```
+prisma/migrations/<ts>_wa_conversations_messages/migration.sql
+src/modules/whatsapp/whatsapp-conversations.types.ts
+src/modules/whatsapp/whatsapp-conversations.schema.ts             (zod strict; cursor pagination)
+src/modules/whatsapp/whatsapp-conversations.repository.ts         (Prisma-direct; ADR-0001)
+src/modules/whatsapp/whatsapp-conversations.service.ts            (upsert + list)
+src/modules/whatsapp/whatsapp-conversations.routes.ts             (POST /internal/wa/conversations.list + messages.list)
+src/modules/whatsapp/__tests__/whatsapp-conversations.schema.test.ts
+src/modules/whatsapp/__tests__/whatsapp-conversations.service.test.ts
+src/modules/whatsapp/__tests__/whatsapp-conversations.repository.integration.test.ts
+src/modules/whatsapp/__tests__/whatsapp-conversations.routes.integration.test.ts
+```
+
+**Files to modify**
+- `prisma/schema.prisma` — add `Conversation` + `Message` models per ADR-0010 (author-authorized; courtesy heads-up to Slot A recorded in commit).
+- `src/modules/whatsapp/index.ts` — barrel export new types + service + zod schemas (repository intentionally NOT re-exported per module discipline).
+- `src/entrypoints/api-server.ts` — instantiate repo + service + register routes with `internalRpcAuthGuard`.
+
+**Files NOT touched**
+- T10 primitive (`WhatsappConfigService`), other WA modules
+- `worker.ts` (T27's async inbound path — separate task)
+- `.env.example` (no new env; INTERNAL_RPC_SECRET already exists)
+- `package.json` — zero new deps
+
+**Approach**
+1. **Schema (ADR-0010 DDL)** — `Conversation`: `id uuid pk`, `hotelId uuid`, `guestWaPhone varchar(32)`, `lastMessageAt timestamptz`, `lastMessagePreview text`, `unreadCount int`, timestamps. Unique `(hotelId, guestWaPhone)`; index `(hotelId, lastMessageAt DESC)`. `Message`: `id uuid pk`, `conversationId uuid fk`, `direction enum('inbound','outbound')`, `status varchar`, `externalMessageId varchar(120)?` (wamid), `body text`, `webhookEventId uuid?` (FK to `webhook_events.id`, nullable), `createdAt`. Partial unique `WHERE external_message_id IS NOT NULL`; index `(conversationId, createdAt DESC)`.
+2. **Migration** — `pnpm prisma migrate dev --name wa_conversations_messages`; commit generated SQL.
+3. **Repository** — Prisma-direct: `upsertConversation({ hotelId, guestWaPhone, ...updates })` + `insertMessage(...)` + `listConversationsPage({ hotelId, cursor, limit })` + `listMessagesPage({ conversationId, cursor, limit })`.
+4. **Service** — `upsertOnInbound({ hotelId, guestWaPhone, body, wamid, webhookEventId })` (increments `unreadCount`, updates `lastMessagePreview` = body[:280], `lastMessageAt` = now); `upsertOnOutbound({ ... })` (no unread increment, sets preview + timestamp). `listConversations` / `listMessages` are pure passthrough with cursor decode/encode.
+5. **Cursor** — `Buffer.from(JSON.stringify({ v: 1, id, ts })).toString('base64url')`. Decode at request boundary; reject malformed → `ValidationError`.
+6. **Routes** — `POST /internal/wa/conversations.list { hotel_id, cursor?, limit? }` → `{ items, next_cursor? }`. Same shape for messages. Default limit 50, max 200. `internalRpcAuthGuard` preHandler.
+7. **Tests** — schema (5+), service (10+ incl. upsert dedupe, cursor round-trip), repo integration (5+), routes integration (10+ incl. 401 no-secret, 401 wrong secret, cursor pagination, empty list, malformed cursor 400).
+
+**GAPs / questions**
+
+- **GAP T29-#1 — Cursor shape stability**. Options: (a) opaque base64 JSON `{v,id,ts}` — my intent, simplest; (b) `{after_id}` string — less flexible for future indexes. **My intent**: (a). Non-blocker.
+- **GAP T29-#2 — `webhook_events.id` FK**. `Message.webhookEventId` nullable to accommodate outbound path (no webhook event). Referential integrity: `ON DELETE SET NULL`. Non-blocker.
+- **GAP T29-#3 — `body` PII in log**. Service must NOT log `body`. Only log `bodyLength` per T20-fu precedent. Enforced via drift-scan.
+- **GAP T29-#4 — Migration name / atomicity**. Single migration file; both tables in one transaction. Non-blocker.
+- **GAP T29-#5 — Slot A courtesy heads-up**. PARENT §8 T29 notes: "Coordinate with Slot A (Nathan) as courtesy notification". **My intent**: commit message + PR body cite ADR-0010 authorization; no separate ACK needed. Non-blocker.
+
+---
+
+### ASSIGNMENT T30 — claimed by exec-C (Satrio) at H24 (2026-07-09) 01:00
+- Branch: `feat/vps-k3s-staging-deploy`
+- Routed from: PM-STATUS-PARENT.md §8 T30 detail block (ADR-0011). Doc-first task; zero `src/` change. **Independent** of T26–T29; can ship in parallel.
+- Deps status: all foundation Qs merged; `main` state is deployable; DNS domain `qooma.satrioputrowicaksono.my.id` available.
+
+#### PLAN T30 — exec-C (Satrio) at H24 (2026-07-09) 01:00
+
+**Scope recap**
+Ship staging deployment kit for the Integration service on Hetzner VPS (`91.99.194.116`, Ubuntu 26.04, 8 GB) via K3s single-node. Per ADR-0011: Traefik + cert-manager + Let's Encrypt HTTP-01 + Postgres 15 Bitnami helm + Redis 7 Bitnami helm + GHCR registry + GH Actions auto-deploy on push to `main`. Subdomain `integration-staging.qooma.satrioputrowicaksono.my.id`. **Deliverable = 3 runbook docs + 7 k8s manifests + 1 GH workflow + `.gitignore` addition.** Zero `src/` change.
+
+**Files to create**
+```
+docs/runbooks/vps-k3s-bootstrap.md                 (one-time VPS bootstrap: K3s install, cert-manager, Postgres/Redis helm charts, deploy user)
+docs/runbooks/deploy-integration-service.md        (service-specific deploy: DNS, GHCR pull secret, migrate job, manifest apply, smoke test, rollback)
+docs/runbooks/ci-cd-github-actions.md              (deploy flow explanation + GH secrets checklist + troubleshooting matrix)
+deploy/k8s/integration/namespace.yaml              (namespace + ResourceQuota per ADR-0011 envelope)
+deploy/k8s/integration/configmap.yaml              (non-secret env: LOG_LEVEL, API_PORT, etc.)
+deploy/k8s/integration/secret.template.yaml        (annotated template; real values → gitignored secret.staging.yaml)
+deploy/k8s/integration/deployment.yaml             (api Deployment 2 replicas + worker Deployment 1 replica; probes; resource limits)
+deploy/k8s/integration/service.yaml                (ClusterIP for api pod, port 3000)
+deploy/k8s/integration/ingress.yaml                (Traefik IngressRoute + cert-manager annotations)
+deploy/k8s/integration/job-migrate.yaml            (Prisma migrate Job — run before deployment)
+.github/workflows/deploy-staging.yml               (push main → build → GHCR push → SSH VPS → migrate + kubectl set image + rollout status + smoke test)
+```
+
+**Files to modify**
+- `.gitignore` — add `deploy/k8s/**/secret.staging.yaml` (verified via `git log --all --full-history -- 'deploy/**/secret.staging.yaml'` = empty).
+- `Dockerfile` — optional minor: add `HEALTHCHECK CMD wget -qO- http://localhost:3000/healthz || exit 1` + GHCR label annotations. NO code changes.
+
+**Files NOT touched**
+- `src/**` — drift scan `git diff main...HEAD -- src/` MUST be empty
+- `prisma/**` — schema untouched
+- `package.json`
+
+**Approach**
+1. **Runbook** — 3 markdown files, dry-run tested locally before commit (SSH-executable steps documented with expected outputs).
+2. **K8s manifests** — one Deployment per process (api + worker), sharing configmap + secret. Rolling update strategy (`maxUnavailable: 0`, `maxSurge: 1`). Resource limits sesuai ADR-0011 (api: 512Mi/500m; worker: 512Mi/250m).
+3. **Migration Job** — separate `Job` resource with `restartPolicy: OnFailure`; runs before Deployment apply.
+4. **GH Actions workflow** — matrix: build multi-stage Docker image → tag `ghcr.io/<owner>/integration-backend:{sha,latest}` → push GHCR → SSH into VPS → `kubectl apply -f deploy/k8s/integration/` → `kubectl rollout status deployment/api -n integration-staging --timeout=180s` → curl smoke test on `/healthz`.
+5. **Rollback procedure documented** — `kubectl rollout undo deployment/api -n integration-staging` + verification of previous image tag.
+
+**GAPs / questions**
+
+- **GAP T30-#1 — Dry-run bukti**. DoD requires screenshot / log excerpt di PR body. **My intent**: capture `kubectl get pods -n integration-staging` + `curl -v https://integration-staging.qooma.satrioputrowicaksono.my.id/healthz` + certificate `openssl s_client -connect ...:443 -showcerts` snippets. Manual step; commit runbook + manifests first, then run bootstrap on VPS, then paste evidence in PR body before merge. **Blocker for PR merge, not for PLAN.**
+- **GAP T30-#2 — GH secrets configuration**. `VPS_SSH_HOST`, `VPS_SSH_USER`, `VPS_SSH_PRIVATE_KEY`, `VPS_KUBECONFIG_B64` MUST be set via `gh secret set` before workflow can succeed. Runbook `ci-cd-github-actions.md` documents. Not blocking PLAN.
+- **GAP T30-#3 — DNS A record**. `integration-staging.qooma.satrioputrowicaksono.my.id` → `91.99.194.116` — manual step at JagoanHosting DNS panel. Documented in `deploy-integration-service.md`. Not blocking PLAN.
+- **GAP T30-#4 — Sealed-secrets vs plaintext gitignore**. ADR-0011 explicitly picks plaintext gitignore for MVP; sealed-secrets = future work. Non-blocker.
+- **GAP T30-#5 — Dockerfile healthcheck**. Existing Dockerfile has `EXPOSE 3000` already? Verify + add `HEALTHCHECK` if absent. Non-blocker; 1-line change.
+
+---
+
+### ASSIGNMENT T26 — claimed by exec-C (Satrio) at H24 (2026-07-09) 01:15
+- Branch: `feat/wa-config-crud-routes`
+- Routed from: PM-STATUS-PARENT.md §8 T26 detail block. PO ruling 2026-07-08: WA ownership Slot B → Slot C. Self-contained composition — same pattern as T17-fu (Telegram config CRUD route landing).
+- Deps status: all foundation Qs merged; T10 primitive on main; `WhatsappConfigRepository` already instantiated in `api-server.ts` from T22-fu wiring (rename local var + share instance). No new deps.
+
+#### PLAN T26 — exec-C (Satrio) at H24 (2026-07-09) 01:15
+
+**Scope recap**
+Land `GET, PUT /api/integrations/whatsapp` behind `[jwtAuthGuard, requireRole('gm_admin')]` per spec §2.1 row 28 + ADR-0009 (public CRM API, not internal RPC). Mirrors T17-fu Telegram config route landing exactly. `hotelId` extracted from JWT (`req.hotelId` per Q-C-04). `GET` returns view with masked `access_token` (T10 primitive already masks via `maskTokenForLog`); `PUT` accepts full config body, encrypts `access_token` via T03, upserts via T10 service.
+
+**Files to create**
+```
+src/modules/whatsapp/whatsapp-config.routes.ts                              (thin: validate → call service → return)
+src/modules/whatsapp/__tests__/whatsapp-config.routes.test.ts               (unit — fastify.inject with mocked service)
+src/modules/whatsapp/__tests__/whatsapp-config.routes.integration.test.ts   (integration — real Prisma + JWT)
+```
+
+**Files to modify**
+- `src/entrypoints/api-server.ts` — instantiate `WhatsappConfigService` (repo already exists) + register routes with `gmAdminGuards`.
+- `src/modules/whatsapp/index.ts` — export route registrar + service (do NOT export repository per module discipline).
+
+**Files NOT touched**
+- T10 primitive (service / schema / types / repository frozen)
+- Other WA modules (T11–T16 primitives)
+- `prisma/schema.prisma` (T10 already added `WaConfig`)
+- `.env.example`, `env.ts`, `package.json`
+
+**Approach**
+1. **Route file** — Fastify plugin. `preHandler = [...gmAdminGuards]`. Handlers:
+   - `GET /api/integrations/whatsapp`: `hotelId = req.hotelId` (via `requireHotelId`); `service.getForHotel(hotelId)` → return view (masked token). If service throws `NotFoundError` → error-handler translates 404.
+   - `PUT /api/integrations/whatsapp`: parse body via `WhatsappConfigPutSchema.safeParse` → `ValidationError` on fail. Call `service.upsertForHotel(hotelId, dto)` → return view.
+2. **Wiring** — reuse `waConfigRepo` from T22-fu block or instantiate here; construct `WhatsappConfigService(waConfigRepo, logger)`; register.
+3. **Unit tests (route level)** — 401 no auth + 403 wrong role + 400 zod fail + 200 GET happy + 200 PUT happy + 404 GET no config + defensive-branch hotelId-empty.
+4. **Integration tests** — mirrors T17-fu: 401 + 403 + 404 empty state + PUT→GET round-trip (asserts masked token; plaintext never in response) + PUT idempotency + x-correlation-id echo.
+
+**GAPs / questions**
+
+- **GAP T26-#1 — Repo reuse from T22-fu wiring**. `WhatsappConfigRepository` is already instantiated in `api-server.ts` for the QR route's phone lookup. **My intent**: reuse the same instance to keep only one repo per db-scoped resource. 1-line refactor + share ref. Non-blocker.
+- **GAP T26-#2 — Masking discipline sustained**. T10 service already masks `accessToken` in the view (per T10 primitive tests). Route just returns the view. No new masking logic. Non-blocker; drift scan asserts plaintext never in log or response JSON.
+- **GAP T26-#3 — `webhook_verify_token` in PUT body**. Per T10 primitive schema, PUT body accepts `webhookVerifyToken`. Route passes through; service encrypts / stores. **PII floor sustained** via T10 service's existing log discipline. Non-blocker.
+- **GAP T26-#4 — Integration test WA repository dependency (Q-C-01)**. `Q-C-01` (Prisma singleton) resolved on main via PR #25 — integration test can use real DB. No Prisma-mock stopgap needed. Non-blocker.
+
+---
+
+**All 3 PLANs posted per user direct-authorization.** Suggested implementation order (per PARENT §8 dependency notes): **T30 (independent, doc-first) → T29 (schema + storage; unblocks T27/T28) → T26 (WA config route landing; smallest)**. Or ship in parallel — no ordering constraints between them.
+
+##### PM C CONSOLIDATED ACK — T29 + T30 + T26 PLANs APPROVED with corrections (H24, 2026-07-09)
+
+**Executive**: 3 PLANs cover the first tranche of the new T26-T31 backlog. Cross-service verification against `main` confirms all prerequisites are in place. T26 is a clean T17-fu mirror (proven pattern); T29 introduces the first slot-C schema change (ADR-0010 authorized); T30 is doc-first infrastructure work. `## 3.` heading preserved.
+
+⚠ **T29 PLAN corrections required — 3 ADR-0010 alignment issues** (executor MUST address at implementation):
+
+1. **`lastMessagePreview` truncation length**: PLAN says `body[:280]` → **ADR-0010 line 52 specifies max 200 char**. Change to `body[:200]` (or `.slice(0, 200)`).
+2. **`guestWaPhone` VARCHAR length**: PLAN says `VARCHAR(32)` → **ADR-0010 line 49 specifies VARCHAR(20)** (E.164 fits). Change to `VARCHAR(20)`.
+3. **`external_message_id` constraint**: PLAN says "Partial unique WHERE `external_message_id IS NOT NULL`" → **ADR-0010 line 79 specifies partial INDEX (not UNIQUE)** — dedup is handled by `webhook_events(provider, external_id)` per Q-B-06 pattern, not at messages layer. Change to non-unique partial index. If dedup at messages layer is desired for defense-in-depth, raise as ADR-0010 amendment (Q-C-17) — do NOT silently deviate.
+
+Other T29 detail-checks (verified OK against ADR-0010):
+- `Message.direction`: `ENUM('inbound', 'outbound')` per ADR-0010 line 66 → use Prisma `enum WaMessageDirection { inbound outbound }` (Postgres enum, not VARCHAR+CHECK).
+- `Message.body TEXT NOT NULL`, `Message.status VARCHAR(20) NOT NULL`, `Message.conversation_id UUID FK cascade`, `Message.webhook_event_id UUID NULL FK → webhook_events` all match.
+- `Message.webhookEventId` `ON DELETE SET NULL` — ADR-0010 doesn't specify but this is a reasonable inference (webhook_events cleanup shouldn't nuke messages history). Accept.
+- Conversation `UNIQUE (hotel_id, guest_wa_phone)` ✓; `INDEX (hotel_id, last_message_at DESC)` ✓.
+
+**T30 PLAN — no ADR-0011 corrections needed.** Well-planned. All 3 runbook docs + 7 k8s manifests + 1 GH workflow + `.gitignore` addition match ADR-0011 envelope. Rolling update strategy, migration Job separation, resource limits, rollback procedure all documented per DoD.
+
+**T26 PLAN — no corrections; mirrors T17-fu route landing exactly.** Verified `WhatsappConfigService` + `WhatsappConfigRepository` + `WhatsappConfigPutSchema/ResponseSchema` all on main; `waConfigRepo` already instantiated at `api-server.ts:168` from T22-fu wiring (reuse per GAP #1).
+
+---
+
+**Shared binding conditions (all 3 followups)**
+
+1. **Zero primitive touches** (per followup) — verify via `git status --short` on SUBMIT. T29: no touches to T10 WA config primitive. T26: no touches to T10 primitive files. T30: no `src/**` touches at all (`git diff main...HEAD -- src/` MUST be empty).
+2. **Response schema `.parse()` at integration** — apply on happy-path responses:
+   - T29: `ConversationsListResponseSchema.parse(res.json())` + `MessagesListResponseSchema.parse(res.json())`.
+   - T26: `WhatsappConfigResponseSchema.parse(res.json())` on GET + PUT 200 responses.
+3. **`gm_admin` guard** on T26 routes (JWT); **`internalRpcAuthGuard`** on T29 routes (T09, `X-Internal-Secret`). Integration tests assert 401 + 403 (T26) / 401 (T29 — no role check for internal RPC).
+4. **`hotelId` from `req.hotelId`** for T26 (JWT populates per Q-C-04). T29 conversations.list body accepts explicit `hotel_id` (internal RPC pattern — HC caller specifies which tenant to list).
+5. **`.js` extension discipline** — 0 `.ts` import extensions.
+6. **AppError discipline** — routes use `AuthError` + `ValidationError` + `NotFoundError` (NOT `throw new Error`) per T24-fu / T18-fu carry-over. Q-C-15 tolerated deviation applies only to entrypoint boot-guards.
+7. **Zero package.json touches** — cumulative pnpm PO queue UNCHANGED at 5. All 3 followups add ZERO new deps.
+8. **Test naming** — `should <expected> when <condition>` throughout.
+9. **`make check` PASS** + module/route coverage ≥ 90% per followup.
+10. **Skip-without-`DATABASE_URL`** for integration tests requiring Prisma (T29 repository + routes; T26 routes). Per T17/T19/T20/T23/T24/T18-fu precedent.
+
+**T29-specific bindings**
+
+11. **PII floor** — `body` NEVER logged; only `bodyLength: number` in structured logs. Dedicated test: `JSON.stringify(loggedPayload).not.toContain(body)`. Mirrors T20-fu binding #5.
+12. **Cursor round-trip test** — `encode(decode(cursor))` = original; malformed cursor → `ValidationError` (400).
+13. **Tenant isolation** — repo's `listConversationsPage` MUST filter by `hotelId` in the SQL WHERE clause. Dedicated integration test: 2 hotels seeded, list with hotel-A only returns hotel-A conversations. NO cross-tenant leak.
+14. **`messages.list` scoping** — conversation lookup validates `conversation.hotelId === request.hotel_id`; cross-tenant `conversationId` → `NotFoundError('conversation', id)` (byte-identical anti-enumeration, mirrors T18-fu §4.10 discipline). This is defense-in-depth even though internal RPC is HC-trusted.
+15. **Upsert idempotency** — `upsertOnInbound` called twice with same `(hotelId, guestWaPhone, wamid)` produces 1 conversation row (dedup on unique) + 2 messages if webhook_events dedup is bypassed (or 1 if webhook_events already deduped upstream — depends on caller pattern). Test both semantics.
+16. **`unread_count` increment** — only on inbound; outbound sets preview + timestamp but does NOT increment. Dedicated test.
+17. **Slot A courtesy heads-up** (per PARENT §8 T29 notes) — commit message + PR body cite ADR-0010 authorization; add a 1-line note to `PM-STATUS-PARENT.md §10` cross-dev coord. Non-blocking; documentation courtesy.
+
+**T30-specific bindings**
+
+18. **Dry-run evidence in PR body** — `kubectl get pods -n integration-staging` + `curl -v https://integration-staging.qooma.satrioputrowicaksono.my.id/healthz` + TLS cert `openssl s_client -connect …:443 -showcerts` snippets. **Blocker for PR merge**, not for PLAN. Executor may commit runbook + manifests first, then run bootstrap on VPS, then paste evidence + request VERDICT.
+19. **`.gitignore` update MUST include `deploy/k8s/**/secret.staging.yaml`** — verified no prior tracking; safe to add.
+20. **Runbook self-test discipline** — each step in `docs/runbooks/vps-k3s-bootstrap.md` + `deploy-integration-service.md` MUST be copy-paste executable. Executor runs the runbook top-to-bottom on the actual VPS before commit; any step that requires manual correction → fix in runbook, not in ops memory.
+21. **GH secrets checklist** in `ci-cd-github-actions.md` — enumerate all required GH secrets (`VPS_SSH_HOST`, `VPS_SSH_USER`, `VPS_SSH_PRIVATE_KEY`, `VPS_KUBECONFIG_B64`, `GHCR_PAT` if needed) with `gh secret set …` example commands.
+22. **`.github/workflows/deploy-staging.yml` gates** — only fires on `push` to `main` (NOT on PRs); requires `make check` green from CI as prerequisite (check `workflow_run` or manual gate); explicit `if:` conditions on jobs to avoid accidental staging deploys from feature branches.
+23. **Rollback tested** — runbook includes `kubectl rollout undo deployment/api -n integration-staging` step; PR body includes rollback dry-run evidence (bring up new image, then roll back, verify /healthz still 200).
+24. **Zero `src/` change** — enforced via drift-scan `git diff main...HEAD -- src/` at SUBMIT (result MUST be empty).
+25. **`Dockerfile HEALTHCHECK`** (GAP #5) — 1-line addition acceptable if absent. Verify via `docker build --target api . && docker inspect …`. Non-blocker; nice-to-have.
+
+**T26-specific bindings**
+
+26. **T17-fu mirror discipline** — route file structure follows `src/modules/telegram/telegram.routes.ts` verbatim. Pure `toResponseDto` if needed for camelCase → snake_case mapping (T10 view may already match wire — verify).
+27. **Masked-token invariant** — `access_token` plaintext NEVER in response JSON. T10 primitive service already masks; route test verifies via `JSON.stringify(res.json()).not.toContain(PLAINTEXT_ACCESS_TOKEN)`.
+28. **Repo instance reuse** (GAP #1) — reuse existing `waConfigRepo = new WhatsappConfigRepository(db)` at `api-server.ts:168`; instantiate `WhatsappConfigService(waConfigRepo, logger)` and share. Do NOT create a second `WhatsappConfigRepository(db)` instance.
+29. **PUT idempotency test** — PUT→PUT with same body returns identical row; encrypted `access_token_enc` may differ (fresh nonce per encrypt) but decrypt round-trip yields same plaintext.
+30. **`webhook_verify_token`** stored per T10 primitive discipline — verified at PUT; response omits or masks per T10 view shape.
+
+**Per-PLAN GAP resolutions**
+
+- **T29 GAP #1** (cursor opaque base64) — ACK.
+- **T29 GAP #2** (webhook_events FK ON DELETE SET NULL) — ACK.
+- **T29 GAP #3** (body PII discipline) — ACK; codified as binding #11.
+- **T29 GAP #4** (single migration, both tables in one tx) — ACK.
+- **T29 GAP #5** (Slot A courtesy heads-up) — ACK; codified as binding #17.
+- **T30 GAP #1** (dry-run evidence in PR body) — ACK; codified as binding #18. Merge-blocker, not PLAN-blocker.
+- **T30 GAP #2** (GH secrets) — ACK; codified as binding #21.
+- **T30 GAP #3** (DNS A record manual) — ACK.
+- **T30 GAP #4** (sealed-secrets deferred) — ACK per ADR-0011.
+- **T30 GAP #5** (Dockerfile healthcheck) — ACK; codified as binding #25.
+- **T26 GAP #1** (repo reuse from T22-fu wiring) — ACK; codified as binding #28.
+- **T26 GAP #2-#4** — ACK all as specified.
+
+**Cross-service Qs status check** (still open, tracked in PARENT §3):
+- Q-C-08 (`degraded` semantics) / Q-C-11 (FE overview shape) / Q-C-14 (winston no-op) / Q-C-15 (`BootstrapError`) / Q-C-16 (`INTERNAL_RPC_SECRET.optional()`) — all carry-over, not blocking these 3.
+- Q-C-06/07/10/12 (HC contracts + socket infra) — apply to T27/T28/T24-fu-B/T25-fu wave already merged; not blocking T29/T30/T26.
+- New Q candidate if T29 external_message_id partial-unique deviates: raise **Q-C-17** at that time.
+
+**Suggested implementation order** (any pattern works — no ordering constraint):
+- **T30 first** — doc/tooling only, no code churn, easy to review, provides deploy confidence for future test-in-staging on T29/T26.
+- **T29 second** — schema-change task; unblocks T27/T28.
+- **T26 last** — smallest; benefits from T29 being merged if `messages` upsert is desired in the response shape (not needed for T26 CRUD).
+
+Or ship in parallel on 3 separate branches — same wave-2 pattern (T22-fu / T21-fu / T24-fu-B / T25-fu bundled OR separated).
+
+**Carry-over from prior VERDICTs** (still in effect):
+- Q-C-15 tolerated: `throw new Error(` OK at entrypoint boot-guards only. Route/adapter runtime = AppError subclasses.
+- Q-C-14 (winston no-op): contract tests for logger calls remain structural.
+- Q-C-16: any new env fields on `.optional()`.
+
+Each will get its own SUBMIT + branch + PR + PM C VERDICT (or bundled per executor preference — precedent from PR #37).
+
+Proceed on the 3 branches (or 1 bundle). Post SUBMIT per followup when: ADR alignment corrections applied (T29 items 1-3) + all shared + task-specific bindings honored + `make check` green + drift-scans clean + dry-run evidence attached (T30 merge-time).
+
+---
+
 ## 3. Slot C open questions (mirror to PARENT §3)
 
 > PM C catat di sini ketika executor C raise `GAP` atau `BLOCKED`. Setelah resolve atau eskalasi ke Parent PM, update status. Parent PM consolidate ke `PM-STATUS-PARENT.md §3`.
