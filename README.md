@@ -84,7 +84,9 @@ Detail rationale: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) + ADR di [docs/
 
 ## 🚀 Quick start
 
-> **Prasyarat**: Node.js ≥20, pnpm (auto-install via `corepack enable` — sudah di-handle `make install`).
+> **Prasyarat**: Node.js ≥20, pnpm (auto-install via `corepack enable` — sudah di-handle `make install`), Docker Desktop.
+
+> **📖 Panduan lengkap end-to-end** (init → env → DB GUI → smoke-test 3 MVP endpoint): [**`docs/runbooks/local-dev.md`**](./docs/runbooks/local-dev.md).
 
 ```bash
 # 1. Install pnpm & deps (termasuk corepack enable otomatis)
@@ -92,7 +94,12 @@ make install
 
 # 2. Setup env
 cp .env.example .env
-# edit .env: isi DATABASE_URL, JWT secrets, dll
+# Generate real secrets (WAJIB — boot fails-fast kalau ENCRYPTION_KEY ≠ 64 chars):
+echo "ENCRYPTION_KEY=$(openssl rand -hex 32)"
+echo "JWT_ACCESS_SECRET=$(openssl rand -base64 36)"
+echo "JWT_REFRESH_SECRET=$(openssl rand -base64 36)"
+echo "INTERNAL_RPC_SECRET=$(openssl rand -base64 36)"
+# → paste 4 baris di atas ke .env, replace placeholders
 
 # 3. Start dev stack (Postgres + Redis) + run migration
 make start
