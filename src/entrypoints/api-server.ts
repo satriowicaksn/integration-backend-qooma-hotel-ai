@@ -39,12 +39,19 @@ import { DepartmentTelegramReadStubAdapter } from '@modules/telegram-dept-routin
 import { DepartmentTelegramWriteStubAdapter } from '@modules/telegram-dept-routing/adapters/department-telegram-write-stub.adapter.js';
 import { telegramDeptRoutingRoutes } from '@modules/telegram-dept-routing/telegram-dept-routing.routes.js';
 import { TelegramDeptRoutingService } from '@modules/telegram-dept-routing/telegram-dept-routing.service.js';
+import { AiInboundStubAdapter } from '@modules/whatsapp/adapters/ai-inbound.stub-adapter.js';
+import { HotelCoreGuestUpsertStubAdapter } from '@modules/whatsapp/adapters/hc-guest-upsert.stub-adapter.js';
+import { EnvWaHotelSlugLookup } from '@modules/whatsapp/adapters/wa-hotel-slug-lookup.adapter.js';
+import { WhatsappWebhookSecretResolver } from '@modules/whatsapp/adapters/whatsapp-webhook-secret.adapter.js';
 import { WhatsappConfigRepository } from '@modules/whatsapp/whatsapp-config.repository.js';
 import { whatsappConfigRoutes } from '@modules/whatsapp/whatsapp-config.routes.js';
 import { WhatsappConfigService } from '@modules/whatsapp/whatsapp-config.service.js';
 import { WhatsappConversationsRepository } from '@modules/whatsapp/whatsapp-conversations.repository.js';
 import { whatsappConversationsRoutes } from '@modules/whatsapp/whatsapp-conversations.routes.js';
 import { WhatsappConversationsService } from '@modules/whatsapp/whatsapp-conversations.service.js';
+import { WhatsappInboundIngestService } from '@modules/whatsapp/whatsapp-inbound-ingest.service.js';
+import { WhatsappWebhookEventsRepository } from '@modules/whatsapp/whatsapp-webhook-events.repository.js';
+import { whatsappWebhookRoutes } from '@modules/whatsapp/whatsapp-webhook.routes.js';
 import { registerErrorHandler } from '@plugins/error-handler.plugin.js';
 import { registerWebhookRawBody, verifyWebhookSignature } from '@plugins/hmac-validator.plugin.js';
 import { internalRpcAuthGuard } from '@plugins/internal-rpc-auth.plugin.js';
@@ -209,6 +216,44 @@ export async function buildServer(): Promise<FastifyInstance> {
     service: conversationsService,
     repository: conversationsRepo,
     guards: [internalRpcAuthGuard({ secret: config.INTERNAL_RPC_SECRET })],
+  });
+
+  // T27 — WA inbound webhook (Meta-facing, spec §2.3 + §3.1).
+  // Guard order: raw-body parser (registered above for telegram) →
+  // resolveTenantFromSlug → verifyWebhookSignature. HC guest upsert +
+  // AI inbound land as STUBS pending Q-B-04 + Q-B-05.
+  const waWebhookEventsRepo = new WhatsappWebhookEventsRepository(db);
+  const waGuestUpsertStub = new HotelCoreGuestUpsertStubAdapter(logger);
+  const waAiInboundStub = new AiInboundStubAdapter(logger);
+  const waIngestService = new WhatsappInboundIngestService(
+    waWebhookEventsRepo,
+    waGuestUpsertStub,
+    waAiInboundStub,
+    logger,
+  );
+  const waSlugAdapter = new EnvWaHotelSlugLookup(config.WHATSAPP_WEBHOOK_HOTEL_SLUG_MAP ?? '');
+  const waSlugResolver = createSlugResolver({ lookup: (slug) => waSlugAdapter.lookup(slug) });
+  const waSecretResolver = new WhatsappWebhookSecretResolver(waConfigRepo);
+  await app.register(whatsappWebhookRoutes, {
+    ingestService: waIngestService,
+    conversationsService,
+    tenantResolver: resolveTenantFromSlug({ resolver: waSlugResolver }),
+    signatureGuard: verifyWebhookSignature({
+      provider: 'whatsapp',
+      resolveSecret: (req) =>
+        waSecretResolver.resolveSecret({ hotelId: requireHotelIdForSecret(req.hotelId) }),
+    }),
+    logger,
+  });
+
+  // Loud startup signal: HC guest-upsert + AI inbound are STUBs pending
+  // Q-B-04 + Q-B-05. Ops should see this on every boot.
+  logger.warn({
+    msg: 'whatsapp_inbound.startup',
+    module: 'whatsapp',
+    hcAdapters: 'STUB',
+    ratifyQs: 'Q-B-04,Q-B-05',
+    hmacSecret: 'webhook_verify_token_per_Q-A-04',
   });
 
   return app;
