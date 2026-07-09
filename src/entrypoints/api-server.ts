@@ -20,6 +20,13 @@ import { loadConfig } from '@core/config/env.js';
 import { createLogger } from '@core/logger/logger.js';
 import { db } from '@core/prisma/prisma-client.js';
 
+import { ChannelHealthRepository } from '@modules/channel-health/channel-health.repository.js';
+import { ChannelHealthReadAdapter } from '@modules/integration-overview/adapters/channel-health-read.adapter.js';
+import { QrStateReadAdapter } from '@modules/integration-overview/adapters/qr-state-read.adapter.js';
+import { TelegramConfigReadAdapter } from '@modules/integration-overview/adapters/telegram-config-read.adapter.js';
+import { WhatsappConfigReadAdapter } from '@modules/integration-overview/adapters/whatsapp-config-read.adapter.js';
+import { integrationOverviewRoutes } from '@modules/integration-overview/integration-overview.routes.js';
+import { IntegrationOverviewService } from '@modules/integration-overview/integration-overview.service.js';
 import { ObjectStorageStubAdapter } from '@modules/qr-provisioning/adapters/object-storage-stub.adapter.js';
 import { QrRendererStubAdapter } from '@modules/qr-provisioning/adapters/qr-renderer-stub.adapter.js';
 import { WhatsappPhoneLookupAdapter } from '@modules/qr-provisioning/adapters/whatsapp-phone-lookup.adapter.js';
@@ -207,6 +214,25 @@ export async function buildServer(): Promise<FastifyInstance> {
   const waConfigService = new WhatsappConfigService(waConfigRepo, logger);
   await app.register(whatsappConfigRoutes, {
     service: waConfigService,
+    guards: gmAdminGuards,
+  });
+
+  // T23-followup — aggregated integration overview (spec §2.1 row 27).
+  // 4 reader-port adapters bridge to each subsystem's repository; the
+  // service composes them via Promise.allSettled with per-subsystem
+  // resilience (T23 primitive bindings #9-#11).
+  const channelHealthRepo = new ChannelHealthRepository(db);
+  const integrationOverviewService = new IntegrationOverviewService(
+    {
+      whatsapp: new WhatsappConfigReadAdapter(waConfigRepo),
+      telegram: new TelegramConfigReadAdapter(telegramRepo),
+      qr: new QrStateReadAdapter(qrRepo),
+      health: new ChannelHealthReadAdapter(channelHealthRepo),
+    },
+    logger,
+  );
+  await app.register(integrationOverviewRoutes, {
+    service: integrationOverviewService,
     guards: gmAdminGuards,
   });
 
