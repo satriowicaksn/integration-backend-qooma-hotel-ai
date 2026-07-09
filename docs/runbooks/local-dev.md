@@ -231,16 +231,209 @@ curl -X POST http://localhost:3000/internal/wa/dispatch \
   }' | jq
 ```
 
-Verify di DB (via GUI atau `psql`):
+---
+
+## 8. Check data di DB local (setelah curl)
+
+Tiap curl di §7 landing data ke tabel Postgres tertentu. Gunakan GUI (TablePlus / DBeaver / Postico) atau CLI (`docker exec -it qooma-postgres psql -U app -d app`) untuk verify.
+
+### 8a. Setelah `PUT /api/integrations/whatsapp` (store token)
+
 ```sql
-SELECT hotel_id, bsp, phone_number, verified_at FROM wa_configs;
-SELECT id, status, external_message_id, created_at FROM outbound_dispatch_queue ORDER BY created_at DESC LIMIT 5;
-SELECT id, direction, status, body, created_at FROM messages ORDER BY created_at DESC LIMIT 5;
+-- 1) Row masuk ke wa_configs (1 row per hotel; upsert-by-hotel_id)
+SELECT
+  hotel_id,
+  bsp,
+  phone_number_id,
+  phone_number,
+  webhook_url,
+  verified_at,
+  created_at,
+  updated_at,
+  length(access_token_enc)      AS access_token_enc_length,
+  length(webhook_verify_token)  AS webhook_verify_token_length
+FROM wa_configs
+WHERE hotel_id = '11111111-2222-3333-4444-555555555555';
+
+-- 2) SECURITY CHECK — access_token TIDAK BOLEH tersimpan sebagai plaintext.
+--    Kolom access_token_enc adalah envelope AES-256-GCM (nonce + tag + ciphertext),
+--    biasanya base64-encoded. Panjangnya > plaintext + selalu berbeda tiap encrypt
+--    (nonce random). Query ini pastikan plaintext BUKAN masuk ke DB:
+SELECT
+  CASE WHEN access_token_enc LIKE 'EAAG%' THEN '❌ PLAINTEXT LEAK' ELSE '✅ encrypted' END AS security_check,
+  substring(access_token_enc FROM 1 FOR 20) || '...' AS envelope_head
+FROM wa_configs
+WHERE hotel_id = '11111111-2222-3333-4444-555555555555';
+```
+
+### 8b. Setelah `POST /internal/wa/dispatch` (send message)
+
+```sql
+-- 1) Row masuk ke outbound_dispatch_queue (semua attempt persist di sini,
+--    terlepas outcome sukses/failed)
+SELECT
+  id AS dispatch_id,
+  hotel_id,
+  provider,
+  status,             -- pending | sent | delivered | read | failed
+  external_message_id,  -- wamid.HBg... kalau Meta return sukses
+  template_name,      -- filled kalau kirim template
+  attempt_count,
+  created_at,
+  updated_at
+FROM outbound_dispatch_queue
+WHERE hotel_id = '11111111-2222-3333-4444-555555555555'
+ORDER BY created_at DESC
+LIMIT 10;
+
+-- 2) Row masuk ke messages (per T29 conversations upsert, dipanggil oleh T28 dispatch)
+--    Bakal ada 1 row per successful dispatch dengan direction='outbound', linked
+--    via dispatch_id FK ke outbound_dispatch_queue.id
+SELECT
+  m.id            AS message_id,
+  m.conversation_id,
+  m.direction,    -- outbound (dari dispatch) | inbound (dari webhook)
+  m.status,       -- pending | sent | delivered | read | failed
+  m.external_message_id,
+  m.dispatch_id,
+  length(m.body)  AS body_length,       -- body sendiri tidak di-select untuk PII
+  m.created_at
+FROM messages m
+WHERE m.conversation_id IN (
+  SELECT id FROM conversations
+  WHERE hotel_id = '11111111-2222-3333-4444-555555555555'
+)
+ORDER BY m.created_at DESC
+LIMIT 10;
+
+-- 3) Row masuk ke conversations (upsert-by-(hotel_id, guest_wa_phone))
+--    Tiap kombinasi (hotel, WA phone) hanya 1 conversation row.
+SELECT
+  id AS conversation_id,
+  hotel_id,
+  guest_wa_phone,           -- E.164 phone number
+  last_message_at,
+  last_message_preview,     -- max 200 chars, snippet
+  unread_count,             -- inbound-only increment (T29 binding #16)
+  created_at,
+  updated_at
+FROM conversations
+WHERE hotel_id = '11111111-2222-3333-4444-555555555555'
+ORDER BY last_message_at DESC NULLS LAST
+LIMIT 10;
+
+-- 4) Kalau Meta return delivery status (via webhook), row masuk ke delivery_receipts
+SELECT
+  dispatch_id,
+  status,
+  received_at,
+  external_message_id
+FROM delivery_receipts
+ORDER BY received_at DESC
+LIMIT 10;
+```
+
+### 8c. Setelah inbound webhook (`POST /webhook/whatsapp/:hotel_slug`)
+
+```sql
+-- 1) Raw webhook payload persist ke webhook_events (audit floor per T19-fu binding #6)
+SELECT
+  id,
+  hotel_id,
+  provider,          -- 'whatsapp' | 'telegram'
+  signature_valid,
+  received_at,
+  jsonb_pretty(payload) AS payload_preview
+FROM webhook_events
+WHERE provider = 'whatsapp'
+ORDER BY received_at DESC
+LIMIT 5;
+
+-- 2) Inbound message ke-upsert ke messages (direction='inbound') + increment
+--    conversations.unread_count
+SELECT
+  c.guest_wa_phone,
+  c.unread_count,
+  m.direction,
+  m.external_message_id,  -- Meta wamid
+  m.created_at
+FROM messages m
+JOIN conversations c ON c.id = m.conversation_id
+WHERE m.direction = 'inbound'
+  AND c.hotel_id = '11111111-2222-3333-4444-555555555555'
+ORDER BY m.created_at DESC
+LIMIT 10;
+```
+
+### 8d. Cross-cutting checks
+
+```sql
+-- Semua config yang tersimpan (WA + Telegram)
+SELECT
+  'whatsapp' AS channel, hotel_id, verified_at, updated_at
+FROM wa_configs
+UNION ALL
+SELECT
+  'telegram' AS channel, hotel_id, NULL AS verified_at, updated_at
+FROM telegram_configs
+ORDER BY updated_at DESC;
+
+-- Health snapshots per channel (kalau probe cron sudah jalan T24-fu-B)
+SELECT
+  hotel_id,
+  provider,
+  status,
+  latency_ms,
+  checked_at
+FROM channel_health_snapshots
+ORDER BY checked_at DESC
+LIMIT 20;
+
+-- Total row counts per table (health overview)
+SELECT
+  'wa_configs' AS tbl,               COUNT(*) FROM wa_configs
+UNION ALL SELECT 'telegram_configs',           COUNT(*) FROM telegram_configs
+UNION ALL SELECT 'conversations',              COUNT(*) FROM conversations
+UNION ALL SELECT 'messages',                   COUNT(*) FROM messages
+UNION ALL SELECT 'outbound_dispatch_queue',    COUNT(*) FROM outbound_dispatch_queue
+UNION ALL SELECT 'delivery_receipts',          COUNT(*) FROM delivery_receipts
+UNION ALL SELECT 'webhook_events',             COUNT(*) FROM webhook_events
+UNION ALL SELECT 'channel_health_snapshots',   COUNT(*) FROM channel_health_snapshots
+UNION ALL SELECT 'qr_state',                   COUNT(*) FROM qr_state
+UNION ALL SELECT 'ota_mailbox_state',          COUNT(*) FROM ota_mailbox_state
+ORDER BY tbl;
+```
+
+### 8e. Prisma Studio (GUI alternative — no SQL needed)
+
+```bash
+make db-studio
+# → auto-opens Prisma Studio at http://localhost:5555
+# → click any table di sidebar untuk browse row-by-row
+```
+
+Prisma Studio bagus untuk quick browse + basic filter, tapi tidak bisa run SQL JOIN kompleks — untuk itu pakai TablePlus/DBeaver/psql.
+
+### 8f. Reset data 1 tabel (tanpa drop DB)
+
+```sql
+-- ⚠️ HAPUS data 1 tabel (misal reset semua conversations):
+TRUNCATE conversations RESTART IDENTITY CASCADE;
+-- CASCADE juga hapus messages, karena messages punya FK ke conversations.id
+
+-- Atau hapus data per hotel (sasar row saja):
+DELETE FROM outbound_dispatch_queue WHERE hotel_id = '<hotel-uuid>';
+DELETE FROM wa_configs               WHERE hotel_id = '<hotel-uuid>';
+```
+
+Kalau mau reset **semua data** (drop volume + re-migrate):
+```bash
+make start-fresh
 ```
 
 ---
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 | Error | Fix |
 |---|---|
@@ -258,7 +451,7 @@ SELECT id, direction, status, body, created_at FROM messages ORDER BY created_at
 
 ---
 
-## 9. Common tasks
+## 10. Common tasks
 
 ```bash
 make ps                # cek status containers
@@ -277,7 +470,7 @@ make logs              # tail docker-compose logs
 
 ---
 
-## 10. Next steps
+## 11. Next steps
 
 - **Real Meta credentials**: setup [Meta Business](https://business.facebook.com/) → WhatsApp Business API → dapatkan permanent access_token + phone_number_id
 - **Webhook tunneling** (kalau mau receive WA webhooks di local): `ngrok http 3000` → set URL di `webhookUrl` PUT payload + di Meta dashboard
