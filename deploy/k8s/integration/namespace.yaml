@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: integration-staging
+  labels:
+    app.kubernetes.io/part-of: qooma
+    env: staging
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: integration-staging-quota
+  namespace: integration-staging
+spec:
+  hard:
+    requests.cpu: '1500m'
+    requests.memory: '2Gi'
+    limits.cpu: '3000m'
+    limits.memory: '4Gi'
+    persistentvolumeclaims: '5'
+    pods: '10'
