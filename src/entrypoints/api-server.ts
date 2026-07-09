@@ -13,6 +13,7 @@
 
 import { randomUUID } from 'node:crypto';
 
+import axios from 'axios';
 import Fastify, { type FastifyInstance } from 'fastify';
 
 import { loadConfig } from '@core/config/env.js';
@@ -39,8 +40,12 @@ import { DepartmentTelegramReadStubAdapter } from '@modules/telegram-dept-routin
 import { DepartmentTelegramWriteStubAdapter } from '@modules/telegram-dept-routing/adapters/department-telegram-write-stub.adapter.js';
 import { telegramDeptRoutingRoutes } from '@modules/telegram-dept-routing/telegram-dept-routing.routes.js';
 import { TelegramDeptRoutingService } from '@modules/telegram-dept-routing/telegram-dept-routing.service.js';
+import type { HttpPoster } from '@modules/whatsapp/adapters/1engage.adapter.js';
+import { create1engageAdapter } from '@modules/whatsapp/adapters/1engage.adapter.js';
 import { AiInboundStubAdapter } from '@modules/whatsapp/adapters/ai-inbound.stub-adapter.js';
+import { HotelCoreDndPassthroughAdapter } from '@modules/whatsapp/adapters/hc-dnd-passthrough.adapter.js';
 import { HotelCoreGuestUpsertStubAdapter } from '@modules/whatsapp/adapters/hc-guest-upsert.stub-adapter.js';
+import { HotelCoreQuotaPassthroughAdapter } from '@modules/whatsapp/adapters/hc-quota-passthrough.adapter.js';
 import { EnvWaHotelSlugLookup } from '@modules/whatsapp/adapters/wa-hotel-slug-lookup.adapter.js';
 import { WhatsappWebhookSecretResolver } from '@modules/whatsapp/adapters/whatsapp-webhook-secret.adapter.js';
 import { WhatsappConfigRepository } from '@modules/whatsapp/whatsapp-config.repository.js';
@@ -49,7 +54,10 @@ import { WhatsappConfigService } from '@modules/whatsapp/whatsapp-config.service
 import { WhatsappConversationsRepository } from '@modules/whatsapp/whatsapp-conversations.repository.js';
 import { whatsappConversationsRoutes } from '@modules/whatsapp/whatsapp-conversations.routes.js';
 import { WhatsappConversationsService } from '@modules/whatsapp/whatsapp-conversations.service.js';
+import { whatsappDispatchRoutes } from '@modules/whatsapp/whatsapp-dispatch.routes.js';
 import { WhatsappInboundIngestService } from '@modules/whatsapp/whatsapp-inbound-ingest.service.js';
+import { WhatsappOutboundDispatchRepository } from '@modules/whatsapp/whatsapp-outbound-dispatch.repository.js';
+import { WhatsappOutboundDispatchService } from '@modules/whatsapp/whatsapp-outbound-dispatch.service.js';
 import { WhatsappWebhookEventsRepository } from '@modules/whatsapp/whatsapp-webhook-events.repository.js';
 import { whatsappWebhookRoutes } from '@modules/whatsapp/whatsapp-webhook.routes.js';
 import { registerErrorHandler } from '@plugins/error-handler.plugin.js';
@@ -256,6 +264,53 @@ export async function buildServer(): Promise<FastifyInstance> {
     hmacSecret: 'webhook_verify_token_per_Q-A-04',
   });
 
+  // T28 — WA outbound dispatch internal RPC (ADR-0009, spec §2.4).
+  // Behind `internalRpcAuthGuard` (T09). Composes T13 dispatch service
+  // with the T29 conversations upsert on outcome. HC quota + DND are
+  // **passthrough** per ADR-0009 (FINAL MVP, NOT stubs).
+  //
+  // Route registration is env-gated on `WA_BSP_BASE_URL` (Q-C-16). Without
+  // it, the 1engage BSP has no target and dispatch would immediately fail;
+  // we prefer NOT to register the route in that case so HC gets a clean
+  // 404 instead of a confusing 502.
+  if (config.WA_BSP_BASE_URL !== undefined) {
+    const bspHttpPoster = createBspHttpPoster();
+    const bsp = create1engageAdapter({
+      http: bspHttpPoster,
+      config: { baseUrl: config.WA_BSP_BASE_URL, apiVersion: config.WA_BSP_API_VERSION },
+    });
+    const quotaAdapter = new HotelCoreQuotaPassthroughAdapter(logger);
+    const dndAdapter = new HotelCoreDndPassthroughAdapter(logger);
+    const outboundDispatchRepo = new WhatsappOutboundDispatchRepository(db);
+    const outboundDispatchService = new WhatsappOutboundDispatchService(
+      outboundDispatchRepo,
+      bsp,
+      quotaAdapter,
+      dndAdapter,
+      logger,
+    );
+    await app.register(whatsappDispatchRoutes, {
+      dispatchService: outboundDispatchService,
+      conversationsService,
+      guards: [internalRpcAuthGuard({ secret: config.INTERNAL_RPC_SECRET })],
+      logger,
+    });
+    // Loud startup signal: passthroughs are the ADR-0009 FINAL MVP shape,
+    // not stubs. Ops should see this on every boot as a semantic pointer.
+    logger.warn({
+      msg: 'whatsapp_dispatch.startup',
+      module: 'whatsapp',
+      passthroughAdapters: 'FINAL_MVP_PER_ADR_0009',
+      ratifyQs: 'Q-B-08,Q-B-09',
+    });
+  } else {
+    logger.warn({
+      msg: 'whatsapp_dispatch.startup_skipped',
+      module: 'whatsapp',
+      reason: 'WA_BSP_BASE_URL is unset — /internal/wa/dispatch not registered',
+    });
+  }
+
   return app;
 }
 
@@ -264,6 +319,23 @@ function requireHotelIdForSecret(candidate: string | undefined): string {
     throw new Error('hotelId must be resolved before signature verification');
   }
   return candidate;
+}
+
+/** Minimal HttpPoster wrapping axios, used by the T13 1engage BSP
+ *  adapter. Kept inline rather than routed through `core/http/HttpClient`
+ *  because the wrapper is 4 lines and `HttpClient` is a TODO stub. */
+function createBspHttpPoster(): HttpPoster {
+  const instance = axios.create({ timeout: 10_000 });
+  return {
+    async post<T>(
+      url: string,
+      body?: unknown,
+      opts?: unknown,
+    ): Promise<{ data: T; status: number }> {
+      const res = await instance.post<T>(url, body, opts as never);
+      return { data: res.data, status: res.status };
+    },
+  };
 }
 
 export async function shutdownServer(app: FastifyInstance): Promise<void> {

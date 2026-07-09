@@ -1,5 +1,7 @@
 # Deploy Integration service to staging (T30 / ADR-0011)
 
+> **Worked example of the portable onboarding template.** The generic version — usable for Auth, Hotel Core, AI, or any future Qooma service on the same K3s cluster — is in [`service-onboarding-template.md`](./service-onboarding-template.md). This document is the concrete instance for the Integration service (namespace `integration-staging`, subdomain `integration-staging.qooma.satrioputrowicaksono.my.id`, port `3000`). Read this to see what a filled-in scaffold looks like; use the template runbook when onboarding a new service.
+
 **Prerequisites**: `vps-k3s-bootstrap.md` completed. Postgres + Redis + Traefik + cert-manager healthy.
 
 **Outcome**: Integration service reachable at `https://integration-staging.qooma.satrioputrowicaksono.my.id/healthz` with valid Let's Encrypt TLS.

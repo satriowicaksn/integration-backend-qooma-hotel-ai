@@ -1,0 +1,28 @@
+# Template — Traefik ingress with cert-manager LE HTTP-01.
+# Tokens: <NAMESPACE>, <SERVICE_NAME>, <SUBDOMAIN>, <TLS_SECRET_NAME>
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: <SERVICE_NAME>-api
+  namespace: <NAMESPACE>
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: 'true'
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - <SUBDOMAIN>
+      secretName: <TLS_SECRET_NAME>
+  rules:
+    - host: <SUBDOMAIN>
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: <SERVICE_NAME>-api
+                port:
+                  number: 80

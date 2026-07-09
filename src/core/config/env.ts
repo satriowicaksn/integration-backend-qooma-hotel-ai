@@ -67,6 +67,12 @@ const EnvSchema = z.object({
   // (cron is idle). List format: JSON `["<hotel-uuid>", ...]`.
   HEALTH_PROBE_INTERVAL_MS: z.coerce.number().int().nonnegative().default(60_000),
   HEALTH_PROBE_HOTEL_LIST: z.string().optional(),
+  // T28 WA outbound dispatch — 1engage BSP endpoint. Optional at load
+  // time (Q-C-16); `api-server.ts` skips T28 route registration when
+  // `WA_BSP_BASE_URL` is unset (loud warn). `WA_BSP_API_VERSION`
+  // defaults to Meta Graph `v22.0` per spec §3.1.
+  WA_BSP_BASE_URL: z.string().url().optional(),
+  WA_BSP_API_VERSION: z.string().default('v22.0'),
 
   // Rate limit
   RATE_LIMIT_GLOBAL_PER_MIN: z.coerce.number().int().positive().default(100),
