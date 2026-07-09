@@ -1,0 +1,107 @@
+# Template — api + worker Deployments with rolling update, probes, and
+# resource limits per ADR-0011 envelope.
+# Tokens: <NAMESPACE>, <SERVICE_NAME>, <PORT>, <IMAGE_API>, <IMAGE_WORKER>
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: <SERVICE_NAME>-api
+  namespace: <NAMESPACE>
+  labels:
+    app: <SERVICE_NAME>-api
+    component: api
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: <SERVICE_NAME>-api
+  template:
+    metadata:
+      labels:
+        app: <SERVICE_NAME>-api
+        component: api
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: api
+          image: <IMAGE_API>:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: <PORT>
+          envFrom:
+            - configMapRef:
+                name: <SERVICE_NAME>-config
+            - secretRef:
+                name: <SERVICE_NAME>-secrets
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 250m
+              memory: 384Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: <SERVICE_NAME>-worker
+  namespace: <NAMESPACE>
+  labels:
+    app: <SERVICE_NAME>-worker
+    component: worker
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: <SERVICE_NAME>-worker
+  template:
+    metadata:
+      labels:
+        app: <SERVICE_NAME>-worker
+        component: worker
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: worker
+          image: <IMAGE_WORKER>:latest
+          imagePullPolicy: Always
+          envFrom:
+            - configMapRef:
+                name: <SERVICE_NAME>-config
+            - secretRef:
+                name: <SERVICE_NAME>-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 384Mi
+            limits:
+              cpu: 250m
+              memory: 512Mi

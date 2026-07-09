@@ -1,0 +1,38 @@
+# Template — Prisma migrate Job. Runs before Deployment apply.
+# Tokens: <NAMESPACE>, <SERVICE_NAME>, <IMAGE_API>
+# NOTE: adjust the `command`/`args` if the service does not use Prisma
+# (e.g., Django `manage.py migrate`, Alembic, Flyway, etc.).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: <SERVICE_NAME>-migrate
+  namespace: <NAMESPACE>
+spec:
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: <SERVICE_NAME>-migrate
+    spec:
+      restartPolicy: OnFailure
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: migrate
+          image: <IMAGE_API>:latest
+          imagePullPolicy: Always
+          command: ['node', 'node_modules/prisma/build/index.js']
+          args: ['migrate', 'deploy']
+          envFrom:
+            - configMapRef:
+                name: <SERVICE_NAME>-config
+            - secretRef:
+                name: <SERVICE_NAME>-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 250m
+              memory: 384Mi

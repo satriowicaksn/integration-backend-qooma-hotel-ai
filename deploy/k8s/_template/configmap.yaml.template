@@ -1,0 +1,14 @@
+# Template — non-secret runtime config. Copy → `<service>-config` after
+# scaffolding. Add service-specific keys before `kubectl apply`.
+# Tokens: <NAMESPACE>, <SERVICE_NAME>, <PORT>
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: <SERVICE_NAME>-config
+  namespace: <NAMESPACE>
+data:
+  NODE_ENV: 'staging'
+  LOG_LEVEL: 'info'
+  TZ: 'UTC'
+  API_HOST: '0.0.0.0'
+  API_PORT: '<PORT>'
