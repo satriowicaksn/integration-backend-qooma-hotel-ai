@@ -3694,6 +3694,65 @@ src/modules/whatsapp/__tests__/ai-inbound.stub-adapter.test.ts           (~2 uni
 - **GAP T27-#5 — Guest-upsert idempotency**. Stub returns `uuidv5(hotelId + waPhoneLast4)` — deterministic. Real HC RPC will return the persisted guest id later. Non-blocker (Q-B-04 parked).
 - **GAP T27-#6 — Cross-dev coord**. T27 does not touch schema / Slot A / Slot B scope. No courtesy heads-up needed. Non-blocker.
 
+##### PM C CONSOLIDATED ACK — T31 + T28 + T27 PLANs APPROVED (H24, 2026-07-09)
+
+**Executive**: All 3 PLANs cleanly composed against verified-on-main primitives. Cross-service check green:
+- T31 distills T30 output (on main post-PR #39).
+- T28: `WhatsappConversationsService.upsertOnOutbound` on main; `waConfigRepo` at `api-server.ts:174` (PLAN cite correct); `WhatsappOutboundDispatchService` on main with `HotelCoreQuotaPort` + `HotelCoreDndPort` type slots.
+- T27: `upsertOnInbound` on main; T04/T05/T12/T14/T15 all on main.
+- `Message.dispatchId` FK exists at `prisma/schema.prisma:171` (no schema change needed).
+
+`## 3.` heading preserved. 3rd consecutive slot-C task-set following stubbed-adapter + T19-fu pattern.
+
+**GAP resolutions** (all ACK):
+- T31 #1-#5: (a) `.yaml.template` extension; (a) accept both args+interactive; skip shellcheck if absent; ADR-0011 plain YAML stays; no cross-dev coord.
+- T28 #1: sequential dispatch → messages upsert with try/catch swallow — ACK.
+- T28 #2-#5: E.164 pass-through, single-config per hotel, HC-side dedup, T14 handles BSP retry — ACK all.
+- T27 #1-#6: `webhook_verify_token` MVP per Q-A-04 parked; sequential per-message upsert; inbound-only scope; env slug map per T19-fu; deterministic guest_id stub; no cross-dev coord — ACK all.
+
+**Shared binding conditions (all 3 — carry over T19-fu + T18-fu + PR #39 lessons)**:
+
+1. **Test files WAJIB alongside runtime** — do NOT ship code without tests (PR #39 attempt-1 REJECT lesson). Executor's PLAN test counts (T31 no-code + dry-run evidence; T28 ~25 tests; T27 ~24 tests) are correct scaffolding.
+2. **`.optional()` on new env** — T27 adds `WHATSAPP_WEBHOOK_HOTEL_SLUG_MAP: z.string().optional()` per Q-C-16 pattern.
+3. **AppError subclasses in route + adapter runtime** — `AuthError` / `ValidationError` / `NotFoundError` only. Q-C-15 tolerance covers only entrypoint boot-guards.
+4. **Zero `package.json` touches** — cumulative pnpm PO queue UNCHANGED at 5.
+5. **`.js` extension discipline** — 0 `.ts` imports.
+6. **Integration tests** wrap in `runOrSkip = process.env['DATABASE_URL'] ? describe : describe.skip`.
+7. **Test naming**: `should <expected> when <condition>`.
+8. **`make check`** PASS + coverage ≥ 90% on unit-testable files.
+9. **Drift scans clean** on new runtime files.
+10. **Test-first discipline (CRITICAL from PR #39 lesson)** — if bundling all 3 in one PR, ensure tests exist for ALL runtime files BEFORE opening PR. No attempt-1 REJECT loop.
+
+**T31-specific bindings**:
+- **#11 Dry-run evidence in PR body** (mirrors T30 binding #18): `scaffold-service.sh --dry-run` output for a synthetic service (e.g. `auth-staging`) piped through `kubectl apply --dry-run=client -f -` = SUCCESS.
+- **#12 Zero `src/` change**: `git diff main...HEAD -- src/` MUST be empty.
+- **#13 Refactor `deploy-integration-service.md` audit-neutral**: existing anchor links / cross-refs still resolve (verify manually).
+- **#14 Idempotency**: re-running `scaffold-service.sh` with same args + non-empty target dir → clean error unless `--force`.
+
+**T28-specific bindings**:
+- **#15 Passthrough adapter naming** — `.adapter.ts` (NOT `.stub-adapter.ts`) signals FINAL MVP shape per ADR-0009. Docstring: "Passthrough per ADR-0009 — HC is authoritative on quota + DND; DO NOT convert to real HC RPC in this repo."
+- **#16 Loud startup warn** — `msg: 'whatsapp_dispatch.startup', passthroughAdapters: 'FINAL_MVP_PER_ADR_0009', ratifyQs: 'Q-B-08,Q-B-09'` (per T19-fu binding #3 pattern; `FINAL_MVP` signal distinguishes from `STUB`).
+- **#17 Messages upsert atomicity** — sequential (dispatch first, then upsert); if upsert throws, structured error log + swallow; flag `messagesUpsertOK: false` on response OR just log — executor picks; response schema must accommodate.
+- **#18 zod XOR refinement** — exactly one of `body` / `template_ref` at request level; test asserts both-present + both-missing rejected.
+- **#19 Response schema `.parse()`** at integration happy path.
+- **#20 `WhatsappDispatchResponseSchema.parse(res.json())`** on 200.
+
+**T27-specific bindings**:
+- **#21 Guard chain order (CRITICAL)** — raw-body parse (T04) → tenant resolve (T05) → HMAC verify (T04) → persist → dispatch → 200 always on valid sig. Unknown slug → 404 **before** HMAC (anti-enum). Bad sig → 401 **before** persist. Dedicated integration test asserts each rejection point.
+- **#22 200-always-on-valid-sig (Meta-ack per §4.7)** — dispatch failure in async worker never blocks 200 (T19-fu binding #7 pattern).
+- **#23 Stub adapter naming** — `.stub.adapter.ts` (contrasts T28's `.adapter.ts` FINAL shape); docstring cites Q-B-04 / Q-B-05; per-invocation `warn` with PII last-4 on `wa_phone`.
+- **#24 PII floor CRITICAL** — `wa_phone` full E.164 NEVER in log record. `JSON.stringify(loggedRecord).not.toContain(FULL_PHONE)`; only `waPhoneLast4` present. Mirrors T19-fu / T20-fu binding #4 pattern.
+- **#25 Loud startup warn** — `msg: 'whatsapp_inbound.startup', hcAdapters: 'STUB', ratifyQs: 'Q-B-04,Q-B-05', hmacSecret: 'webhook_verify_token_per_Q-A-04'`.
+- **#26 Anti-enum test** — unknown slug 404 shape byte-identical to canonical `NotFoundError('hotel', slug)` (mirrors T18-fu / T29 #14 pattern).
+- **#27 Messages upsert reflected** — integration test verifies `conversations.upsertOnInbound` was invoked with correct `wamid` + `webhookEventId` + `body[:200]` preview.
+
+**Suggested implementation order** (matches executor's PLAN + dependency graph): T31 → T28 → T27. Or bundle all 3 per PR #37/#39 precedent — but **test-first discipline required** to avoid PR #39 attempt-1 loop.
+
+**Carry-over housekeeping** (non-blocking, add to first PR body):
+- PARENT §10 Slot A courtesy heads-up for T29 ADR-0010 schema touch (still owed from PR #39 VERDICT).
+
+Proceed on branches (or bundle). Post SUBMIT when: all bindings honored + tests exist alongside runtime + `make check` green + T31 `scaffold-service.sh --dry-run` evidence attached.
+
 ---
 
 ## 3. Slot C open questions (mirror to PARENT §3)
