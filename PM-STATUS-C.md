@@ -3525,6 +3525,177 @@ PM C follow-up actions (batched)
 
 ---
 
+### ASSIGNMENT T31 — claimed by exec-C (Satrio) at H24 (2026-07-09) 05:30
+- Branch: `feat/service-onboarding-template`
+- Routed from: PM-STATUS-PARENT.md §8 T31 detail block + ADR-0011 (distill). PO ruling 2026-07-08 (Version C). Doc + tooling only, zero `src/` change.
+- Deps status: PR #39 merged (T30 K3s kit is on `main`); T31 = distill T30 output into portable template. Independent of T27/T28.
+- Recommended sequence position: **first of the 3-task wave** — lightest risk (docs + shell script), unblocks Auth/HC/AI onboarding audit doc.
+
+#### PLAN T31 — exec-C (Satrio) at H24 (2026-07-09) 05:30
+
+**Scope recap**
+Ship reusable onboarding kit for future services (Auth, HC, AI) that will land on the same K3s cluster. Deliverable = 1 generic runbook + 1 runbook index update + 7 templated k8s manifests with `<TOKEN>` placeholders + 1 templated GH Actions workflow + 1 interactive `bash` scaffolder + refactor of `deploy-integration-service.md` as the worked example. Zero `src/` change.
+
+**Files to create**
+```
+docs/runbooks/service-onboarding-template.md         (generic step-by-step; VPS access → GHCR access → DNS → manifest apply → CI/CD → smoke)
+docs/runbooks/README.md                              (runbook index: bootstrap / deploy / CI / template)
+deploy/k8s/_template/namespace.yaml.template         (<SERVICE_NAME>, <NAMESPACE> tokens)
+deploy/k8s/_template/configmap.yaml.template         (<NAMESPACE>, <PORT>)
+deploy/k8s/_template/secret.template.yaml.template   (placeholder secrets shell)
+deploy/k8s/_template/deployment.yaml.template        (<SERVICE_NAME>, <NAMESPACE>, <IMAGE_API>, <IMAGE_WORKER>, <PORT>)
+deploy/k8s/_template/service.yaml.template           (<SERVICE_NAME>, <NAMESPACE>, <PORT>)
+deploy/k8s/_template/ingress.yaml.template           (<SERVICE_NAME>, <NAMESPACE>, <SUBDOMAIN>, <TLS_SECRET_NAME>)
+deploy/k8s/_template/job-migrate.yaml.template       (<SERVICE_NAME>, <NAMESPACE>)
+.github/workflows/deploy-staging.yml.template        (<SERVICE_NAME>, <IMAGE_API>, <IMAGE_WORKER>, <HEALTHCHECK_HOST>)
+scripts/scaffold-service.sh                          (interactive bash; sed-token replacement; idempotent; --dry-run supported)
+```
+
+**Files to modify**
+- `docs/runbooks/deploy-integration-service.md` — reframe intro paragraph as "worked example of the template" + link to `service-onboarding-template.md`. Keep concrete integration values so existing links / cross-refs still resolve. No behavior change; audit-neutral.
+
+**Files NOT touched**
+- `src/**` — drift scan `git diff main...HEAD -- src/` MUST be empty
+- `prisma/**`
+- `package.json` — zero new deps
+- `deploy/k8s/integration/**` — untouched (that is the concrete instance the template abstracts from)
+- Existing `.github/workflows/deploy-staging.yml` — untouched (the `.template` sibling is new)
+
+**Approach**
+1. **Template distillation** — read `deploy/k8s/integration/*.yaml` verbatim; substitute `integration-staging` → `<NAMESPACE>`, `integration-backend-api` → `<SERVICE_NAME>-api`, `3000` → `<PORT>`, `integration-staging.qooma.satrioputrowicaksono.my.id` → `<SUBDOMAIN>`, `ghcr.io/satriowicaksn/integration-backend-*` → `<IMAGE_API>`/`<IMAGE_WORKER>`. Save as `.yaml.template` siblings under `deploy/k8s/_template/`.
+2. **Runbook `service-onboarding-template.md`** — generic step-by-step: prerequisites (VPS ready per `vps-k3s-bootstrap.md`, GHCR token, DNS control), scaffolder invocation, per-token explanation, kubectl apply order (namespace → configmap → secret → migrate job → deployment → service → ingress), smoke test template, rollback template. Reference `deploy-integration-service.md` as worked example.
+3. **`scripts/scaffold-service.sh`** — POSIX-ish `bash` with `set -euo pipefail`. Args: `--service <name>`, `--subdomain <fqdn>`, `--port <int>`, `--namespace <ns>`, `--image-api <ghcr-ref>`, `--image-worker <ghcr-ref>`, `--out <dir>` (default `deploy/k8s/<service>/`), `--dry-run` (print to stdout without writing), `--force` (overwrite non-empty dir). Interactive mode when no args (`read -p`). Token replacement via `sed` with idempotency check (target dir empty OR `--force`). `--dry-run` pipes generated manifest through `kubectl apply --dry-run=client -f -` for validation.
+4. **README index** — grouped: **Bootstrap** (vps-k3s-bootstrap), **Deploy** (deploy-integration-service, service-onboarding-template), **CI/CD** (ci-cd-github-actions). Include quick-start command.
+5. **DoD demonstration** — run `scripts/scaffold-service.sh --service auth --subdomain auth-staging.qooma.satrioputrowicaksono.my.id --port 3001 --namespace auth-staging --image-api ghcr.io/satriowicaksn/auth-backend-api --image-worker ghcr.io/satriowicaksn/auth-backend-worker --dry-run --out /tmp/auth-scaffold` locally; paste `kubectl apply --dry-run=client` output in PR body as evidence.
+
+**GAPs / questions**
+
+- **GAP T31-#1 — Template file extension**. Options: (a) `.yaml.template` (my intent — keeps YAML syntax highlighting off since tokens break parse); (b) `.tmpl.yaml` (tokens still break parse; more surprising for tooling); (c) `.yaml` in `_template/` dir marker (breaks kustomize / kubectl parse against the template dir itself if someone runs `kubectl apply -f deploy/k8s/_template/`). **My intent**: (a). Non-blocker.
+- **GAP T31-#2 — Interactive prompts vs args-only**. Options: (a) accept both (my intent; args override, interactive fallback); (b) args-only (CI-friendly, less discoverable); (c) interactive-only (breaks scripting). **My intent**: (a). Non-blocker.
+- **GAP T31-#3 — shellcheck installed locally**. Not guaranteed; if absent, flag in PR body + skip that step. Non-blocker.
+- **GAP T31-#4 — Kustomize consideration**. Some teams prefer `kustomize` for templating over sed. ADR-0011 explicitly picks plain YAML — I stay in line. If PO wants a follow-up ADR to adopt kustomize later, that is a separate task. Non-blocker.
+- **GAP T31-#5 — Slot A / Slot B courtesy heads-up**. T31 does not modify their scope. No cross-dev coord entry needed. Non-blocker.
+
+---
+
+### ASSIGNMENT T28 — claimed by exec-C (Satrio) at H24 (2026-07-09) 05:40
+- Branch: `feat/wa-outbound-dispatch-rpc`
+- Routed from: PM-STATUS-PARENT.md §8 T28 detail block + ADR-0009 + spec §2.4 (WA outbound internal RPC).
+- Deps status: T13 outbound-dispatch service on main; T14 retry queue on main; T16 template relay on main; T26 wired `WhatsappConfigRepository` (reuse the `waConfigRepo` instance from `api-server.ts:174`); T29 `WhatsappConversationsService.upsertOnOutbound(...)` on main; T09 `internalRpcAuthGuard` on main.
+- Recommended sequence position: **second of the 3-task wave** — depends on T26 wiring share; T27 will depend on T28's messages-upsert path already present.
+
+#### PLAN T28 — exec-C (Satrio) at H24 (2026-07-09) 05:40
+
+**Scope recap**
+Land `POST /internal/wa/dispatch` behind `internalRpcAuthGuard` (T09; `X-Internal-Secret`, spec §4.11). HC caller sends `{ hotel_id, wa_config_id?, to_wa_phone, body? | template_ref? + template_variables?, correlation_id? }`. Route composes: (a) resolve WA config (arg or hotel's single row); (b) HC quota + DND checks via **passthrough adapters** (FINAL MVP per ADR-0009; NOT stubs); (c) T13 outbound-dispatch service to enqueue via T14 retry queue / T16 template relay; (d) messages upsert via T29 `conversations.upsertOnOutbound(...)`; (e) return `{ dispatch_id, status, external_message_id? }` wire.
+
+**Files to create**
+```
+src/modules/whatsapp/adapters/hc-quota-passthrough.adapter.ts       (implements HotelCoreQuotaPort — { allow: true } always; FINAL MVP per ADR-0009)
+src/modules/whatsapp/adapters/hc-dnd-passthrough.adapter.ts         (implements HotelCoreDndPort — { inDnd: false } always; FINAL MVP per ADR-0009)
+src/modules/whatsapp/whatsapp-dispatch.schema.ts                    (zod strict; XOR body/template_ref refinement)
+src/modules/whatsapp/whatsapp-dispatch.routes.ts                    (POST /internal/wa/dispatch; internalRpcAuthGuard)
+src/modules/whatsapp/__tests__/whatsapp-dispatch.schema.test.ts               (~6 unit)
+src/modules/whatsapp/__tests__/whatsapp-dispatch.routes.test.ts               (~7 unit — fastify.inject mocked service)
+src/modules/whatsapp/__tests__/whatsapp-dispatch.routes.integration.test.ts   (~8 integration — runOrSkip)
+src/modules/whatsapp/__tests__/hc-quota-passthrough.adapter.test.ts           (~2 unit)
+src/modules/whatsapp/__tests__/hc-dnd-passthrough.adapter.test.ts             (~2 unit)
+```
+
+**Files to modify**
+- `src/modules/whatsapp/whatsapp-outbound-dispatch.service.ts` — after outbound-dispatch-queue insert, call `conversationsService.upsertOnOutbound({ ..., status: 'pending', dispatchId })`. If sequential upsert must NOT block dispatch, wrap in `try/catch` with structured error log + flag `messagesUpsertOK: false` on response — I will flag design decision at ACK time.
+- `src/entrypoints/api-server.ts` — instantiate passthrough adapters, wire `WhatsappOutboundDispatchService` (compose with existing `waConfigRepo` + `WhatsappConversationsService` from T29), register `whatsappDispatchRoutes` behind `internalRpcAuthGuard`. Add loud startup warn: `msg: 'whatsapp_dispatch.startup', passthroughAdapters: 'FINAL_MVP_PER_ADR_0009', ratifyQs: 'Q-B-08,Q-B-09'`.
+- `src/modules/whatsapp/index.ts` — barrel exports for new types + schema.
+
+**Files NOT touched**
+- T13 primitive core (service internals untouched apart from the messages-upsert insertion after enqueue)
+- T14 retry-queue primitive
+- T16 template-relay primitive
+- T29 conversations service (called, not modified)
+- `prisma/schema.prisma` — no schema change (`Message.dispatchId` FK already exists per T29)
+- `.env.example` — no new env
+- `package.json` — zero new deps
+
+**Approach**
+1. **Passthrough adapters** — implement HC port interfaces from T13 primitive; return constant. Docstring header: "**Passthrough per ADR-0009 — HC is authoritative on quota + DND; DO NOT convert to real HC RPC in this repo.**" Debug-log noop with `correlationId`. **Filename ends `.adapter.ts` NOT `.stub-adapter.ts`** — signals FINAL MVP shape, not throw-away.
+2. **Wire schema** — `.strict()`; refinement enforces exactly one of `body` / `template_ref`; `to_wa_phone` E.164 regex; `hotel_id` + `wa_config_id?` uuid; `correlation_id?` string.
+3. **Route** — safeParse → resolve config: if `wa_config_id` present use it, else `waConfigRepo.findByHotelId(hotel_id)`; missing → `NotFoundError('whatsapp_config', hotelId)`. Call outbound-dispatch service. Map to wire: `{ dispatch_id, status, external_message_id }`.
+4. **Messages upsert** — inside dispatch service, after successful queue insert: call `conversationsService.upsertOnOutbound({ hotelId, waConfigId, guestWaPhone: to_wa_phone, body, templateRef, templateVariables, externalMessageId: null, dispatchId, status: 'pending', sentAt: null })`. Per T29 contract: sets `lastMessagePreview = body[:200]`, `lastMessageAt = now`, does NOT bump `unreadCount`.
+5. **Loud startup warn** — `passthroughAdapters: 'FINAL_MVP_PER_ADR_0009'` signals ops these are NOT stubs.
+6. **Tests** — schema (XOR body/template, strict, uuid, E.164); routes unit (401 no-secret, 401 wrong-secret, 400 zod, 404 missing config, 200 text-send, 200 template-send, guard-order); routes integration (runOrSkip; verifies row created in `outbound_dispatch_queue` + `messages` row inserted with correct `dispatchId` FK); passthrough adapters (constant return + debug log + never throws).
+
+**GAPs / questions**
+
+- **GAP T28-#1 — Transactional atomicity of dispatch-queue insert + messages upsert**. Options: (a) sequential (my intent — dispatch first, then messages; if messages fails log + swallow, dispatch remains authoritative); (b) `db.$transaction` wrap. Concern with (b): T29 upsert already opens its own tx internally; nested tx may be fragile. **My intent**: (a) with structured error log on messages failure. Flag at ACK for concurrence.
+- **GAP T28-#2 — `guest_wa_phone` normalization**. Wire accepts E.164; T29 conversations upsert stores as VARCHAR(20). No normalization difference. Non-blocker.
+- **GAP T28-#3 — `wa_config_id` when hotel has multiple**. Current schema uniquely keys `WaConfig` by `hotelId` (PK) — only one config per hotel. So `wa_config_id` arg is defensive / future-proofing. When absent, `findByHotelId` returns the single row. Non-blocker.
+- **GAP T28-#4 — Idempotency-key**. HC dedups on its side per ADR-0009. Integration does NOT dedupe — same client sending same body twice → two dispatch rows. Non-blocker for MVP; flag as Q-C-XX if PM disagrees.
+- **GAP T28-#5 — HC caller error contract**. On upstream BSP failure → T14 retry queue handles; route returns `{ dispatch_id, status: 'pending' }` even if BSP call fails immediately. HC polls via T15 delivery receipts. Non-blocker.
+
+---
+
+### ASSIGNMENT T27 — claimed by exec-C (Satrio) at H24 (2026-07-09) 05:50
+- Branch: `feat/wa-inbound-webhook`
+- Routed from: PM-STATUS-PARENT.md §8 T27 detail block + ADR-0010 + spec §2.3 + §3.1 inbound. Q-A-04 parked (webhook_verify_token as HMAC secret MVP per §4.2).
+- Deps status: T04 HMAC plugin on main; T05 tenant resolver on main; T12 ingest service on main; T15 delivery receipts on main; T29 `WhatsappConversationsService.upsertOnInbound(...)` on main; T14 retry queue on main.
+- Recommended sequence position: **third of the 3-task wave** — heaviest (mirrors T19-fu inbound scale). Depends on T29 upsertOnInbound + T28 passthrough-adapter precedent for stub-adapter shape.
+
+#### PLAN T27 — exec-C (Satrio) at H24 (2026-07-09) 05:50
+
+**Scope recap**
+Land `POST /webhook/whatsapp/:hotel_slug` (Meta-facing WA Business webhook). Composes T04 HMAC guard + T05 tenant slug resolver + T12 ingest service + T15 delivery receipts + T29 conversations upsert. HC + AI stub adapters follow the T19-fu inbound pattern verbatim (Q-B-04 + Q-B-05 parked). BullMQ processor runs async dispatch after 200 sync ACK per spec §4.7. Loud startup warn `hcAdapters: 'STUB'` for ops signal.
+
+**Files to create**
+```
+src/modules/whatsapp/whatsapp-webhook.schema.ts                          (zod strict; WA Business Cloud API v18+ envelope; deep leaves unknown)
+src/modules/whatsapp/whatsapp-webhook.routes.ts                          (POST /webhook/whatsapp/:hotel_slug)
+src/modules/whatsapp/whatsapp-inbound.jobs.ts                            (BullMQ processor: ingest → conversations upsert → HC guest upsert → AI notify)
+src/modules/whatsapp/adapters/hc-guest-upsert.stub-adapter.ts            (implements HotelCoreGuestUpsertPort; STUB per Q-B-04; per-invocation warn; PII last-4)
+src/modules/whatsapp/adapters/ai-inbound.stub-adapter.ts                 (implements AiInboundMessagePort; STUB per Q-B-05; per-invocation warn; no-op)
+src/modules/whatsapp/__tests__/whatsapp-webhook.schema.test.ts           (~4 unit)
+src/modules/whatsapp/__tests__/whatsapp-webhook.routes.test.ts           (~7 unit — guard order + dispatch throw + PII)
+src/modules/whatsapp/__tests__/whatsapp-webhook.routes.integration.test.ts (~6 integration — runOrSkip; anti-enum, HMAC verify, conversations upsert reflected)
+src/modules/whatsapp/__tests__/whatsapp-inbound.jobs.test.ts             (~3 unit — composition, error bubble, PII floor)
+src/modules/whatsapp/__tests__/hc-guest-upsert.stub-adapter.test.ts      (~2 unit)
+src/modules/whatsapp/__tests__/ai-inbound.stub-adapter.test.ts           (~2 unit)
+```
+
+**Files to modify**
+- `src/entrypoints/api-server.ts` — wire ingest service + stub adapters + register webhook routes with `verifyWebhookSignature({provider:'whatsapp', resolveSecret})`. Slug resolver uses env `WHATSAPP_WEBHOOK_HOTEL_SLUG_MAP`. Loud startup warn `msg: 'whatsapp_inbound.startup', hcAdapters: 'STUB', ratifyQs: 'Q-B-04,Q-B-05', hmacSecret: 'webhook_verify_token_per_Q-A-04'`.
+- `src/entrypoints/worker.ts` — register `whatsapp-inbound` Bull processor (mirrors T21-fu / T24-fu-B cron pattern).
+- `src/core/config/env.ts` — add `WHATSAPP_WEBHOOK_HOTEL_SLUG_MAP: z.string().optional()` (Q-C-16 discipline).
+- `src/modules/whatsapp/index.ts` — barrel exports.
+
+**Files NOT touched**
+- T04 HMAC plugin (used, not modified)
+- T05 tenant resolver plugin (used, not modified)
+- T12 ingest service primitive (called, not modified)
+- T15 delivery receipts primitive (untouched — separate webhook path for `messages.status`)
+- T29 conversations service (called, not modified)
+- `prisma/schema.prisma` — no schema change
+- `package.json` — zero new deps
+
+**Approach**
+1. **Wire schema** — Meta WA Business webhook envelope: `entry[].changes[].value.messages[]` + `entry[].changes[].value.statuses[]`. Zod `.strict()` at outer level; deep leaves `z.unknown()` to avoid over-constraining Meta's evolving payload. Refinement rejects payloads with neither `messages` nor `statuses`.
+2. **Route** — `POST /webhook/whatsapp/:hotel_slug`:
+   - `preHandler` chain (ORDER-CRITICAL per T19-fu bindings): raw-body parse (T04) → tenant resolve from slug (T05; unknown slug → 404 **before** HMAC — anti-enum) → HMAC verify with `webhook_verify_token` as secret (bad sig → 401 **before** persist).
+   - Handler: `webhookEventsRepo.persist({ provider: 'whatsapp', hotelId, externalId, payload })` → enqueue Bull job `whatsapp_inbound.process_event` with `{ webhookEventId }` → return `200 { ok: true }` synchronously. Dispatch failures in async worker never block the 200 (T19-fu binding #7).
+3. **Stub adapters** — `-stub.adapter.ts` filename; MVP header docstring citing Q-B-04 / Q-B-05; per-invocation `logger.warn({msg, hcAdapters:'STUB', waPhoneLast4})`. PII: only last-4 of `wa_phone` in log (T19-fu binding #1/#2 pattern verbatim).
+4. **BullMQ job** — processor loads `webhook_events` row by id, iterates `messages[]`: for each, call `conversationsService.upsertOnInbound({ hotelId, waConfigId, guestWaPhone, body, externalMessageId: wamid, webhookEventId, receivedAt })` → then `hcGuestUpsert.upsert(...)` → then `aiInbound.notify(...)`. Any adapter error bubbles up → Bull retry per T14 retry policy.
+5. **Loud startup warn** — signals ops the deployment carries STUB HC/AI adapters. Mirrors T19-fu telegram_inbound.startup pattern.
+6. **Tests** — schema (envelope shape); routes unit (guard order tenant → sig → persist → dispatch; 200 { ok } even when dispatch throws; 400 zod; 404 unknown slug; 401 bad sig; PII floor — wa_phone last-4 only); adapters (return + PII + warn shape); jobs (composition + error bubble + PII floor); routes integration (401 no-sig / 401 wrong-sig / 404 unknown slug / 400 zod / 200 happy + webhook_events row + conversations upsert reflected with `unreadCount = 1` + preview[:200] + correlation-id echo).
+
+**GAPs / questions**
+
+- **GAP T27-#1 — HMAC secret shape**. Meta signs webhook with app-secret HMAC-SHA256 by default; per MVP §4.2 we substitute `webhook_verify_token` as the shared secret (documented per Q-A-04 parked). Options: (a) accept MVP shape now (my intent); (b) wait for Q-A-04 resolution before shipping. **My intent**: (a) with docstring citing Q-A-04. Non-blocker.
+- **GAP T27-#2 — Sequential vs parallel per-message upsert**. A Meta batch may include N messages. Options: (a) sequential (my intent — predictable ordering, cleaner error handling); (b) `Promise.all` (parallelism gain vs unordered log lines + potential FK contention). **My intent**: (a). Non-blocker.
+- **GAP T27-#3 — Delivery-receipts path in T27**. Spec §3.1 covers inbound messages; §3.3 covers delivery receipts. Options: (a) T27 scope inbound-only (my intent — smaller PR, T15 primitive already handles status separately); (b) bundle delivery receipts route into T27. **My intent**: (a). Non-blocker.
+- **GAP T27-#4 — `WHATSAPP_WEBHOOK_HOTEL_SLUG_MAP` shape**. Follow T19-fu `TELEGRAM_WEBHOOK_HOTEL_SLUG_MAP` verbatim: comma-separated `slug:uuid` entries, parsed at startup. Non-blocker.
+- **GAP T27-#5 — Guest-upsert idempotency**. Stub returns `uuidv5(hotelId + waPhoneLast4)` — deterministic. Real HC RPC will return the persisted guest id later. Non-blocker (Q-B-04 parked).
+- **GAP T27-#6 — Cross-dev coord**. T27 does not touch schema / Slot A / Slot B scope. No courtesy heads-up needed. Non-blocker.
+
+---
+
 ## 3. Slot C open questions (mirror to PARENT §3)
 
 > PM C catat di sini ketika executor C raise `GAP` atau `BLOCKED`. Setelah resolve atau eskalasi ke Parent PM, update status. Parent PM consolidate ke `PM-STATUS-PARENT.md §3`.
