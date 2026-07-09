@@ -2,6 +2,10 @@
 
 Operational documentation for the Integration service and, via the onboarding template, any future Qooma service on the shared K3s cluster.
 
+## Local development
+
+- [**`local-dev.md`**](./local-dev.md) — clone → install → env config → Docker deps → run API/worker → connect DB via GUI → smoke-test 3 MVP endpoints (WA connect / get / send). Covers `ENCRYPTION_KEY` 64-char requirement + BSP env + JWT helper.
+
 ## Bootstrap (one-time per VPS)
 
 - [**`vps-k3s-bootstrap.md`**](./vps-k3s-bootstrap.md) — SSH hardening, K3s install, Traefik + cert-manager, Postgres 15 + Redis 7 helm charts, `deploy` user + kubeconfig.
