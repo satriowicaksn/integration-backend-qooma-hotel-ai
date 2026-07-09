@@ -325,7 +325,11 @@ function requireHotelIdForSecret(candidate: string | undefined): string {
  *  adapter. Kept inline rather than routed through `core/http/HttpClient`
  *  because the wrapper is 4 lines and `HttpClient` is a TODO stub. */
 function createBspHttpPoster(): HttpPoster {
-  const instance = axios.create({ timeout: 10_000 });
+  // `validateStatus: () => true` — accept ANY status without throwing so the
+  // adapter's `if (res.status < 200 || res.status >= 300)` branch runs and
+  // surfaces Meta's real error body (e.g. `{error:{message,type,code,...}}`)
+  // instead of losing it to the axios AxiosError.message ("Request failed…").
+  const instance = axios.create({ timeout: 10_000, validateStatus: () => true });
   return {
     async post<T>(
       url: string,
