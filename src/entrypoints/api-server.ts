@@ -40,8 +40,14 @@ import { DepartmentTelegramWriteStubAdapter } from '@modules/telegram-dept-routi
 import { telegramDeptRoutingRoutes } from '@modules/telegram-dept-routing/telegram-dept-routing.routes.js';
 import { TelegramDeptRoutingService } from '@modules/telegram-dept-routing/telegram-dept-routing.service.js';
 import { WhatsappConfigRepository } from '@modules/whatsapp/whatsapp-config.repository.js';
+import { whatsappConfigRoutes } from '@modules/whatsapp/whatsapp-config.routes.js';
+import { WhatsappConfigService } from '@modules/whatsapp/whatsapp-config.service.js';
+import { WhatsappConversationsRepository } from '@modules/whatsapp/whatsapp-conversations.repository.js';
+import { whatsappConversationsRoutes } from '@modules/whatsapp/whatsapp-conversations.routes.js';
+import { WhatsappConversationsService } from '@modules/whatsapp/whatsapp-conversations.service.js';
 import { registerErrorHandler } from '@plugins/error-handler.plugin.js';
 import { registerWebhookRawBody, verifyWebhookSignature } from '@plugins/hmac-validator.plugin.js';
+import { internalRpcAuthGuard } from '@plugins/internal-rpc-auth.plugin.js';
 import { jwtAuthGuard, requireRole } from '@plugins/jwt-auth.plugin.js';
 import { createSlugResolver, resolveTenantFromSlug } from '@plugins/tenant-resolver.plugin.js';
 
@@ -179,6 +185,30 @@ export async function buildServer(): Promise<FastifyInstance> {
     ioAdapters: 'STUB',
     ratifyQs: 'Q-C-10',
     poPackages: 'qrcode,@aws-sdk/client-s3',
+  });
+
+  // T26 — WA config CRUD route landing (spec §2.1 row 28, ADR-0009).
+  // Reuses `waConfigRepo` already instantiated by T22-fu wiring above.
+  const waConfigService = new WhatsappConfigService(waConfigRepo, logger);
+  await app.register(whatsappConfigRoutes, {
+    service: waConfigService,
+    guards: gmAdminGuards,
+  });
+
+  // T29 — WA conversation + message internal RPC (ADR-0010).
+  // Behind `internalRpcAuthGuard` (T09; `X-Internal-Secret`), NOT JWT —
+  // HC calls these on behalf of CRM per ADR-0009 boundary.
+  if (config.INTERNAL_RPC_SECRET === undefined) {
+    throw new Error(
+      'INTERNAL_RPC_SECRET is required to register the WA conversations internal RPC (spec §4.11).',
+    );
+  }
+  const conversationsRepo = new WhatsappConversationsRepository(db);
+  const conversationsService = new WhatsappConversationsService(conversationsRepo, logger);
+  await app.register(whatsappConversationsRoutes, {
+    service: conversationsService,
+    repository: conversationsRepo,
+    guards: [internalRpcAuthGuard({ secret: config.INTERNAL_RPC_SECRET })],
   });
 
   return app;

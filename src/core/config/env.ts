@@ -39,6 +39,11 @@ const EnvSchema = z.object({
   JWT_REFRESH_TTL: z.string().default('30d'),
   ENCRYPTION_KEY: z.string().length(64),
   ENCRYPTION_KEY_VERSION: z.string().default('v1'),
+  // Internal RPC (service-to-service) shared secret. Consumed by
+  // `internalRpcAuthGuard`. Optional at load-time so unrelated unit
+  // tests can boot; `api-server.ts` throws at wiring time when an RPC
+  // route is registered without this set.
+  INTERNAL_RPC_SECRET: z.string().min(32).optional(),
   // Dev/MVP hotel-slug → hotel_id map for the Telegram inbound webhook
   // (`POST /webhook/telegram/:hotel_slug`). JSON blob `{ "slug": "<uuid>", ... }`.
   // Empty → every slug 404s. A proper Auth-service RPC lookup replaces

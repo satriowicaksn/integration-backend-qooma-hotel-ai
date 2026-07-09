@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: integration-config
+  namespace: integration-staging
+data:
+  NODE_ENV: 'staging'
+  LOG_LEVEL: 'info'
+  TZ: 'UTC'
+  API_HOST: '0.0.0.0'
+  API_PORT: '3000'
+  RATE_LIMIT_GLOBAL_PER_MIN: '100'
+  RATE_LIMIT_WEBHOOK_PER_MIN: '300'
+  WORKER_CONCURRENCY_DEFAULT: '5'
+  # Followup runtime toggles
+  OTA_POLL_INTERVAL_MS: '60000'
+  HEALTH_PROBE_INTERVAL_MS: '60000'
+  # Health probe hotel list is empty in staging until a hotel is seeded.
+  HEALTH_PROBE_HOTEL_LIST: ''
+  # Telegram webhook + dept routing stubs use empty maps in staging.
+  TELEGRAM_WEBHOOK_HOTEL_SLUG_MAP: ''
+  TELEGRAM_DEPT_ROUTING_MAP: ''
+  # Sentry — leave blank in staging to disable.
+  SENTRY_DSN: ''
+  SENTRY_TRACES_SAMPLE_RATE: '0.1'
+  SENTRY_ENV: 'staging'
+  # JWT TTLs mirror repo defaults.
+  JWT_ACCESS_TTL: '8h'
+  JWT_REFRESH_TTL: '30d'
+  ENCRYPTION_KEY_VERSION: 'v1'
+  TELEGRAM_API_BASE: 'https://api.telegram.org'

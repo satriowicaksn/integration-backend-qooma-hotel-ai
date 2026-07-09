@@ -51,6 +51,10 @@ COPY --from=build --chown=app:app /app/prisma ./prisma
 COPY --chown=app:app package.json ./
 USER app
 EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD wget --no-verbose --spider --tries=1 http://localhost:3000/healthz || exit 1
+LABEL org.opencontainers.image.source="https://github.com/satriowicaksn/integration-backend-qooma-hotel-ai"
+LABEL org.opencontainers.image.title="qooma-integration-backend-api"
 ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["node", "dist/entrypoints/api.js"]
 

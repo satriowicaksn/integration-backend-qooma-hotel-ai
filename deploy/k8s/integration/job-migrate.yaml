@@ -1,0 +1,38 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: integration-migrate
+  namespace: integration-staging
+spec:
+  # Preserve completed pod logs for 24 h.
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: integration-migrate
+    spec:
+      restartPolicy: OnFailure
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: migrate
+          image: ghcr.io/satriowicaksn/integration-backend-api:latest
+          imagePullPolicy: Always
+          # Prisma bundles CLI as a dev-dep; the runtime image ships
+          # `dist/` + `node_modules/@prisma/client`. Use `prisma migrate
+          # deploy` (production-safe: no --dev prompts).
+          command: ['node', 'node_modules/prisma/build/index.js']
+          args: ['migrate', 'deploy']
+          envFrom:
+            - configMapRef:
+                name: integration-config
+            - secretRef:
+                name: integration-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 250m
+              memory: 384Mi

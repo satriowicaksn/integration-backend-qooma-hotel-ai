@@ -79,3 +79,8 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 # --- AI assistant local state ---
 .claude/local.json
 .claude/session/
+
+# --- T30 staging deploy: keep real secrets out of git ---
+deploy/k8s/**/secret.staging.yaml
+deploy/k8s/**/secret.prod.yaml
+deploy/k8s/**/*.secret.yaml
