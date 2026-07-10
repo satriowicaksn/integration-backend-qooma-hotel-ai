@@ -1,14 +1,14 @@
 # Deploy Integration service to staging (T30 / ADR-0011)
 
-> **Worked example of the portable onboarding template.** The generic version — usable for Auth, Hotel Core, AI, or any future Qooma service on the same K3s cluster — is in [`service-onboarding-template.md`](./service-onboarding-template.md). This document is the concrete instance for the Integration service (namespace `integration-staging`, subdomain `integration-staging.qooma.satrioputrowicaksono.my.id`, port `3000`). Read this to see what a filled-in scaffold looks like; use the template runbook when onboarding a new service.
+> **Worked example of the portable onboarding template.** The generic version — usable for Auth, Hotel Core, AI, or any future Qooma service on the same K3s cluster — is in [`service-onboarding-template.md`](./service-onboarding-template.md). This document is the concrete instance for the Integration service (namespace `integration-staging`, subdomain `integration-staging.sharedisini.com`, port `3000`). Read this to see what a filled-in scaffold looks like; use the template runbook when onboarding a new service.
 
 **Prerequisites**: `vps-k3s-bootstrap.md` completed. Postgres + Redis + Traefik + cert-manager healthy.
 
-**Outcome**: Integration service reachable at `https://integration-staging.qooma.satrioputrowicaksono.my.id/healthz` with valid Let's Encrypt TLS.
+**Outcome**: Integration service reachable at `https://integration-staging.sharedisini.com/healthz` with valid Let's Encrypt TLS.
 
 ## 1. DNS A record (JagoanHosting panel)
 
-At JagoanHosting DNS management for `qooma.satrioputrowicaksono.my.id`:
+At JagoanHosting DNS management for `sharedisini.com`:
 
 - Record type: **A**
 - Host: `integration-staging`
@@ -18,7 +18,7 @@ At JagoanHosting DNS management for `qooma.satrioputrowicaksono.my.id`:
 Verify propagation:
 
 ```bash
-dig +short integration-staging.qooma.satrioputrowicaksono.my.id
+dig +short integration-staging.sharedisini.com
 # Expect: 91.99.194.116
 ```
 
@@ -43,8 +43,8 @@ INTERNAL_RPC_SECRET=$(openssl rand -base64 48)
 #   DATABASE_URL = postgresql://postgres:<postgres-pw>@postgres-postgresql.data.svc.cluster.local:5432/integration?schema=public
 #   REDIS_URL    = redis://:<redis-pw>@redis-master.data.svc.cluster.local:6379
 #   JWT_ACCESS_SECRET / JWT_REFRESH_SECRET / ENCRYPTION_KEY / INTERNAL_RPC_SECRET
-#   CORS_ORIGIN  = https://crm-staging.qooma.satrioputrowicaksono.my.id (or wherever the FE lands)
-#   API_BASE_URL = https://integration-staging.qooma.satrioputrowicaksono.my.id
+#   CORS_ORIGIN  = https://frontend-qooma-hotel-ai.vercel.app (or wherever the FE lands)
+#   API_BASE_URL = https://integration-staging.sharedisini.com
 ```
 
 Create the database (one-time):
@@ -112,10 +112,10 @@ kubectl -n integration-staging rollout status deployment/integration-worker --ti
 # Wait ~1 minute for cert-manager to issue the cert.
 kubectl -n integration-staging get certificate
 
-curl -v https://integration-staging.qooma.satrioputrowicaksono.my.id/healthz
+curl -v https://integration-staging.sharedisini.com/healthz
 # Expect: 200 {"status":"ok"} with valid Let's Encrypt cert.
 
-openssl s_client -connect integration-staging.qooma.satrioputrowicaksono.my.id:443 -servername integration-staging.qooma.satrioputrowicaksono.my.id -showcerts </dev/null 2>/dev/null | openssl x509 -noout -issuer -dates
+openssl s_client -connect integration-staging.sharedisini.com:443 -servername integration-staging.sharedisini.com -showcerts </dev/null 2>/dev/null | openssl x509 -noout -issuer -dates
 # Expect: issuer=C = US, O = Let's Encrypt, CN = R11 (or similar) + notAfter within 90 days
 ```
 

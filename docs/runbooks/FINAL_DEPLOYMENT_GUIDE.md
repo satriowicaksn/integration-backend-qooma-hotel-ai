@@ -1,6 +1,6 @@
 # FINAL DEPLOYMENT GUIDE
 
-Master index — urutan runbook yang harus diikuti untuk deploy Integration service dari zero sampai live di `https://integration-staging.qooma.satrioputrowicaksono.my.id`.
+Master index — urutan runbook yang harus diikuti untuk deploy Integration service dari zero sampai live di `https://integration-staging.sharedisini.com`.
 
 **Target VPS**: Hetzner `91.99.194.116` (Ubuntu 26.04, 8 GB).
 **Prasyarat operator**: SSH access ke VPS (root via password atau key), `kubectl` + `helm` + `gh` CLI di workstation, akses DNS panel JagoanHosting.

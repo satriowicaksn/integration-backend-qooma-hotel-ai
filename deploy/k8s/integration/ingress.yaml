@@ -11,10 +11,10 @@ spec:
   ingressClassName: traefik
   tls:
     - hosts:
-        - integration-staging.qooma.satrioputrowicaksono.my.id
+        - integration-staging.sharedisini.com
       secretName: integration-staging-tls
   rules:
-    - host: integration-staging.qooma.satrioputrowicaksono.my.id
+    - host: integration-staging.sharedisini.com
       http:
         paths:
           - path: /
