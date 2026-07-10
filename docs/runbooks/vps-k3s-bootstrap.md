@@ -88,6 +88,18 @@ kubectl cluster-info   # verifikasi dari workstation
 
 ## 3. Install Helm + Traefik + cert-manager
 
+> ⚠️ **PENTING kalau jalan di VPS (as root)**: `kubectl` bawaan K3s otomatis point ke
+> `/etc/rancher/k3s/k3s.yaml`, tapi `helm` **tidak** — helm cari `~/.kube/config` atau env
+> `KUBECONFIG`. Kalau tidak di-set, semua `helm install` gagal dengan
+> `Kubernetes cluster unreachable: Get "http://localhost:8080/version"`.
+> Set dulu (permanen di `.bashrc`):
+>
+> ```bash
+> export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+> echo 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml' >> ~/.bashrc
+> helm list -A   # verifikasi helm bisa reach cluster
+> ```
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
