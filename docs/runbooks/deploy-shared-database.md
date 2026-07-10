@@ -25,6 +25,11 @@ kubectl create namespace data
 
 ### A.2 Install Postgres 15 (Bitnami helm chart)
 
+> ⚠️ **Bitnami image registry note (2024-2025)**: `docker.io/bitnami/*` sekarang hanya berisi
+> tag untuk paid Tanzu subscribers. Tag public lama (yang direferensi chart free-tier ini) sudah
+> dihapus, install akan gagal dengan `ImagePullBackOff` + `manifest unknown`. Free-tier images
+> di-mirror ke `docker.io/bitnamilegacy/*` — override registry via `--set image.repository`.
+
 ```bash
 helm repo add bitnami https://charts.bitnami.com/bitnami
 helm repo update
@@ -35,15 +40,18 @@ echo "POSTGRES password (SIMPAN SEKARANG): $PG_PASSWORD"
 
 helm install postgres bitnami/postgresql -n data \
   --version 15.5.0 \
+  --set image.registry=docker.io \
+  --set image.repository=bitnamilegacy/postgresql \
+  --set image.tag=16.3.0-debian-12-r10 \
   --set auth.postgresPassword="$PG_PASSWORD" \
   --set primary.persistence.storageClass=local-path \
   --set primary.persistence.size=10Gi \
   --set primary.resources.requests.memory=512Mi \
   --set primary.resources.limits.memory=1Gi
 
-# Verifikasi
+# Verifikasi — Postgres = StatefulSet, exec target pod langsung (bukan deploy/)
 kubectl -n data rollout status statefulset/postgres-postgresql --timeout=180s
-kubectl -n data exec deploy/postgres-postgresql -- \
+kubectl -n data exec postgres-postgresql-0 -- env PGPASSWORD="$PG_PASSWORD" \
   psql -U postgres -c 'SELECT version();'
 ```
 
@@ -56,20 +64,25 @@ kubectl -n data get secret postgres-postgresql \
 
 ### A.3 Install Redis 7 (Bitnami helm chart, standalone)
 
+Sama dengan Postgres — override registry ke `bitnamilegacy` (lihat note di A.2).
+
 ```bash
 REDIS_PASSWORD="$(openssl rand -base64 24)"
 echo "REDIS password (SIMPAN SEKARANG): $REDIS_PASSWORD"
 
 helm install redis bitnami/redis -n data \
   --version 19.5.0 \
+  --set image.registry=docker.io \
+  --set image.repository=bitnamilegacy/redis \
+  --set image.tag=7.2.5-debian-12-r0 \
   --set architecture=standalone \
   --set auth.password="$REDIS_PASSWORD" \
   --set master.resources.requests.memory=256Mi \
   --set master.resources.limits.memory=512Mi
 
+# Verifikasi — Redis master = StatefulSet, exec target pod langsung
 kubectl -n data rollout status statefulset/redis-master --timeout=180s
-kubectl -n data exec deploy/redis-master -- \
-  redis-cli -a "$REDIS_PASSWORD" PING
+kubectl -n data exec redis-master-0 -- redis-cli -a "$REDIS_PASSWORD" PING
 # Expect: PONG
 ```
 
@@ -110,12 +123,19 @@ Tokens yang perlu Anda pilih:
 
 ### B.1 Buat database Postgres
 
+Postgres di chart Bitnami adalah **StatefulSet** — target pod langsung (`postgres-postgresql-0`)
+atau resource `sts/postgres-postgresql`, **bukan** `deploy/`. `PGPASSWORD` env wajib supaya
+`createdb` / `psql` tidak prompt password.
+
 ```bash
-kubectl -n data exec deploy/postgres-postgresql -- \
+PG_PASSWORD=$(kubectl -n data get secret postgres-postgresql \
+  -o jsonpath='{.data.postgres-password}' | base64 -d)
+
+kubectl -n data exec postgres-postgresql-0 -- env PGPASSWORD="$PG_PASSWORD" \
   createdb -U postgres <SERVICE_NAME>
 
 # Verifikasi
-kubectl -n data exec deploy/postgres-postgresql -- \
+kubectl -n data exec postgres-postgresql-0 -- env PGPASSWORD="$PG_PASSWORD" \
   psql -U postgres -lqt | cut -d '|' -f1 | grep -w <SERVICE_NAME>
 ```
 
@@ -175,15 +195,32 @@ kubectl -n <NAMESPACE> logs deploy/<SERVICE_NAME>-api | grep -i 'prisma\|redis'
 
 ### C.1 Konek dari workstation (via port-forward)
 
+Kalau punya multi-cluster, export dulu KUBECONFIG dedicated (lihat
+`vps-k3s-bootstrap.md` §2):
+
 ```bash
-kubectl -n data port-forward svc/postgres-postgresql 5432:5432
-# Di terminal lain: psql, DBeaver, TablePlus → localhost:5432, user postgres, pw dari A.2.
+export KUBECONFIG=~/.kube/config-qooma-vps
+
+# Port-forward Postgres + Redis di background (tetap jalan sampai terminal ditutup)
+kubectl -n data port-forward svc/postgres-postgresql 5432:5432 > /tmp/pg-pf.log 2>&1 &
+kubectl -n data port-forward svc/redis-master 6379:6379 > /tmp/redis-pf.log 2>&1 &
+
+# Cek jalan
+jobs
+lsof -i :5432
+lsof -i :6379
+
+# Di GUI (DBeaver / TablePlus / psql) → host: 127.0.0.1, port 5432/6379,
+# user postgres, password dari A.2 recovery command.
 ```
 
 ### C.2 Manual backup (ad-hoc, sebelum migration besar)
 
 ```bash
-kubectl -n data exec deploy/postgres-postgresql -- \
+PG_PASSWORD=$(kubectl -n data get secret postgres-postgresql \
+  -o jsonpath='{.data.postgres-password}' | base64 -d)
+
+kubectl -n data exec postgres-postgresql-0 -- env PGPASSWORD="$PG_PASSWORD" \
   pg_dump -U postgres <SERVICE_NAME> | gzip > <SERVICE_NAME>-$(date +%F).sql.gz
 ```
 
@@ -191,7 +228,7 @@ Restore:
 
 ```bash
 gunzip -c <SERVICE_NAME>-YYYY-MM-DD.sql.gz | \
-  kubectl -n data exec -i deploy/postgres-postgresql -- \
+  kubectl -n data exec -i postgres-postgresql-0 -- env PGPASSWORD="$PG_PASSWORD" \
   psql -U postgres -d <SERVICE_NAME>
 ```
 
@@ -201,9 +238,12 @@ saat traffic sudah production-grade.
 ### C.3 Reset database service (destruktif — hanya staging)
 
 ```bash
-kubectl -n data exec deploy/postgres-postgresql -- \
+PG_PASSWORD=$(kubectl -n data get secret postgres-postgresql \
+  -o jsonpath='{.data.postgres-password}' | base64 -d)
+
+kubectl -n data exec postgres-postgresql-0 -- env PGPASSWORD="$PG_PASSWORD" \
   psql -U postgres -c 'DROP DATABASE IF EXISTS <SERVICE_NAME>;'
-kubectl -n data exec deploy/postgres-postgresql -- \
+kubectl -n data exec postgres-postgresql-0 -- env PGPASSWORD="$PG_PASSWORD" \
   createdb -U postgres <SERVICE_NAME>
 # Lalu re-run migration Job (B.4).
 ```
@@ -218,8 +258,8 @@ Belum otomatis — koordinasi lintas service dulu sebelum eksekusi.
 ## Bagian D — Verifikasi checklist
 
 - [ ] `kubectl -n data get pods` — `postgres-postgresql-0` + `redis-master-0` `Running`.
-- [ ] `kubectl -n data exec deploy/postgres-postgresql -- psql -U postgres -c 'SELECT 1'` → `1`.
-- [ ] `kubectl -n data exec deploy/redis-master -- redis-cli -a "$REDIS_PASSWORD" PING` → `PONG`.
+- [ ] `kubectl -n data exec postgres-postgresql-0 -- env PGPASSWORD="$PG_PASSWORD" psql -U postgres -c 'SELECT 1'` → `1`.
+- [ ] `kubectl -n data exec redis-master-0 -- redis-cli -a "$REDIS_PASSWORD" PING` → `PONG`.
 - [ ] Per service: `\l` di psql menampilkan database `<SERVICE_NAME>`.
 - [ ] `secret.staging.yaml` tidak ter-commit (`git check-ignore` print path).
 - [ ] Migration Job `Complete`.

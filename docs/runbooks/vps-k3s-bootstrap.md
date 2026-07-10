@@ -65,9 +65,23 @@ ufw status verbose   # verifikasi 22/80/443 ALLOW
 ## 2. Install K3s
 
 ```bash
-# As root di VPS
+# As root di VPS — bikin config file dulu supaya cert API server include IP publik
+mkdir -p /etc/rancher/k3s
+cat > /etc/rancher/k3s/config.yaml <<EOF
+tls-san:
+  - 91.99.194.116
+EOF
+
+# Install K3s
 curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--write-kubeconfig-mode 644 --disable=traefik" sh -
 # NOTE: K3s bundled Traefik di-disable — kita install versi pinned via Helm di §3.
+# NOTE: `tls-san` WAJIB di-set sebelum install; kalau tidak, cert API server hanya
+# valid untuk 127.0.0.1 → kubectl dari workstation eksternal kena `TLS handshake timeout`
+# walaupun port 6443 terbuka. Kalau lupa: edit config.yaml, `systemctl restart k3s`, lalu
+# re-download kubeconfig (cert baru).
+
+# Buka port 6443 untuk akses kubectl dari workstation
+ufw allow 6443/tcp
 
 # Verify
 kubectl get nodes    # expect Ready
@@ -77,12 +91,22 @@ kubectl get pods -A  # coredns + local-path-provisioner Running
 Kubeconfig sudah otomatis di `/etc/rancher/k3s/k3s.yaml` dan readable (`mode 644` dari `--write-kubeconfig-mode`). Untuk pakai dari workstation Anda:
 
 ```bash
-# Di workstation lokal
-mkdir -p ~/.kube
+# Di workstation lokal — simpan di file dedicated (bukan overwrite ~/.kube/config kalau
+# Anda punya multi-cluster). Path bebas — di sini contoh ~/.kube/config-qooma-vps.
 ssh root@91.99.194.116 "cat /etc/rancher/k3s/k3s.yaml" | \
-  sed "s/127.0.0.1/91.99.194.116/g" > ~/.kube/config
-chmod 600 ~/.kube/config
+  sed "s/127.0.0.1/91.99.194.116/g" > ~/.kube/config-qooma-vps
+chmod 600 ~/.kube/config-qooma-vps
 
+# Rename context supaya jelas (opsional, disarankan untuk multi-cluster)
+sed -i '' \
+  -e 's/name: default/name: qooma-vps/g' \
+  -e 's/cluster: default/cluster: qooma-vps/g' \
+  -e 's/user: default/user: qooma-vps-admin/g' \
+  -e 's/current-context: default/current-context: qooma-vps/g' \
+  ~/.kube/config-qooma-vps
+
+# Tiap session mau kerja di qooma:
+export KUBECONFIG=~/.kube/config-qooma-vps
 kubectl cluster-info   # verifikasi dari workstation
 ```
 
