@@ -14,7 +14,7 @@
 | Environment | Base URL |
 |---|---|
 | Local dev | `http://localhost:3000` |
-| Staging (VPS) | `https://integration-staging.qooma.satrioputrowicaksono.my.id` |
+| Staging (VPS) | `https://integration-staging.sharedisini.com` |
 | Production | belum di-deploy (menunggu keputusan namespace prod) |
 
 Semua path di dokumen ini bersifat **absolute** (misal `/api/integrations/whatsapp`). Tempel di belakang base URL sesuai environment.
@@ -131,13 +131,13 @@ Untuk endpoint yang butuh `hotel_id` / `dept_id` / `conversation_id`, cross-tena
       "phone_number": "+6281234567890",
       "verified_at": "2026-01-15T10:30:00Z",
       "has_access_token": true,
-      "webhook_url": "https://integration-staging.qooma.satrioputrowicaksono.my.id/webhook/whatsapp/hotel-slug-123"
+      "webhook_url": "https://integration-staging.sharedisini.com/webhook/whatsapp/hotel-slug-123"
     },
     "telegram": {
       "bot_username": "qooma_demo_bot",
       "has_bot_token": true,
       "default_chat_id": "-100999",
-      "webhook_url": "https://integration-staging.qooma.satrioputrowicaksono.my.id/webhook/telegram/hotel-slug-123"
+      "webhook_url": "https://integration-staging.sharedisini.com/webhook/telegram/hotel-slug-123"
     },
     "qr": {
       "url": "https://wa.me/6281234567890",
@@ -173,7 +173,7 @@ Untuk endpoint yang butuh `hotel_id` / `dept_id` / `conversation_id`, cross-tena
     "phoneNumberId": "1234567890",
     "phoneNumber": "+6281234567890",
     "accessToken": "***masked***",
-    "webhookUrl": "https://integration-staging.qooma.satrioputrowicaksono.my.id/webhook/whatsapp/hotel-slug",
+    "webhookUrl": "https://integration-staging.sharedisini.com/webhook/whatsapp/hotel-slug",
     "webhookVerifyToken": "***masked***",
     "verifiedAt": "2026-01-15T10:30:00Z",
     "createdAt": "2026-01-15T10:30:00Z",
@@ -458,7 +458,7 @@ Endpoint ini di-hit oleh Meta / Telegram, bukan FE. Documented supaya jelas owne
 ### 7.1 Ambil status semua integrasi (halaman utama)
 
 ```bash
-curl -X GET https://integration-staging.qooma.satrioputrowicaksono.my.id/api/integrations \
+curl -X GET https://integration-staging.sharedisini.com/api/integrations \
   -H "Authorization: Bearer eyJhbGc..." \
   -H "X-Correlation-Id: c1a2b3d4-e5f6-7890-a1b2-c3d4e5f6a7b8"
 ```
@@ -478,7 +478,7 @@ FE render: WA card = configured (klik "Edit"). Telegram card = "Belum di-setup" 
 ### 7.2 Setup WhatsApp
 
 ```bash
-curl -X PUT https://integration-staging.qooma.satrioputrowicaksono.my.id/api/integrations/whatsapp \
+curl -X PUT https://integration-staging.sharedisini.com/api/integrations/whatsapp \
   -H "Authorization: Bearer eyJhbGc..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -486,7 +486,7 @@ curl -X PUT https://integration-staging.qooma.satrioputrowicaksono.my.id/api/int
     "phoneNumberId": "1234567890",
     "phoneNumber": "+6281234567890",
     "accessToken": "EAAG...",
-    "webhookUrl": "https://integration-staging.qooma.satrioputrowicaksono.my.id/webhook/whatsapp/hotel-slug-123",
+    "webhookUrl": "https://integration-staging.sharedisini.com/webhook/whatsapp/hotel-slug-123",
     "webhookVerifyToken": "randomstring32chars"
   }'
 ```
@@ -496,7 +496,7 @@ Response 200 = sukses. Access token & webhook verify token di-mask di response â
 ### 7.3 Generate QR
 
 ```bash
-curl -X POST https://integration-staging.qooma.satrioputrowicaksono.my.id/api/integrations/qr/regenerate \
+curl -X POST https://integration-staging.sharedisini.com/api/integrations/qr/regenerate \
   -H "Authorization: Bearer eyJhbGc..." \
   -H "Content-Type: application/json" \
   -d '{ "greetingText": "Halo, ada yang bisa kami bantu?" }'

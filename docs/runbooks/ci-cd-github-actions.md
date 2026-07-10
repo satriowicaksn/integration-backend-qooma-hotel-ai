@@ -54,6 +54,6 @@ gh run watch
 ## Post-deploy validation checklist
 
 - [ ] `gh run list --workflow=deploy-staging.yml --limit=5` shows latest run `success`.
-- [ ] `curl -s https://integration-staging.qooma.satrioputrowicaksono.my.id/healthz` returns `{"status":"ok"}`.
+- [ ] `curl -s https://integration-staging.sharedisini.com/healthz` returns `{"status":"ok"}`.
 - [ ] `openssl s_client -connect ...:443 -showcerts </dev/null 2>/dev/null | openssl x509 -noout -dates` shows a Let's Encrypt cert within the 90-day window.
 - [ ] Rollback path documented in `deploy-integration-service.md` §8 was tested at least once (screenshot / log excerpt in PR body).

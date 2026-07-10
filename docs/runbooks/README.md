@@ -16,7 +16,7 @@ Operational documentation for the Integration service and, via the onboarding te
 
 - [**`deploy-shared-database.md`**](./deploy-shared-database.md) — bootstrap Postgres 15 + Redis 7 di cluster once, lalu resep per-service untuk `createdb` + connection strings + migration Job. Prasyarat sebelum service pertama.
 - [**`service-onboarding-template.md`**](./service-onboarding-template.md) — generic step-by-step for landing any new service (Auth, HC, AI, …) on the existing cluster. Uses `scripts/scaffold-service.sh` + `deploy/k8s/_template/*.yaml.template`.
-- [**`deploy-integration-service.md`**](./deploy-integration-service.md) — worked example of the template for the Integration service (namespace `integration-staging`, subdomain `integration-staging.qooma.satrioputrowicaksono.my.id`).
+- [**`deploy-integration-service.md`**](./deploy-integration-service.md) — worked example of the template for the Integration service (namespace `integration-staging`, subdomain `integration-staging.sharedisini.com`).
 
 ## CI/CD
 
@@ -28,7 +28,7 @@ Operational documentation for the Integration service and, via the onboarding te
 scripts/scaffold-service.sh \
   --service <name> \
   --namespace <name>-staging \
-  --subdomain <name>-staging.qooma.satrioputrowicaksono.my.id \
+  --subdomain <name>-staging.sharedisini.com \
   --port 3000 \
   --dry-run     # inspect first
 ```

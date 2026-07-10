@@ -8,7 +8,7 @@
 
 ## Konteks
 
-Backend Qooma ekosistem butuh staging environment untuk test end-to-end sebelum production. PO menyediakan VPS Hetzner (`91.99.194.116`, 8GB RAM, Ubuntu 26.04 LTS) + domain root `qooma.satrioputrowicaksono.my.id` (DNS di JagoanHosting).
+Backend Qooma ekosistem butuh staging environment untuk test end-to-end sebelum production. PO menyediakan VPS Hetzner (`91.99.194.116`, 8GB RAM, Ubuntu 26.04 LTS) + domain root `sharedisini.com` (DNS di JagoanHosting).
 
 Requirement PO:
 1. VPS setup — Postgres + Redis + service runtime siap
@@ -54,7 +54,7 @@ Repo mengadopsi ADR-0005 (AWS ECS Fargate) sebagai **prod default**. Staging bol
 | Deploy user | dedicated `deploy` user di VPS (non-root, sudo K3s only) | Least privilege; GH Actions SSH key ≠ personal SSH key |
 | DB migration | Kubernetes Job (`prisma migrate deploy`) — pre-rollout | Migration atomicity per deploy; separate from app image runtime |
 | Secrets storage | `kubectl apply -f secret.staging.yaml` (gitignored) | MVP; prod pindah ke sealed-secrets / external vault |
-| Subdomain scheme | `<service>-<env>.qooma.satrioputrowicaksono.my.id` (mis. `integration-staging.qooma...`) | Env-in-subdomain, clear at glance, per-service cert cheap |
+| Subdomain scheme | `<service>-<env>.sharedisini.com` (mis. `integration-staging.qooma...`) | Env-in-subdomain, clear at glance, per-service cert cheap |
 
 ## Resource envelope (VPS 8GB)
 
@@ -92,7 +92,7 @@ Repo mengadopsi ADR-0005 (AWS ECS Fargate) sebagai **prod default**. Staging bol
 
 ### Migrasi / rollout
 1. T30 (Slot C) ship runbook + manifest + workflow.
-2. PO dry-run runbook ke VPS `91.99.194.116`; verify Integration service accessible di `integration-staging.qooma.satrioputrowicaksono.my.id`.
+2. PO dry-run runbook ke VPS `91.99.194.116`; verify Integration service accessible di `integration-staging.sharedisini.com`.
 3. Auth/HC/AI onboard nanti = duplicate `deploy/k8s/<service>/` folder pattern per service repo, subdomain `<svc>-staging.qooma...`, join K3s cluster yang sama.
 4. Kalau resource pressure (>7 GB sustained atau OOM events), Parent PM eskalasi PO untuk upgrade VPS ke 16 GB atau split ke 2 VPS (per-svc pair).
 

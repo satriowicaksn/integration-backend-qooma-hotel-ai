@@ -15,7 +15,7 @@
 |---|---|---|
 | `<SERVICE_NAME>` | `auth` | Short lower-case slug, no spaces. Used as resource prefix. |
 | `<NAMESPACE>` | `auth-staging` | K8s namespace. Convention: `<service>-staging`. |
-| `<SUBDOMAIN>` | `auth-staging.qooma.satrioputrowicaksono.my.id` | Full FQDN routed by Traefik. |
+| `<SUBDOMAIN>` | `auth-staging.sharedisini.com` | Full FQDN routed by Traefik. |
 | `<PORT>` | `3001` | Container port the API listens on. |
 | `<IMAGE_API>` | `ghcr.io/satriowicaksn/auth-backend-api` | GHCR image ref (without tag). |
 | `<IMAGE_WORKER>` | `ghcr.io/satriowicaksn/auth-backend-worker` | GHCR image ref (without tag). |
@@ -29,7 +29,7 @@ From the repo root:
 scripts/scaffold-service.sh \
   --service auth \
   --namespace auth-staging \
-  --subdomain auth-staging.qooma.satrioputrowicaksono.my.id \
+  --subdomain auth-staging.sharedisini.com \
   --port 3001 \
   --image-api ghcr.io/satriowicaksn/auth-backend-api \
   --image-worker ghcr.io/satriowicaksn/auth-backend-worker
@@ -45,7 +45,7 @@ Dry-run (prints rendered manifests + workflow to stdout, validates offline; no f
 
 ```bash
 scripts/scaffold-service.sh --service auth --namespace auth-staging \
-  --subdomain auth-staging.qooma.satrioputrowicaksono.my.id --dry-run
+  --subdomain auth-staging.sharedisini.com --dry-run
 ```
 
 The scaffolder writes:

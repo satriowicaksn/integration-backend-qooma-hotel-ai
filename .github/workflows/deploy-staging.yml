@@ -120,7 +120,7 @@ jobs:
       - name: Smoke test
         run: |
           for _ in $(seq 1 30); do
-            if curl -fsS https://integration-staging.qooma.satrioputrowicaksono.my.id/healthz; then
+            if curl -fsS https://integration-staging.sharedisini.com/healthz; then
               echo
               echo "Smoke test OK."
               exit 0
