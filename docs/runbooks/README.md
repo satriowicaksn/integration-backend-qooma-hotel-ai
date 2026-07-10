@@ -2,6 +2,8 @@
 
 Operational documentation for the Integration service and, via the onboarding template, any future Qooma service on the shared K3s cluster.
 
+> **Mulai dari sini kalau mau deploy from scratch**: [**`FINAL_DEPLOYMENT_GUIDE.md`**](./FINAL_DEPLOYMENT_GUIDE.md) — master index urutan runbook + coverage check + link ke ops harian.
+
 ## Local development
 
 - [**`local-dev.md`**](./local-dev.md) — clone → install → env config → Docker deps → run API/worker → connect DB via GUI → smoke-test 3 MVP endpoints (WA connect / get / send). Covers `ENCRYPTION_KEY` 64-char requirement + BSP env + JWT helper.
@@ -12,6 +14,7 @@ Operational documentation for the Integration service and, via the onboarding te
 
 ## Deploy
 
+- [**`deploy-shared-database.md`**](./deploy-shared-database.md) — bootstrap Postgres 15 + Redis 7 di cluster once, lalu resep per-service untuk `createdb` + connection strings + migration Job. Prasyarat sebelum service pertama.
 - [**`service-onboarding-template.md`**](./service-onboarding-template.md) — generic step-by-step for landing any new service (Auth, HC, AI, …) on the existing cluster. Uses `scripts/scaffold-service.sh` + `deploy/k8s/_template/*.yaml.template`.
 - [**`deploy-integration-service.md`**](./deploy-integration-service.md) — worked example of the template for the Integration service (namespace `integration-staging`, subdomain `integration-staging.qooma.satrioputrowicaksono.my.id`).
 
