@@ -106,7 +106,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   });
 
   app.get('/healthz', async (_req, reply) => {
-    reply.type('text/plain').send('OK');
+    return reply.type('text/plain').send('OK');
   });
 
   // Manual DI wiring: repository ← db, service ← repo + logger.
