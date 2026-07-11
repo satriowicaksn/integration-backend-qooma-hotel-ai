@@ -3,6 +3,8 @@
 Operational documentation for the Integration service and, via the onboarding template, any future Qooma service on the shared K3s cluster.
 
 > **Mulai dari sini kalau mau deploy from scratch**: [**`FINAL_DEPLOYMENT_GUIDE.md`**](./FINAL_DEPLOYMENT_GUIDE.md) — master index urutan runbook + coverage check + link ke ops harian.
+>
+> **Mulai dari sini kalau infra sudah bootstrap, tinggal tambah service baru** (Auth, HotelCore, AI, dst.): [**`NEW_SERVICE_QUICKSTART.md`**](./NEW_SERVICE_QUICKSTART.md) — single-page per-service checklist dengan semua pitfall Dockerfile/CI yang pernah kena di Integration.
 
 ## Local development
 
