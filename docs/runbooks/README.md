@@ -22,6 +22,10 @@ Operational documentation for the Integration service and, via the onboarding te
 
 - [**`ci-cd-github-actions.md`**](./ci-cd-github-actions.md) — GitHub Actions auto-deploy workflow, required GH secrets checklist, troubleshooting matrix.
 
+## DNS + TLS
+
+- [**`dns-resolution.md`**](./dns-resolution.md) — diagnose NXDOMAIN, fix NS delegation di JagoanHosting, cert-manager auto-issue TLS, `/etc/hosts` workaround + nip.io fallback untuk share sebelum DNS propagate.
+
 ## Quick start (new service)
 
 ```bash
