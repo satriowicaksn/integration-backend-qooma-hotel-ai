@@ -76,6 +76,12 @@ jobs:
     env:
       DATABASE_URL: postgresql://app:app_dev_pw@localhost:5432/app
       REDIS_URL: redis://localhost:6379
+      API_BASE_URL: http://localhost:3000
+      CORS_ORIGIN: http://localhost:3000
+      JWT_ACCESS_SECRET: ci_test_access_secret_min_32_chars_padding_padding
+      JWT_REFRESH_SECRET: ci_test_refresh_secret_min_32_chars_padding_padding
+      ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      INTERNAL_RPC_SECRET: ci_test_internal_rpc_secret_min_32_chars_padding
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v3
