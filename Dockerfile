@@ -44,7 +44,7 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 FROM node:${NODE_VERSION} AS api
 ENV NODE_ENV=production
 WORKDIR /app
-RUN apk add --no-cache tini && addgroup -S app && adduser -S app -G app
+RUN apk add --no-cache tini openssl && addgroup -S app && adduser -S app -G app
 COPY --from=prod-deps --chown=app:app /app/node_modules ./node_modules
 COPY --from=build --chown=app:app /app/dist ./dist
 COPY --from=build --chown=app:app /app/prisma ./prisma
@@ -62,7 +62,7 @@ CMD ["node", "dist/entrypoints/api.js"]
 FROM node:${NODE_VERSION} AS worker
 ENV NODE_ENV=production
 WORKDIR /app
-RUN apk add --no-cache tini && addgroup -S app && adduser -S app -G app
+RUN apk add --no-cache tini openssl && addgroup -S app && adduser -S app -G app
 COPY --from=prod-deps --chown=app:app /app/node_modules ./node_modules
 COPY --from=build --chown=app:app /app/dist ./dist
 COPY --from=build --chown=app:app /app/prisma ./prisma
