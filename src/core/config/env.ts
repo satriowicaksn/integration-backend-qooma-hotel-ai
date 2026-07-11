@@ -13,7 +13,7 @@ import { z } from 'zod';
 
 const EnvSchema = z.object({
   // Runtime
-  NODE_ENV: z.enum(['development', 'staging', 'production']).default('development'),
+  NODE_ENV: z.enum(['development', 'test', 'staging', 'production']).default('development'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   TZ: z.string().default('UTC'),
 
