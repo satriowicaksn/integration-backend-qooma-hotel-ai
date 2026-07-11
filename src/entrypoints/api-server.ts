@@ -105,7 +105,9 @@ export async function buildServer(): Promise<FastifyInstance> {
     });
   });
 
-  app.get('/healthz', () => ({ status: 'ok' }));
+  app.get('/healthz', async (_req, reply) => {
+    reply.type('text/plain').send('OK');
+  });
 
   // Manual DI wiring: repository ← db, service ← repo + logger.
   // Guards composed here so route plugins stay auth-agnostic.
