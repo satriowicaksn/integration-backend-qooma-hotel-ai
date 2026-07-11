@@ -39,6 +39,8 @@ COPY package.json pnpm-lock.yaml .npmrc ./
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm config set store-dir /pnpm/store && \
     pnpm install --frozen-lockfile --prod=true
+COPY prisma ./prisma
+RUN pnpm prisma:generate
 
 # --- Stage 5a: api runtime --------------------------------------------------
 FROM node:${NODE_VERSION} AS api

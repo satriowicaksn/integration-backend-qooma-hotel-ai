@@ -104,15 +104,16 @@ jobs:
         env:
           SHA_TAG: ${{ steps.tags.outputs.sha }}
         run: |
+          # Apply Deployment specs first so first-run bootstrap works
+          # (set image would fail with NotFound before the Deployment exists).
+          kubectl apply -f deploy/k8s/integration/deployment.yaml
+
           kubectl -n integration-staging set image \
             deployment/integration-api \
             api="${IMAGE_API}:${SHA_TAG}"
           kubectl -n integration-staging set image \
             deployment/integration-worker \
             worker="${IMAGE_WORKER}:${SHA_TAG}"
-
-          # Ensure the Deployment specs exist (first-run apply).
-          kubectl apply -f deploy/k8s/integration/deployment.yaml
 
           kubectl -n integration-staging rollout status deployment/integration-api --timeout=240s
           kubectl -n integration-staging rollout status deployment/integration-worker --timeout=240s
