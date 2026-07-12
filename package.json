@@ -1,6 +1,6 @@
 {
   "name": "@qooma/integration-backend",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Integration / Channels backend service for Qooma — WhatsApp Cloud API, Telegram Bot, OTA email parser, QR provisioning, webhook ingress, outbound dispatch, channel health. Spec: docs/spec/04-integration-channels.md.",
   "license": "UNLICENSED",
