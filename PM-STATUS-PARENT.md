@@ -1,5 +1,20 @@
 # PM-STATUS-PARENT — Qooma Backend (cross-dev roll-up)
 
+## 🔄 INTEGRATION HANDOVER — 2026-07-13 — full cross-repo board: FE `docs/INTEGRATION-STATUS.md`
+
+**Integration ↔ FE: 🟡 LIVE but FE keeps it MOCKED (on-progress).** No Dev A code changes in this repo.
+
+- This service is fully wired (`buildServer`) and its `/api/integrations/*` paths match the FE exactly (whatsapp, telegram, telegram/departments, qr/regenerate, qr/download, overview). But the FE keeps `VITE_MOCK_INTEGRATION=true` (MSW) until sign-off, so the live BE is not exercised from the browser yet.
+
+**🔧 Dev C (Satrio) — TASKS:**
+
+- Flip FE `VITE_MOCK_INTEGRATION=false` (confirm `VITE_INTEGRATION_BACKEND_URL=https://integration-staging.sharedisini.com`) and verify reachability with the cross-origin cookie (needs auth `COOKIE_DOMAIN` + this service's `CORS_ORIGIN` including the vercel origin).
+- Finish the stub adapters flagged in this repo's code: telegram inbound (staff lookup, ticket action — Q-C-06/07), telegram dept routing (HC read/write — Q-OPS-06), QR provisioning (renderer/storage — Q-C-10), WhatsApp inbound (guest upsert, AI inbound — Q-B-04/05). WA dispatch is env-gated on `WA_BSP_BASE_URL`.
+
+**No Dev A/B tasks in this repo.**
+
+---
+
 > **Parent PM tracker.** Read-only buat Executor & PM A/B/C kecuali bagian roll-up yang explicit dipost oleh PM A/B/C. Parent PM authority untuk section §1, §3, §4, §5, §6, §7, §8. PM A/B/C append baris short ke §2 setelah tiap APPROVE (per `PM-AGENT.md §0.8`).
 >
 > Detail per-dev assignment (ASSIGNMENT → PLAN → SUBMIT → VERDICT) tinggal di **`PM-STATUS-A.md`** (Nathan), **`PM-STATUS-B.md`** (Nanak), **`PM-STATUS-C.md`** (Satrio).
