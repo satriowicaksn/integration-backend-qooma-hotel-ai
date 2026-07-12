@@ -237,7 +237,12 @@ describe('WhatsappInboundIngestService.processEvent — worker discipline (never
     const outcomes = await service.processEvent(EVENT_ID, HOTEL_ID, validEnvelope);
 
     expect(outcomes).toMatchObject([
-      { messageId: 'wamid.hello1', guestId: 'guest-1', dispatched: true, aiReply: 'Breakfast ends at 10:30.' },
+      {
+        messageId: 'wamid.hello1',
+        guestId: 'guest-1',
+        dispatched: true,
+        aiReply: 'Breakfast ends at 10:30.',
+      },
     ]);
     expect(repoDouble.markProcessed).toHaveBeenCalledTimes(1);
     expect(repoDouble.markFailed).not.toHaveBeenCalled();

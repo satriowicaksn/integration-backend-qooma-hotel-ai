@@ -96,7 +96,11 @@ describe('HttpAiInboundMessageAdapter', () => {
     const adapter = new HttpAiInboundMessageAdapter(CONFIG, createLoggerSpy());
     await adapter.inboundWaMessage(VALID_INPUT);
 
-    const [, rawBody, opts] = postMock.mock.calls[0] as [string, string, { headers: Record<string, string> }];
+    const [, rawBody, opts] = postMock.mock.calls[0] as [
+      string,
+      string,
+      { headers: Record<string, string> },
+    ];
     const { headers } = opts;
 
     expect(headers['x-service-name']).toBe('integration');
@@ -130,8 +134,14 @@ describe('HttpAiInboundMessageAdapter', () => {
 
   it('should retry on 503 and succeed on second attempt', async () => {
     postMock
-      .mockResolvedValueOnce({ status: 503, data: { error: { code: 'INTERNAL_ERROR', message: 'overload' } } })
-      .mockResolvedValueOnce({ status: 200, data: { conversation_id: 'c', reply: 'r', stop_reason: 'end_turn' } });
+      .mockResolvedValueOnce({
+        status: 503,
+        data: { error: { code: 'INTERNAL_ERROR', message: 'overload' } },
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        data: { conversation_id: 'c', reply: 'r', stop_reason: 'end_turn' },
+      });
 
     const adapter = new HttpAiInboundMessageAdapter(CONFIG, createLoggerSpy());
     const result = await adapter.inboundWaMessage(VALID_INPUT);
@@ -141,10 +151,15 @@ describe('HttpAiInboundMessageAdapter', () => {
   });
 
   it('should throw ExternalServiceError after exhausting all retries on persistent 500', async () => {
-    postMock.mockResolvedValue({ status: 500, data: { error: { code: 'INTERNAL_ERROR', message: 'crash' } } });
+    postMock.mockResolvedValue({
+      status: 500,
+      data: { error: { code: 'INTERNAL_ERROR', message: 'crash' } },
+    });
 
     const adapter = new HttpAiInboundMessageAdapter(CONFIG, createLoggerSpy());
-    await expect(adapter.inboundWaMessage(VALID_INPUT)).rejects.toBeInstanceOf(ExternalServiceError);
+    await expect(adapter.inboundWaMessage(VALID_INPUT)).rejects.toBeInstanceOf(
+      ExternalServiceError,
+    );
     expect(postMock).toHaveBeenCalledTimes(3);
   });
 
@@ -155,7 +170,9 @@ describe('HttpAiInboundMessageAdapter', () => {
     });
 
     const adapter = new HttpAiInboundMessageAdapter(CONFIG, createLoggerSpy());
-    await expect(adapter.inboundWaMessage(VALID_INPUT)).rejects.toBeInstanceOf(ExternalServiceError);
+    await expect(adapter.inboundWaMessage(VALID_INPUT)).rejects.toBeInstanceOf(
+      ExternalServiceError,
+    );
     expect(postMock).toHaveBeenCalledTimes(1);
   });
 
@@ -166,7 +183,9 @@ describe('HttpAiInboundMessageAdapter', () => {
     });
 
     const adapter = new HttpAiInboundMessageAdapter(CONFIG, createLoggerSpy());
-    await expect(adapter.inboundWaMessage(VALID_INPUT)).rejects.toBeInstanceOf(ExternalServiceError);
+    await expect(adapter.inboundWaMessage(VALID_INPUT)).rejects.toBeInstanceOf(
+      ExternalServiceError,
+    );
     expect(postMock).toHaveBeenCalledTimes(1);
   });
 
