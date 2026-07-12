@@ -15,8 +15,10 @@
  * - Payload shape validated structurally (typeof + role enum) so any
  *   drift in Auth's issuance surfaces at the boundary.
  * - `req.user` typed via Fastify augmentation; `req.hotelId` populated
- *   from `payload.hotel_id` (Q-C-04 resolution — tenant scope comes
+ *   from `payload.hotelId` (Q-C-04 resolution — tenant scope comes
  *   from the signed session, not client-controlled headers).
+ * - Token read from `Authorization: Bearer` OR the auth service's httpOnly
+ *   `token` cookie (the FE flow), whichever is present.
  *
  * Zero new deps: `@fastify/jwt` is already installed but this plugin
  * uses Node's built-in `crypto` to keep the verify path a pure
@@ -40,11 +42,16 @@ const VALID_ROLES: ReadonlySet<UserRole> = new Set<UserRole>([
   'gm',
 ]);
 
-/** Session claim shape per PM C ACK Q-C-03 preferred MVP:
- *  `{ sub, hotel_id, role, exp }`. `iat` optional per RFC 7519. */
+/** Session claim shape as ACTUALLY issued by the auth service
+ *  (`auth-backend/src/modules/auth/auth.token-issuer.ts`):
+ *  `{ sub, sid, role, hotelId, deptId, exp, iat }`. `hotelId` is `null` for
+ *  `super_admin` (all-hotels scope). Field names are camelCase — NOT the
+ *  earlier assumed snake_case `hotel_id`. */
 export interface JwtPayload {
   readonly sub: string;
-  readonly hotel_id: string;
+  readonly sid?: string;
+  readonly hotelId: string | null;
+  readonly deptId?: string | null;
   readonly role: UserRole;
   readonly exp: number;
   readonly iat?: number;
@@ -57,6 +64,7 @@ declare module 'fastify' {
 }
 
 const BEARER_PREFIX = 'bearer ';
+const ACCESS_COOKIE = 'token';
 
 function base64UrlDecode(input: string): Buffer {
   const normalized = input.replace(/-/g, '+').replace(/_/g, '/');
@@ -75,11 +83,12 @@ function safeJsonParse(text: string): unknown {
 function isJwtPayload(candidate: unknown): candidate is JwtPayload {
   if (typeof candidate !== 'object' || candidate === null) return false;
   const p = candidate as Record<string, unknown>;
+  const hotelId = p['hotelId'];
+  const hotelIdOk = hotelId === null || (typeof hotelId === 'string' && hotelId.length > 0);
   return (
     typeof p['sub'] === 'string' &&
     p['sub'].length > 0 &&
-    typeof p['hotel_id'] === 'string' &&
-    p['hotel_id'].length > 0 &&
+    hotelIdOk &&
     typeof p['role'] === 'string' &&
     VALID_ROLES.has(p['role'] as UserRole) &&
     typeof p['exp'] === 'number' &&
@@ -97,6 +106,25 @@ export function extractBearerToken(header: string | string[] | undefined): strin
   if (value.toLowerCase().startsWith(BEARER_PREFIX)) {
     const token = value.slice(BEARER_PREFIX.length).trim();
     return token === '' ? undefined : token;
+  }
+  return undefined;
+}
+
+/** Reads a named cookie value from a raw `Cookie` header. The FE authenticates
+ *  via the auth service's httpOnly `token` cookie (not a Bearer header), so the
+ *  guard accepts either. */
+export function extractCookieToken(
+  header: string | undefined,
+  name: string = ACCESS_COOKIE,
+): string | undefined {
+  if (header === undefined) return undefined;
+  for (const part of header.split(';')) {
+    const idx = part.indexOf('=');
+    if (idx === -1) continue;
+    if (part.slice(0, idx).trim() === name) {
+      const value = decodeURIComponent(part.slice(idx + 1).trim());
+      return value === '' ? undefined : value;
+    }
   }
   return undefined;
 }
@@ -159,9 +187,10 @@ export type JwtAuthGuard = (
 export function jwtAuthGuard(opts: JwtAuthOptions): JwtAuthGuard {
   const nowFn = opts.now ?? (() => Math.floor(Date.now() / 1000));
   return function jwtGuard(req, _reply, done): void {
-    const token = extractBearerToken(req.headers.authorization);
+    const token =
+      extractBearerToken(req.headers.authorization) ?? extractCookieToken(req.headers.cookie);
     if (token === undefined) {
-      done(new AuthError('Missing or malformed Authorization header'));
+      done(new AuthError('Missing session token (Bearer header or `token` cookie)'));
       return;
     }
     const payload = verifyJwt(token, opts.secret, nowFn);
@@ -170,7 +199,12 @@ export function jwtAuthGuard(opts: JwtAuthOptions): JwtAuthGuard {
       return;
     }
     req.user = payload;
-    req.hotelId = payload.hotel_id;
+    // `hotelId` is null for super_admin (all-hotels). Leave `req.hotelId` unset
+    // in that case; hotel-scoped routes call `requireHotelId(req.hotelId)`, which
+    // rejects the missing case — the correct behavior for a per-hotel surface.
+    if (payload.hotelId !== null) {
+      req.hotelId = payload.hotelId;
+    }
     done();
   };
 }
