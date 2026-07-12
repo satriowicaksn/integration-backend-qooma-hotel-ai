@@ -22,14 +22,15 @@ function base64Url(buf: Buffer | string): string {
 }
 
 function signHs256(
-  payload: Partial<JwtPayload> & { role?: UserRole; hotel_id?: string; exp?: number },
+  payload: Partial<JwtPayload> & { role?: UserRole; hotelId?: string | null; exp?: number },
   secret = SECRET,
   header: Record<string, unknown> = { alg: 'HS256', typ: 'JWT' },
 ): string {
   const now = Math.floor(Date.now() / 1000);
   const finalPayload = {
     sub: 'user-1',
-    hotel_id: HOTEL_ID,
+    sid: 'sess-1',
+    hotelId: HOTEL_ID,
     role: 'gm_admin',
     exp: now + 3600,
     iat: now,
@@ -77,7 +78,7 @@ describe('verifyJwt (pure)', () => {
     const decoded = verifyJwt(token, SECRET);
     expect(decoded).not.toBeNull();
     expect(decoded?.role).toBe('gm_admin');
-    expect(decoded?.hotel_id).toBe(HOTEL_ID);
+    expect(decoded?.hotelId).toBe(HOTEL_ID);
     expect(decoded?.sub).toBe('user-1');
   });
 
@@ -98,7 +99,7 @@ describe('verifyJwt (pure)', () => {
     const token = signHs256({ role: 'staff' });
     const parts = token.split('.');
     parts[1] = base64Url(
-      JSON.stringify({ sub: 'x', hotel_id: HOTEL_ID, role: 'gm_admin', exp: 9999999999 }),
+      JSON.stringify({ sub: 'x', hotelId: HOTEL_ID, role: 'gm_admin', exp: 9999999999 }),
     );
     expect(verifyJwt(parts.join('.'), SECRET)).toBeNull();
   });
@@ -122,9 +123,17 @@ describe('verifyJwt (pure)', () => {
     expect(verifyJwt(token, SECRET)).toBeNull();
   });
 
-  it('should return null when hotel_id is empty', () => {
-    const token = signHs256({ hotel_id: '' });
+  it('should return null when hotelId is an empty string', () => {
+    const token = signHs256({ hotelId: '' });
     expect(verifyJwt(token, SECRET)).toBeNull();
+  });
+
+  it('should accept hotelId === null (super_admin all-hotels scope)', () => {
+    const token = signHs256({ role: 'super_admin', hotelId: null });
+    const decoded = verifyJwt(token, SECRET);
+    expect(decoded).not.toBeNull();
+    expect(decoded?.hotelId).toBeNull();
+    expect(decoded?.role).toBe('super_admin');
   });
 
   it('should never authenticate against a blank secret (misconfig defense)', () => {

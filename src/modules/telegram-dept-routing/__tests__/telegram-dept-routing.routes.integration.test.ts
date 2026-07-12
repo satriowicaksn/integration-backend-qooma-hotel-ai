@@ -63,7 +63,7 @@ runOrSkip('T18-followup route landing (integration)', () => {
     const header = { alg: 'HS256', typ: 'JWT' };
     const payload = {
       sub: 'user-1',
-      hotel_id: HOTEL_ID,
+      hotelId: HOTEL_ID,
       role: 'gm_admin',
       exp: now + 3600,
       iat: now,
