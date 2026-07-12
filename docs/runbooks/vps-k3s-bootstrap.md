@@ -5,67 +5,124 @@
 
 **Run once, per VPS.** Subsequent service deploys use `deploy-integration-service.md`.
 
+> **Semua step di runbook ini dijalankan sebagai `root` via SSH** (`ssh root@91.99.194.116`). Tidak
+> ada user OS terpisah — pola ini paling aman untuk single-operator MVP dan menghindari trap
+> "user tanpa password + sudo gagal". Kalau nanti tim mengharuskan pemisahan user, lihat
+> [Appendix — Optional SSH user hardening](#appendix--optional-ssh-user-hardening) di bawah dan
+> jalankan **setelah** cluster stabil.
+
 ## Prerequisites (before SSH)
 
-- SSH keypair generated locally (`ssh-keygen -t ed25519 -C "vps-bootstrap"`).
-- Root access to the VPS (initial `root@91.99.194.116`).
-- DNS control at JagoanHosting (needed later; not blocker for bootstrap).
+- SSH keypair di workstation Anda. Kalau belum ada: `ssh-keygen -t ed25519 -C "vps-bootstrap" -f ~/.ssh/id_ed25519` (tekan Enter untuk passphrase kosong / isi passphrase kalau mau).
+- Password root VPS (dari email Hetzner saat provisioning, atau reset via Hetzner Cloud Console → Rescue → Reset root password).
+- DNS control di provider (JagoanHosting) — dibutuhkan Langkah subdomain nanti, bukan blocker bootstrap.
 
-## 1. SSH hardening
+## 1. Firewall + SSH access (as root)
+
+**Default (team-friendly)**: biarkan SSH root pakai password + key sekaligus. Ini yang dipakai untuk
+MVP karena multi-operator: cukup share password root ke tim (via password manager), atau tim yang
+punya SSH key bisa append public-key-nya ke `/root/.ssh/authorized_keys` sendiri. Password auth
+tetap ON supaya teammate tanpa key tidak locked out.
+
+Push public key Anda supaya SSH tanpa password (opsional, tapi disarankan biar operator utama
+tidak type password terus):
 
 ```bash
-# Local
+# Di workstation lokal
 ssh-copy-id -i ~/.ssh/id_ed25519.pub root@91.99.194.116
+# Masukkan password root (dari Hetzner) sekali.
 
-# On the VPS
-adduser --disabled-password --gecos "" deploy
-usermod -aG sudo deploy
-mkdir -p /home/deploy/.ssh
-cp /root/.ssh/authorized_keys /home/deploy/.ssh/
-chown -R deploy:deploy /home/deploy/.ssh
-chmod 700 /home/deploy/.ssh
-chmod 600 /home/deploy/.ssh/authorized_keys
+# Verifikasi login pakai key jalan
+ssh root@91.99.194.116 "hostname && whoami"
+# Expect: hostname VPS + 'root'
+```
 
-sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
-sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
-systemctl restart sshd
+Kalau nanti mau tambah teammate: dapatkan `~/.ssh/id_ed25519.pub`-nya, lalu append ke
+`~/.ssh/authorized_keys` di VPS (`echo "<pubkey>" >> ~/.ssh/authorized_keys`).
 
-apt update && apt install -y ufw
+> ⚠️ **JANGAN** set `PasswordAuthentication no` atau `PermitRootLogin no` di `/etc/ssh/sshd_config`
+> sebelum verifikasi **semua teammate** sudah bisa login via key. Salah urutan = lockout, harus
+> di-fix lewat Hetzner Cloud Console. Kalau mau go key-only nanti (setelah tim stabil),
+> lihat [Appendix — Optional SSH user hardening](#appendix--optional-ssh-user-hardening).
+> Ubuntu 26.04 juga punya folder `/etc/ssh/sshd_config.d/` — kalau ada file di sana yang set
+> `PasswordAuthentication no`, itu override setting utama. Cek dulu: `ls /etc/ssh/sshd_config.d/`.
+
+Firewall UFW:
+
+```bash
+apt update && apt install -y curl wget vim ufw
+
 ufw default deny incoming
 ufw default allow outgoing
 ufw allow 22/tcp
 ufw allow 80/tcp
 ufw allow 443/tcp
 ufw --force enable
+
+ufw status verbose   # verifikasi 22/80/443 ALLOW
 ```
 
-Re-login as `deploy@91.99.194.116`; verify root SSH is refused.
-
-## 2. Install Docker + K3s
+## 2. Install K3s
 
 ```bash
-# As deploy (with sudo)
-sudo apt update && sudo apt install -y curl wget vim
+# As root di VPS — bikin config file dulu supaya cert API server include IP publik
+mkdir -p /etc/rancher/k3s
+cat > /etc/rancher/k3s/config.yaml <<EOF
+tls-san:
+  - 91.99.194.116
+EOF
 
-# K3s (embedded containerd; we don't need standalone Docker)
+# Install K3s
 curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--write-kubeconfig-mode 644 --disable=traefik" sh -
-# NOTE: we disable K3s's bundled Traefik so we can install a pinned Traefik version via Helm.
+# NOTE: K3s bundled Traefik di-disable — kita install versi pinned via Helm di §3.
+# NOTE: `tls-san` WAJIB di-set sebelum install; kalau tidak, cert API server hanya
+# valid untuk 127.0.0.1 → kubectl dari workstation eksternal kena `TLS handshake timeout`
+# walaupun port 6443 terbuka. Kalau lupa: edit config.yaml, `systemctl restart k3s`, lalu
+# re-download kubeconfig (cert baru).
+
+# Buka port 6443 untuk akses kubectl dari workstation
+ufw allow 6443/tcp
 
 # Verify
-sudo kubectl get nodes    # expect Ready
-sudo kubectl get pods -A  # coredns + local-path-provisioner Running
+kubectl get nodes    # expect Ready
+kubectl get pods -A  # coredns + local-path-provisioner Running
 ```
 
-Copy kubeconfig for the `deploy` user:
+Kubeconfig sudah otomatis di `/etc/rancher/k3s/k3s.yaml` dan readable (`mode 644` dari `--write-kubeconfig-mode`). Untuk pakai dari workstation Anda:
 
 ```bash
-mkdir -p ~/.kube
-sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
-sudo chown deploy:deploy ~/.kube/config
-sed -i "s/127.0.0.1/91.99.194.116/g" ~/.kube/config
+# Di workstation lokal — simpan di file dedicated (bukan overwrite ~/.kube/config kalau
+# Anda punya multi-cluster). Path bebas — di sini contoh ~/.kube/config-qooma-vps.
+ssh root@91.99.194.116 "cat /etc/rancher/k3s/k3s.yaml" | \
+  sed "s/127.0.0.1/91.99.194.116/g" > ~/.kube/config-qooma-vps
+chmod 600 ~/.kube/config-qooma-vps
+
+# Rename context supaya jelas (opsional, disarankan untuk multi-cluster)
+sed -i '' \
+  -e 's/name: default/name: qooma-vps/g' \
+  -e 's/cluster: default/cluster: qooma-vps/g' \
+  -e 's/user: default/user: qooma-vps-admin/g' \
+  -e 's/current-context: default/current-context: qooma-vps/g' \
+  ~/.kube/config-qooma-vps
+
+# Tiap session mau kerja di qooma:
+export KUBECONFIG=~/.kube/config-qooma-vps
+kubectl cluster-info   # verifikasi dari workstation
 ```
 
 ## 3. Install Helm + Traefik + cert-manager
+
+> ⚠️ **PENTING kalau jalan di VPS (as root)**: `kubectl` bawaan K3s otomatis point ke
+> `/etc/rancher/k3s/k3s.yaml`, tapi `helm` **tidak** — helm cari `~/.kube/config` atau env
+> `KUBECONFIG`. Kalau tidak di-set, semua `helm install` gagal dengan
+> `Kubernetes cluster unreachable: Get "http://localhost:8080/version"`.
+> Set dulu (permanen di `.bashrc`):
+>
+> ```bash
+> export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+> echo 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml' >> ~/.bashrc
+> helm list -A   # verifikasi helm bisa reach cluster
+> ```
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
@@ -140,22 +197,22 @@ helm install redis bitnami/redis -n data \
 kubectl -n data get secret redis -o jsonpath="{.data.redis-password}" | base64 -d
 ```
 
-## 6. GitHub Actions deploy user (for CI/CD)
+## 6. GitHub Actions kubeconfig secret (for CI/CD)
 
-Generate a dedicated SSH key for GH Actions on your workstation:
-
-```bash
-ssh-keygen -t ed25519 -f ~/.ssh/qooma_gha_deploy -N "" -C "gh-actions@qooma-vps"
-ssh-copy-id -i ~/.ssh/qooma_gha_deploy.pub deploy@91.99.194.116
-```
-
-Base64-encode the kubeconfig for a GH secret:
+CI/CD tidak butuh SSH (workflow pakai `kubectl` via kubeconfig — lihat `.github/workflows/deploy-staging.yml`). Yang perlu di-set: kubeconfig VPS sebagai GitHub secret.
 
 ```bash
-ssh deploy@91.99.194.116 "cat ~/.kube/config" | base64 -w 0 > kubeconfig.b64
+# Di workstation (kubeconfig sudah di-download di §2)
+base64 -w 0 ~/.kube/config > kubeconfig.b64   # macOS: `base64 -i ~/.kube/config -o kubeconfig.b64`
+
+# Store sebagai GH secret
+gh secret set VPS_KUBECONFIG_B64 < kubeconfig.b64
+
+# Bersihkan file lokal — kubeconfig ini mengandung cluster credential
+rm kubeconfig.b64
 ```
 
-Store `qooma_gha_deploy` (private) and `kubeconfig.b64` as GH secrets `VPS_SSH_PRIVATE_KEY` and `VPS_KUBECONFIG_B64` respectively (see `ci-cd-github-actions.md`).
+Detail secret lain (kalau nanti workflow butuh SSH juga) ada di [`ci-cd-github-actions.md`](./ci-cd-github-actions.md).
 
 ## 7. Namespace + ResourceQuota for the service
 
@@ -177,3 +234,74 @@ kubectl apply -f deploy/k8s/integration/namespace.yaml
 - **Cert-manager not issuing**: `kubectl -n cert-manager logs deploy/cert-manager` and check for HTTP-01 challenge failures (usually DNS or port 80 blocked).
 - **Traefik LoadBalancer stuck pending**: K3s's built-in `svclb` should assign the VPS IP. `kubectl -n traefik-system describe svc traefik`.
 - **Postgres pod CrashLoopBackOff**: usually PVC size / storageClass mismatch. `kubectl -n data describe pod postgres-postgresql-0`.
+- **SSH root ditolak setelah salah setting `sshd_config`**: masuk lewat Hetzner Cloud Console (browser serial console) sebagai root → perbaiki `/etc/ssh/sshd_config` → `systemctl restart ssh`. Jangan set `PermitRootLogin no` sampai user OS terpisah + NOPASSWD sudo sudah terverifikasi jalan.
+
+---
+
+## Appendix — Optional SSH user hardening
+
+Jalankan **hanya setelah** cluster stabil dan verifikasi §8 semua hijau. Tujuannya: pisah user
+OS supaya tidak semua orang SSH sebagai root, dan disable root SSH sepenuhnya.
+
+**Pitfall yang menyebabkan lockout sebelumnya**: `adduser --disabled-password` bikin user
+TANPA password sama sekali — `sudo` tidak akan pernah bisa authenticate. Wajib pakai
+`NOPASSWD` sudoers (rekomendasi untuk user deployment/CI) atau set password eksplisit.
+
+### A.1 Bikin user `deploy` + passwordless sudo
+
+```bash
+# As root di VPS
+adduser --disabled-password --gecos "" deploy
+usermod -aG sudo deploy
+
+# Passwordless sudo (WAJIB — kalau tidak, sudo akan selalu gagal karena user tidak punya password)
+echo "deploy ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/deploy
+chmod 440 /etc/sudoers.d/deploy
+visudo -c   # verifikasi syntax → "parsed OK"
+
+# Copy SSH key dari root ke deploy
+mkdir -p /home/deploy/.ssh
+cp /root/.ssh/authorized_keys /home/deploy/.ssh/
+chown -R deploy:deploy /home/deploy/.ssh
+chmod 700 /home/deploy/.ssh
+chmod 600 /home/deploy/.ssh/authorized_keys
+
+# Copy kubeconfig ke deploy
+mkdir -p /home/deploy/.kube
+cp /etc/rancher/k3s/k3s.yaml /home/deploy/.kube/config
+chown -R deploy:deploy /home/deploy/.kube
+```
+
+### A.2 Verifikasi deploy SSH + sudo bekerja SEBELUM disable root
+
+**JANGAN** disable root SSH sebelum step ini hijau. Kalau salah urutan → lockout.
+
+```bash
+# Dari workstation — buka terminal BARU, JANGAN tutup session root yang aktif
+ssh deploy@91.99.194.116 "sudo whoami && kubectl get nodes"
+# Expect: 'root' + list node K3s
+```
+
+### A.3 Disable root SSH
+
+Kalau A.2 sudah hijau:
+
+```bash
+# Di VPS (bisa sebagai root atau deploy sudo)
+sudo sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+sudo systemctl restart ssh
+```
+
+Verifikasi dari workstation:
+```bash
+ssh root@91.99.194.116 "hostname" 2>&1 | grep -q "Permission denied" && echo "root diblok — OK"
+ssh deploy@91.99.194.116 "hostname"   # deploy tetap jalan
+```
+
+### A.4 Emergency recovery kalau ter-lockout
+
+Semua opsi lockout bisa di-fix via Hetzner Cloud Console (browser serial console):
+1. Console → login root pakai password (reset di tab Rescue kalau lupa).
+2. `sed -i 's/^PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config`
+3. `systemctl restart ssh`
+4. Kalau `deploy` user yang broken: `userdel -r deploy` lalu ulangi A.1.

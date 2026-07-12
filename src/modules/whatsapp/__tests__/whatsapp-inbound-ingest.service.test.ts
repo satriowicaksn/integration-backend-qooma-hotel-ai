@@ -226,13 +226,24 @@ describe('WhatsappInboundIngestService.processEvent — worker discipline (never
     const { port: guestPort, double: guestDouble } = createGuestPortDouble();
     const { port: aiPort, double: aiDouble } = createAiPortDouble();
     guestDouble.upsertGuestByWaPhone.mockResolvedValue({ guestId: 'guest-1' });
-    aiDouble.inboundWaMessage.mockResolvedValue(undefined);
+    aiDouble.inboundWaMessage.mockResolvedValue({
+      conversationId: 'conv-1',
+      reply: 'Breakfast ends at 10:30.',
+      stopReason: 'end_turn',
+    });
     repoDouble.markProcessed.mockResolvedValue({});
     const service = new WhatsappInboundIngestService(repo, guestPort, aiPort, createLoggerSpy());
 
     const outcomes = await service.processEvent(EVENT_ID, HOTEL_ID, validEnvelope);
 
-    expect(outcomes).toEqual([{ messageId: 'wamid.hello1', guestId: 'guest-1', dispatched: true }]);
+    expect(outcomes).toMatchObject([
+      {
+        messageId: 'wamid.hello1',
+        guestId: 'guest-1',
+        dispatched: true,
+        aiReply: 'Breakfast ends at 10:30.',
+      },
+    ]);
     expect(repoDouble.markProcessed).toHaveBeenCalledTimes(1);
     expect(repoDouble.markFailed).not.toHaveBeenCalled();
     const guestArg = guestDouble.upsertGuestByWaPhone.mock.calls[0]?.[0] as {
@@ -241,17 +252,13 @@ describe('WhatsappInboundIngestService.processEvent — worker discipline (never
       name?: string;
     };
     expect(guestArg).toEqual({ hotelId: HOTEL_ID, waPhone: WA_PHONE, name: 'Nanak' });
-    const aiArg = aiDouble.inboundWaMessage.mock.calls[0]?.[0] as {
-      hotelId: string;
-      guestId: string;
-      body: string;
-      messageId: string;
-    };
-    expect(aiArg).toEqual({
+    const aiArg = aiDouble.inboundWaMessage.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(aiArg).toMatchObject({
       hotelId: HOTEL_ID,
-      guestId: 'guest-1',
-      body: 'Halo',
-      messageId: 'wamid.hello1',
+      agentSlug: 'reception',
+      sourceId: 'wamid.hello1',
+      messages: [{ role: 'user', content: 'Halo' }],
+      context: { guestId: 'guest-1', channel: 'whatsapp', locale: 'id' },
     });
   });
 
@@ -259,7 +266,7 @@ describe('WhatsappInboundIngestService.processEvent — worker discipline (never
     const { repo, double: repoDouble } = createRepoDouble();
     const { port: guestPort, double: guestDouble } = createGuestPortDouble();
     const { port: aiPort, double: aiDouble } = createAiPortDouble();
-    repoDouble.markProcessed.mockResolvedValue({});
+    repoDouble.markProcessed.mockResolvedValue(undefined);
     const service = new WhatsappInboundIngestService(repo, guestPort, aiPort, createLoggerSpy());
 
     const outcomes = await service.processEvent(EVENT_ID, HOTEL_ID, receiptOnlyEnvelope);
@@ -339,7 +346,11 @@ describe('WhatsappInboundIngestService.processEvent — worker discipline (never
     const { port: guestPort, double: guestDouble } = createGuestPortDouble();
     const { port: aiPort, double: aiDouble } = createAiPortDouble();
     guestDouble.upsertGuestByWaPhone.mockResolvedValue({ guestId: 'guest-1' });
-    aiDouble.inboundWaMessage.mockResolvedValue(undefined);
+    aiDouble.inboundWaMessage.mockResolvedValue({
+      conversationId: 'conv-1',
+      reply: 'ok',
+      stopReason: 'end_turn',
+    });
     repoDouble.markProcessed.mockRejectedValue(new Error('DB down'));
     const logger = createLoggerSpy();
     const service = new WhatsappInboundIngestService(repo, guestPort, aiPort, logger);
@@ -372,7 +383,11 @@ describe('WhatsappInboundIngestService.processEvent — worker discipline (never
     guestDouble.upsertGuestByWaPhone
       .mockResolvedValueOnce({ guestId: 'guest-1' })
       .mockRejectedValueOnce(new Error('HC 502'));
-    aiDouble.inboundWaMessage.mockResolvedValue(undefined);
+    aiDouble.inboundWaMessage.mockResolvedValue({
+      conversationId: 'conv-1',
+      reply: 'ok',
+      stopReason: 'end_turn',
+    });
     repoDouble.markFailed.mockResolvedValue({});
     const service = new WhatsappInboundIngestService(repo, guestPort, aiPort, createLoggerSpy());
 
@@ -390,7 +405,11 @@ describe('WhatsappInboundIngestService.processEvent — worker discipline (never
     const { port: guestPort, double: guestDouble } = createGuestPortDouble();
     const { port: aiPort, double: aiDouble } = createAiPortDouble();
     guestDouble.upsertGuestByWaPhone.mockResolvedValue({ guestId: 'guest-2' });
-    aiDouble.inboundWaMessage.mockResolvedValue(undefined);
+    aiDouble.inboundWaMessage.mockResolvedValue({
+      conversationId: 'conv-2',
+      reply: 'ok',
+      stopReason: 'end_turn',
+    });
     repoDouble.markProcessed.mockResolvedValue({});
     const service = new WhatsappInboundIngestService(repo, guestPort, aiPort, createLoggerSpy());
 
@@ -440,7 +459,11 @@ describe('WhatsappInboundIngestService — PII floor (maskWaPhone)', () => {
     const { port: guestPort, double: guestDouble } = createGuestPortDouble();
     const { port: aiPort, double: aiDouble } = createAiPortDouble();
     guestDouble.upsertGuestByWaPhone.mockResolvedValue({ guestId: 'guest-1' });
-    aiDouble.inboundWaMessage.mockResolvedValue(undefined);
+    aiDouble.inboundWaMessage.mockResolvedValue({
+      conversationId: 'conv-1',
+      reply: 'ok',
+      stopReason: 'end_turn',
+    });
     repoDouble.markProcessed.mockResolvedValue({});
     const logger = createLoggerSpy();
     const service = new WhatsappInboundIngestService(repo, guestPort, aiPort, logger);

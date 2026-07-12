@@ -28,6 +28,8 @@ import type { IngestOutcome, WebhookEventProvider } from './whatsapp-webhook-ing
 
 const PROVIDER: WebhookEventProvider = 'whatsapp';
 const LOG_MODULE = 'whatsapp';
+const AI_AGENT_SLUG = 'reception';
+const AI_LOCALE = 'id';
 const LOG_INGEST_SYNC = 'whatsapp_inbound_ingest.persist';
 const LOG_PROCESS_EVENT = 'whatsapp_inbound_ingest.process';
 const LOG_PROCESS_MESSAGE = 'whatsapp_inbound_ingest.message';
@@ -187,13 +189,16 @@ export class WhatsappInboundIngestService {
       };
     }
 
+    let aiReply: string;
     try {
-      await this.aiPort.inboundWaMessage({
+      const result = await this.aiPort.inboundWaMessage({
         hotelId,
-        guestId,
-        body: message.body,
-        messageId: message.messageId,
+        agentSlug: AI_AGENT_SLUG,
+        sourceId: message.messageId,
+        messages: [{ role: 'user', content: message.body }],
+        context: { guestId, channel: 'whatsapp', locale: AI_LOCALE },
       });
+      aiReply = result.reply;
     } catch (err) {
       return {
         messageId: message.messageId,
@@ -207,6 +212,7 @@ export class WhatsappInboundIngestService {
       messageId: message.messageId,
       guestId,
       dispatched: true,
+      aiReply,
     };
   }
 

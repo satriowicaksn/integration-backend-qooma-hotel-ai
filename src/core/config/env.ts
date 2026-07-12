@@ -13,7 +13,7 @@ import { z } from 'zod';
 
 const EnvSchema = z.object({
   // Runtime
-  NODE_ENV: z.enum(['development', 'staging', 'production']).default('development'),
+  NODE_ENV: z.enum(['development', 'test', 'staging', 'production']).default('development'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   TZ: z.string().default('UTC'),
 
@@ -73,6 +73,12 @@ const EnvSchema = z.object({
   // defaults to Meta Graph `v22.0` per spec §3.1.
   WA_BSP_BASE_URL: z.string().url().optional(),
   WA_BSP_API_VERSION: z.string().default('v22.0'),
+  // AI service base URL — dev: http://localhost:3000 | staging: https://ai-staging.sharedisini.com
+  // Optional: `api-server.ts` uses stub adapter when unset (Q-B-05).
+  AI_BASE_URL: z.string().url().optional(),
+  // HMAC-SHA256 secret for outbound calls to AI service (X-Service-Signature).
+  // Required when AI_BASE_URL is set. Generate: `openssl rand -base64 36`.
+  INTEGRATION_TO_AI_HMAC_SECRET: z.string().min(32).optional(),
 
   // Rate limit
   RATE_LIMIT_GLOBAL_PER_MIN: z.coerce.number().int().positive().default(100),

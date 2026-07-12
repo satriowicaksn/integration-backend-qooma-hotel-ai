@@ -53,6 +53,7 @@ import { AiInboundStubAdapter } from '@modules/whatsapp/adapters/ai-inbound.stub
 import { HotelCoreDndPassthroughAdapter } from '@modules/whatsapp/adapters/hc-dnd-passthrough.adapter.js';
 import { HotelCoreGuestUpsertStubAdapter } from '@modules/whatsapp/adapters/hc-guest-upsert.stub-adapter.js';
 import { HotelCoreQuotaPassthroughAdapter } from '@modules/whatsapp/adapters/hc-quota-passthrough.adapter.js';
+import { HttpAiInboundMessageAdapter } from '@modules/whatsapp/adapters/http-ai-inbound-message.adapter.js';
 import { EnvWaHotelSlugLookup } from '@modules/whatsapp/adapters/wa-hotel-slug-lookup.adapter.js';
 import { WhatsappWebhookSecretResolver } from '@modules/whatsapp/adapters/whatsapp-webhook-secret.adapter.js';
 import { WhatsappConfigRepository } from '@modules/whatsapp/whatsapp-config.repository.js';
@@ -105,7 +106,9 @@ export async function buildServer(): Promise<FastifyInstance> {
     });
   });
 
-  app.get('/healthz', () => ({ status: 'ok' }));
+  app.get('/healthz', async (_req, reply) => {
+    return reply.type('text/plain').send('OK');
+  });
 
   // Manual DI wiring: repository ← db, service ← repo + logger.
   // Guards composed here so route plugins stay auth-agnostic.
@@ -254,15 +257,23 @@ export async function buildServer(): Promise<FastifyInstance> {
 
   // T27 — WA inbound webhook (Meta-facing, spec §2.3 + §3.1).
   // Guard order: raw-body parser (registered above for telegram) →
-  // resolveTenantFromSlug → verifyWebhookSignature. HC guest upsert +
-  // AI inbound land as STUBS pending Q-B-04 + Q-B-05.
+  // resolveTenantFromSlug → verifyWebhookSignature. HC guest upsert is
+  // still a STUB (Q-B-04). AI inbound uses HttpAiInboundMessageAdapter
+  // when AI_BASE_URL + INTEGRATION_TO_AI_HMAC_SECRET are set, otherwise
+  // falls back to stub.
   const waWebhookEventsRepo = new WhatsappWebhookEventsRepository(db);
   const waGuestUpsertStub = new HotelCoreGuestUpsertStubAdapter(logger);
-  const waAiInboundStub = new AiInboundStubAdapter(logger);
+  const waAiInbound =
+    config.AI_BASE_URL !== undefined && config.INTEGRATION_TO_AI_HMAC_SECRET !== undefined
+      ? new HttpAiInboundMessageAdapter(
+          { baseUrl: config.AI_BASE_URL, hmacSecret: config.INTEGRATION_TO_AI_HMAC_SECRET },
+          logger,
+        )
+      : new AiInboundStubAdapter(logger);
   const waIngestService = new WhatsappInboundIngestService(
     waWebhookEventsRepo,
     waGuestUpsertStub,
-    waAiInboundStub,
+    waAiInbound,
     logger,
   );
   const waSlugAdapter = new EnvWaHotelSlugLookup(config.WHATSAPP_WEBHOOK_HOTEL_SLUG_MAP ?? '');
@@ -280,13 +291,12 @@ export async function buildServer(): Promise<FastifyInstance> {
     logger,
   });
 
-  // Loud startup signal: HC guest-upsert + AI inbound are STUBs pending
-  // Q-B-04 + Q-B-05. Ops should see this on every boot.
   logger.warn({
     msg: 'whatsapp_inbound.startup',
     module: 'whatsapp',
-    hcAdapters: 'STUB',
-    ratifyQs: 'Q-B-04,Q-B-05',
+    hcGuestUpsert: 'STUB',
+    aiAdapter: config.AI_BASE_URL !== undefined ? 'HTTP' : 'STUB',
+    ratifyQs: config.AI_BASE_URL !== undefined ? 'Q-B-04' : 'Q-B-04,Q-B-05',
     hmacSecret: 'webhook_verify_token_per_Q-A-04',
   });
 

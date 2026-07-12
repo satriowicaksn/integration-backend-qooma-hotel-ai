@@ -5,6 +5,8 @@
 
 import type { PrismaClient } from '@prisma/client';
 
+import { ValidationError } from '@core/errors/app-errors.js';
+
 import type {
   ConversationDomain,
   CursorFilterConversations,
@@ -185,15 +187,16 @@ function decodeMessageCursor(raw: string | null): DecodedCursor | null {
 }
 
 function decodeCursor(raw: string): DecodedCursor {
-  const parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as {
-    v?: number;
-    id?: string;
-    ts?: string;
-  };
+  let parsed: { v?: number; id?: string; ts?: string };
+  try {
+    parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as typeof parsed;
+  } catch {
+    throw new ValidationError('malformed cursor');
+  }
   if (parsed.v !== 1 || typeof parsed.id !== 'string' || typeof parsed.ts !== 'string') {
-    throw new TypeError('malformed cursor');
+    throw new ValidationError('malformed cursor');
   }
   const ts = new Date(parsed.ts);
-  if (Number.isNaN(ts.getTime())) throw new TypeError('malformed cursor timestamp');
+  if (Number.isNaN(ts.getTime())) throw new ValidationError('malformed cursor timestamp');
   return { ts, id: parsed.id };
 }
