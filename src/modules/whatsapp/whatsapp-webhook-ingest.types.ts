@@ -59,6 +59,7 @@ export interface IngestOutcome {
   readonly messageId: string;
   readonly guestId?: string | undefined;
   readonly dispatched: boolean;
+  readonly aiReply?: string | undefined;
   readonly error?: string | undefined;
 }
 
@@ -77,13 +78,32 @@ export interface GuestUpsertResult {
   readonly guestId: string;
 }
 
+/** Single message turn sent to AI service POST /internal/ai/chat `messages[]`. */
+export interface AiChatMessage {
+  readonly role: 'user' | 'assistant' | 'system';
+  readonly content: string;
+}
+
 /**
- * Q-B-05 assumption A stamp — AI inbound port input. Fire-and-forget; no
- * return payload per spec §3.2 L311.
+ * Input for `AiInboundMessagePort.inboundWaMessage`, maps 1:1 to
+ * AI service POST /internal/ai/chat request body (snake_case conversion
+ * done in the HTTP adapter).
  */
 export interface AiInboundInput {
   readonly hotelId: string;
-  readonly guestId: string;
-  readonly body: string;
-  readonly messageId: string;
+  readonly agentSlug: string;
+  readonly sourceId: string;
+  readonly messages: AiChatMessage[];
+  readonly context: {
+    readonly guestId: string | null;
+    readonly channel: 'whatsapp' | 'telegram' | 'internal';
+    readonly locale: 'id' | 'en';
+  };
+}
+
+/** Subset of AI service POST /internal/ai/chat response 200 used by the adapter. */
+export interface AiChatResult {
+  readonly conversationId: string;
+  readonly reply: string;
+  readonly stopReason: string;
 }
