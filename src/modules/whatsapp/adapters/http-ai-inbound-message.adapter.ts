@@ -111,7 +111,8 @@ export class HttpAiInboundMessageAdapter implements AiInboundMessagePort {
 
       if (!isRetryable(res.status, lastBody) || attempt === RETRY_DELAYS_MS.length) break;
 
-      await sleep(RETRY_DELAYS_MS[attempt]!);
+      const delay = RETRY_DELAYS_MS[attempt];
+      if (delay !== undefined) await sleep(delay);
     }
 
     const code = lastBody.error?.code ?? 'UNKNOWN';

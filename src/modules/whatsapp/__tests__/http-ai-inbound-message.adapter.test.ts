@@ -13,6 +13,7 @@ import { createHmac } from 'node:crypto';
 
 import { describe, expect, it, jest, beforeEach } from '@jest/globals';
 import axios from 'axios';
+import type { AxiosInstance } from 'axios';
 
 import { ExternalServiceError } from '@core/errors/app-errors.js';
 import type { Logger } from '@core/logger/logger.js';
@@ -41,12 +42,12 @@ function createLoggerSpy(): Logger {
   return { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() };
 }
 
-function makeAxiosInstance(postFn: jest.Mock): axios.AxiosInstance {
-  return { post: postFn } as unknown as axios.AxiosInstance;
+function makeAxiosInstance(postFn: jest.MockedFunction<AxiosInstance['post']>): AxiosInstance {
+  return { post: postFn } as unknown as AxiosInstance;
 }
 
 describe('HttpAiInboundMessageAdapter', () => {
-  let postMock: jest.Mock;
+  let postMock: jest.MockedFunction<AxiosInstance['post']>;
 
   beforeEach(() => {
     postMock = jest.fn();

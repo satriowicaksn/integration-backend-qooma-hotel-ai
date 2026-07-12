@@ -50,10 +50,10 @@ import { TelegramDeptRoutingService } from '@modules/telegram-dept-routing/teleg
 import type { HttpPoster } from '@modules/whatsapp/adapters/1engage.adapter.js';
 import { create1engageAdapter } from '@modules/whatsapp/adapters/1engage.adapter.js';
 import { AiInboundStubAdapter } from '@modules/whatsapp/adapters/ai-inbound.stub-adapter.js';
-import { HttpAiInboundMessageAdapter } from '@modules/whatsapp/adapters/http-ai-inbound-message.adapter.js';
 import { HotelCoreDndPassthroughAdapter } from '@modules/whatsapp/adapters/hc-dnd-passthrough.adapter.js';
 import { HotelCoreGuestUpsertStubAdapter } from '@modules/whatsapp/adapters/hc-guest-upsert.stub-adapter.js';
 import { HotelCoreQuotaPassthroughAdapter } from '@modules/whatsapp/adapters/hc-quota-passthrough.adapter.js';
+import { HttpAiInboundMessageAdapter } from '@modules/whatsapp/adapters/http-ai-inbound-message.adapter.js';
 import { EnvWaHotelSlugLookup } from '@modules/whatsapp/adapters/wa-hotel-slug-lookup.adapter.js';
 import { WhatsappWebhookSecretResolver } from '@modules/whatsapp/adapters/whatsapp-webhook-secret.adapter.js';
 import { WhatsappConfigRepository } from '@modules/whatsapp/whatsapp-config.repository.js';
