@@ -28,7 +28,7 @@ import type { IngestOutcome, WebhookEventProvider } from './whatsapp-webhook-ing
 
 const PROVIDER: WebhookEventProvider = 'whatsapp';
 const LOG_MODULE = 'whatsapp';
-const AI_AGENT_SLUG = 'reception';
+const AI_AGENT_SLUG = 'default';
 const AI_LOCALE = 'id';
 const LOG_INGEST_SYNC = 'whatsapp_inbound_ingest.persist';
 const LOG_PROCESS_EVENT = 'whatsapp_inbound_ingest.process';
