@@ -33,6 +33,7 @@ const AI_LOCALE = 'id';
 const LOG_INGEST_SYNC = 'whatsapp_inbound_ingest.persist';
 const LOG_PROCESS_EVENT = 'whatsapp_inbound_ingest.process';
 const LOG_PROCESS_MESSAGE = 'whatsapp_inbound_ingest.message';
+const LOG_MESSAGE_FAILED = 'whatsapp_inbound_ingest.message_failed';
 
 function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
@@ -146,6 +147,14 @@ export class WhatsappInboundIngestService {
         if (firstError === undefined && outcome.error !== undefined) {
           firstError = outcome.error;
         }
+        this.logger.error({
+          msg: LOG_MESSAGE_FAILED,
+          module: LOG_MODULE,
+          hotelId,
+          eventId,
+          messageId: outcome.messageId,
+          error: outcome.error,
+        });
       }
     }
 
