@@ -106,7 +106,7 @@ const VALID_ENVELOPE = {
   ],
 };
 
-describe('POST /webhook/whatsapp/:hotel_slug — guard order + persist/dispatch discipline', () => {
+describe('POST /webhook/whatsapp — guard order + persist/dispatch discipline', () => {
   it('should run tenant → signature → persist → per-message dispatch in that order (bindings #8/#13)', async () => {
     const order: string[] = [];
     const ingest: IngestDouble = {
@@ -131,7 +131,7 @@ describe('POST /webhook/whatsapp/:hotel_slug — guard order + persist/dispatch 
     try {
       const res = await app.inject({
         method: 'POST',
-        url: '/webhook/whatsapp/any',
+        url: '/webhook/whatsapp',
         payload: VALID_ENVELOPE,
       });
       expect(res.statusCode).toBe(200);
@@ -162,7 +162,7 @@ describe('POST /webhook/whatsapp/:hotel_slug — guard order + persist/dispatch 
     try {
       const res = await app.inject({
         method: 'POST',
-        url: '/webhook/whatsapp/any',
+        url: '/webhook/whatsapp',
         payload: VALID_ENVELOPE,
       });
       expect(res.statusCode).toBe(200);
@@ -222,7 +222,7 @@ describe('POST /webhook/whatsapp/:hotel_slug — guard order + persist/dispatch 
     try {
       const res = await app.inject({
         method: 'POST',
-        url: '/webhook/whatsapp/any',
+        url: '/webhook/whatsapp',
         payload: VALID_ENVELOPE,
       });
       expect(res.statusCode).toBe(401);
@@ -250,7 +250,7 @@ describe('POST /webhook/whatsapp/:hotel_slug — guard order + persist/dispatch 
     try {
       const res = await app.inject({
         method: 'POST',
-        url: '/webhook/whatsapp/any',
+        url: '/webhook/whatsapp',
         payload: VALID_ENVELOPE,
       });
       expect(res.statusCode).toBe(400);
@@ -278,7 +278,7 @@ describe('POST /webhook/whatsapp/:hotel_slug — guard order + persist/dispatch 
     try {
       await app.inject({
         method: 'POST',
-        url: '/webhook/whatsapp/any',
+        url: '/webhook/whatsapp',
         headers: { 'x-hub-signature-256': signatureValue },
         payload: VALID_ENVELOPE,
       });

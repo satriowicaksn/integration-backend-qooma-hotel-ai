@@ -55,10 +55,6 @@ const EnvSchema = z.object({
   // 404s. Auth / HC RPC lookup replaces this once Q-OPS-06 +
   // Q-CONTRACT-25 resolve.
   TELEGRAM_DEPT_ROUTING_MAP: z.string().optional(),
-  // T27 WA inbound webhook: MVP hotel-slug → hotel_id map (mirrors
-  // TELEGRAM_WEBHOOK_HOTEL_SLUG_MAP). Empty → every slug 404s BEFORE
-  // HMAC verification (anti-enumeration). JSON `{ "slug": "<uuid>" }`.
-  WHATSAPP_WEBHOOK_HOTEL_SLUG_MAP: z.string().optional(),
   // T21-followup OTA poll cron cadence (milliseconds). Default 60_000
   // per spec §3.3 — 60s. Set to 0 to DISABLE the cron entirely in dev.
   OTA_POLL_INTERVAL_MS: z.coerce.number().int().nonnegative().default(60_000),

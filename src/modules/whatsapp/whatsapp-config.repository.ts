@@ -18,6 +18,10 @@ export class WhatsappConfigRepository {
     return this.db.waConfig.findUnique({ where: { hotelId } });
   }
 
+  async findByPhoneNumberId(phoneNumberId: string): Promise<WaConfig | null> {
+    return this.db.waConfig.findFirst({ where: { phoneNumberId } });
+  }
+
   async upsert(hotelId: string, input: WhatsappConfigPersistenceInput): Promise<WaConfig> {
     return this.db.waConfig.upsert({
       where: { hotelId },
