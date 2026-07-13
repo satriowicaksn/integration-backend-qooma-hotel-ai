@@ -255,12 +255,39 @@ export async function buildServer(): Promise<FastifyInstance> {
     guards: [internalRpcAuthGuard({ secret: config.INTERNAL_RPC_SECRET })],
   });
 
+  // T28 — WA outbound dispatch service (ADR-0009, spec §2.4).
+  // Created here (before T27) so it can be passed to the inbound webhook
+  // route for fire-and-forget AI reply dispatch. Route registration is
+  // env-gated on `WA_BSP_BASE_URL` (Q-C-16); without it the 1engage BSP
+  // has no target and dispatch would immediately fail — we prefer NOT to
+  // register the route so HC gets a clean 404 instead of a confusing 502.
+  // HC quota + DND are **passthrough** per ADR-0009 (FINAL MVP, NOT stubs).
+  let outboundDispatchService: WhatsappOutboundDispatchService | undefined;
+  if (config.WA_BSP_BASE_URL !== undefined) {
+    const bspHttpPoster = createBspHttpPoster();
+    const bsp = create1engageAdapter({
+      http: bspHttpPoster,
+      config: { baseUrl: config.WA_BSP_BASE_URL, apiVersion: config.WA_BSP_API_VERSION },
+    });
+    const quotaAdapter = new HotelCoreQuotaPassthroughAdapter(logger);
+    const dndAdapter = new HotelCoreDndPassthroughAdapter(logger);
+    const outboundDispatchRepo = new WhatsappOutboundDispatchRepository(db);
+    outboundDispatchService = new WhatsappOutboundDispatchService(
+      outboundDispatchRepo,
+      bsp,
+      quotaAdapter,
+      dndAdapter,
+      logger,
+    );
+  }
+
   // T27 — WA inbound webhook (Meta-facing, spec §2.3 + §3.1).
   // Guard order: raw-body parser (registered above for telegram) →
   // resolveTenantFromSlug → verifyWebhookSignature. HC guest upsert is
   // still a STUB (Q-B-04). AI inbound uses HttpAiInboundMessageAdapter
   // when AI_BASE_URL + INTEGRATION_TO_AI_HMAC_SECRET are set, otherwise
-  // falls back to stub.
+  // falls back to stub. `dispatchService` wires AI reply → WA guest when
+  // BSP is configured; undefined → reply dispatch skipped (stub/dev mode).
   const waWebhookEventsRepo = new WhatsappWebhookEventsRepository(db);
   const waGuestUpsertStub = new HotelCoreGuestUpsertStubAdapter(logger);
   const waAiInbound =
@@ -282,6 +309,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   await app.register(whatsappWebhookRoutes, {
     ingestService: waIngestService,
     conversationsService,
+    dispatchService: outboundDispatchService,
     tenantResolver: resolveTenantFromSlug({ resolver: waSlugResolver }),
     signatureGuard: verifyWebhookSignature({
       provider: 'whatsapp',
@@ -296,35 +324,13 @@ export async function buildServer(): Promise<FastifyInstance> {
     module: 'whatsapp',
     hcGuestUpsert: 'STUB',
     aiAdapter: config.AI_BASE_URL !== undefined ? 'HTTP' : 'STUB',
+    dispatchAdapter: outboundDispatchService !== undefined ? 'BSP' : 'SKIP',
     ratifyQs: config.AI_BASE_URL !== undefined ? 'Q-B-04' : 'Q-B-04,Q-B-05',
     hmacSecret: 'webhook_verify_token_per_Q-A-04',
   });
 
-  // T28 — WA outbound dispatch internal RPC (ADR-0009, spec §2.4).
-  // Behind `internalRpcAuthGuard` (T09). Composes T13 dispatch service
-  // with the T29 conversations upsert on outcome. HC quota + DND are
-  // **passthrough** per ADR-0009 (FINAL MVP, NOT stubs).
-  //
-  // Route registration is env-gated on `WA_BSP_BASE_URL` (Q-C-16). Without
-  // it, the 1engage BSP has no target and dispatch would immediately fail;
-  // we prefer NOT to register the route in that case so HC gets a clean
-  // 404 instead of a confusing 502.
-  if (config.WA_BSP_BASE_URL !== undefined) {
-    const bspHttpPoster = createBspHttpPoster();
-    const bsp = create1engageAdapter({
-      http: bspHttpPoster,
-      config: { baseUrl: config.WA_BSP_BASE_URL, apiVersion: config.WA_BSP_API_VERSION },
-    });
-    const quotaAdapter = new HotelCoreQuotaPassthroughAdapter(logger);
-    const dndAdapter = new HotelCoreDndPassthroughAdapter(logger);
-    const outboundDispatchRepo = new WhatsappOutboundDispatchRepository(db);
-    const outboundDispatchService = new WhatsappOutboundDispatchService(
-      outboundDispatchRepo,
-      bsp,
-      quotaAdapter,
-      dndAdapter,
-      logger,
-    );
+  // T28 — WA outbound dispatch internal RPC route (behind internalRpcAuthGuard).
+  if (outboundDispatchService !== undefined) {
     await app.register(whatsappDispatchRoutes, {
       dispatchService: outboundDispatchService,
       conversationsService,

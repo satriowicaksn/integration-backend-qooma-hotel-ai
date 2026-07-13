@@ -22,6 +22,7 @@ import { maskWaPhone } from '@shared/utils/masking.js';
 
 import type { WhatsappConversationsService } from './whatsapp-conversations.service.js';
 import type { WhatsappInboundIngestService } from './whatsapp-inbound-ingest.service.js';
+import type { WhatsappOutboundDispatchService } from './whatsapp-outbound-dispatch.service.js';
 import {
   type WhatsappInboundEnvelopeDto,
   extractInboundMessages,
@@ -38,12 +39,15 @@ export interface ProcessInboundWebhookInput {
 export interface ProcessInboundWebhookDeps {
   readonly conversationsService: WhatsappConversationsService;
   readonly ingestService: WhatsappInboundIngestService;
+  readonly dispatchService?: WhatsappOutboundDispatchService | undefined;
   readonly logger: Logger;
 }
 
 const LOG_MODULE = 'whatsapp';
 const LOG_MSG_UPSERT_FAILED = 'whatsapp_inbound.conversations_upsert_failed';
 const LOG_MSG_MESSAGE = 'whatsapp_inbound.per_message';
+const LOG_MSG_REPLY_DISPATCHED = 'whatsapp_inbound.ai_reply_dispatched';
+const LOG_MSG_REPLY_DISPATCH_FAILED = 'whatsapp_inbound.ai_reply_dispatch_failed';
 
 /**
  * Compose per-message conversations upsert with T12's guest+AI async
@@ -92,5 +96,46 @@ export async function processInboundWebhook(
     }
   }
 
-  return deps.ingestService.processEvent(input.eventId, input.hotelId, input.envelope);
+  const outcomes = await deps.ingestService.processEvent(
+    input.eventId,
+    input.hotelId,
+    input.envelope,
+  );
+
+  if (deps.dispatchService !== undefined) {
+    for (const outcome of outcomes) {
+      if (!outcome.dispatched || outcome.aiReply === undefined || outcome.guestId === undefined) {
+        continue;
+      }
+      const msg = messages.find((m) => m.messageId === outcome.messageId);
+      if (msg === undefined) continue;
+      try {
+        const dispatchOutcome = await deps.dispatchService.dispatchMessage({
+          hotelId: input.hotelId,
+          guestId: outcome.guestId,
+          recipientPhone: msg.waPhone,
+          body: outcome.aiReply,
+        });
+        deps.logger.info({
+          msg: LOG_MSG_REPLY_DISPATCHED,
+          module: LOG_MODULE,
+          hotelId: input.hotelId,
+          messageId: outcome.messageId,
+          waPhone: maskWaPhone(msg.waPhone),
+          kind: dispatchOutcome.kind,
+        });
+      } catch (err) {
+        deps.logger.error({
+          msg: LOG_MSG_REPLY_DISPATCH_FAILED,
+          module: LOG_MODULE,
+          hotelId: input.hotelId,
+          messageId: outcome.messageId,
+          waPhone: maskWaPhone(msg.waPhone),
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  }
+
+  return outcomes;
 }
