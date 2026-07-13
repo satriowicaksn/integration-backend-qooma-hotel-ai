@@ -6,9 +6,10 @@
 
 - This service is fully wired (`buildServer`) and its `/api/integrations/*` paths match the FE exactly (whatsapp, telegram, telegram/departments, qr/regenerate, qr/download, overview). But the FE keeps `VITE_MOCK_INTEGRATION=true` (MSW) until sign-off, so the live BE is not exercised from the browser yet.
 
-**🔧 Dev C (Satrio) — TASKS:**
+**🔧 Dev C (Satrio) — TASKS (updated 2026-07-13):**
 
-- Flip FE `VITE_MOCK_INTEGRATION=false` (confirm `VITE_INTEGRATION_BACKEND_URL=https://integration-staging.sharedisini.com`) and verify reachability with the cross-origin cookie (needs auth `COOKIE_DOMAIN` + this service's `CORS_ORIGIN` including the vercel origin).
+- ✅ **done 2026-07-13** — `CORS_ORIGIN` on this service updated to include `https://frontend-qooma-hotel-ai.vercel.app`; auth `COOKIE_DOMAIN=.sharedisini.com` set; cross-origin cookie flow unblocked.
+- Flip FE `VITE_MOCK_INTEGRATION=false` (confirm `VITE_INTEGRATION_BACKEND_URL=https://integration-staging.sharedisini.com`) and verify reachability with the cross-origin cookie.
 - Finish the stub adapters flagged in this repo's code: telegram inbound (staff lookup, ticket action — Q-C-06/07), telegram dept routing (HC read/write — Q-OPS-06), QR provisioning (renderer/storage — Q-C-10), WhatsApp inbound (guest upsert, AI inbound — Q-B-04/05). WA dispatch is env-gated on `WA_BSP_BASE_URL`.
 
 **No Dev A/B tasks in this repo.**
