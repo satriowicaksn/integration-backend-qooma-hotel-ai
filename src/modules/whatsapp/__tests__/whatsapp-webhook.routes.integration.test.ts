@@ -1,8 +1,8 @@
-// End-to-end integration test for T27 POST /webhook/whatsapp/:hotel_slug.
+// End-to-end integration test for T27 POST /webhook/whatsapp.
 // Boots buildServer() so this exercises raw-body parsing → tenant resolve
-// → HMAC verify (webhook_verify_token as secret per Q-A-04 parked) →
-// webhook_events persist → per-message conversations upsert → stub HC +
-// AI adapters → 200 sync ACK.
+// (phone_number_id DB lookup) → HMAC verify (webhookVerifyToken as secret
+// per Q-A-04 parked) → webhook_events persist → per-message conversations
+// upsert → stub HC + AI adapters → 200 sync ACK.
 //
 // Skips when DATABASE_URL is not set (runOrSkip pattern, binding #10).
 
@@ -17,10 +17,9 @@ import { resetConfigCache } from '@core/config/env.js';
 import { encrypt } from '@shared/utils/crypto.js';
 
 const HOTEL_ID = '11111111-2222-3333-4444-555555555555';
-const HOTEL_SLUG = 'test-hotel';
+const PHONE_NUMBER_ID = '1234567890';
 const VERIFY_TOKEN = 'meta-verify-token-t27';
 const INTERNAL_SECRET = 'i'.repeat(48);
-const SLUG_MAP = JSON.stringify({ [HOTEL_SLUG]: HOTEL_ID });
 
 const runOrSkip = process.env['DATABASE_URL'] ? describe : describe.skip;
 
@@ -41,7 +40,6 @@ runOrSkip('T27 WA inbound webhook (integration)', () => {
     process.env['ENCRYPTION_KEY'] = 'a'.repeat(64);
     process.env['ENCRYPTION_KEY_VERSION'] = 'v1';
     process.env['INTERNAL_RPC_SECRET'] = INTERNAL_SECRET;
-    process.env['WHATSAPP_WEBHOOK_HOTEL_SLUG_MAP'] = SLUG_MAP;
     resetConfigCache();
 
     const prismaModule = await import('@core/prisma/prisma-client.js');
@@ -75,7 +73,7 @@ runOrSkip('T27 WA inbound webhook (integration)', () => {
       data: {
         hotelId: HOTEL_ID,
         bsp: '1engage',
-        phoneNumberId: '1234567890',
+        phoneNumberId: PHONE_NUMBER_ID,
         phoneNumber: '+6289999999999',
         accessTokenEnc: encrypt('plaintext-access-token'),
         webhookUrl: 'https://example.com/webhook',
@@ -86,6 +84,7 @@ runOrSkip('T27 WA inbound webhook (integration)', () => {
 
   function envelopeWith(
     messages: Array<{ from: string; body: string; id: string }>,
+    phoneNumberId = PHONE_NUMBER_ID,
   ): Record<string, unknown> {
     return {
       object: 'whatsapp_business_account',
@@ -97,7 +96,10 @@ runOrSkip('T27 WA inbound webhook (integration)', () => {
               field: 'messages',
               value: {
                 messaging_product: 'whatsapp',
-                metadata: { display_phone_number: '+6289999999999', phone_number_id: '1234567890' },
+                metadata: {
+                  display_phone_number: '+6289999999999',
+                  phone_number_id: phoneNumberId,
+                },
                 messages: messages.map((m) => ({
                   id: m.id,
                   from: m.from,
@@ -119,11 +121,12 @@ runOrSkip('T27 WA inbound webhook (integration)', () => {
     return { raw, header: `sha256=${digest}` };
   }
 
-  it('should return 404 canonical envelope when the URL slug is unknown (anti-enum BEFORE HMAC)', async () => {
-    const { raw, header } = signBody(envelopeWith([]), VERIFY_TOKEN);
+  it('should return 404 canonical envelope when the phone_number_id is unknown (anti-enum BEFORE HMAC)', async () => {
+    // No waConfig seeded — phone_number_id not in DB → 404 before HMAC check.
+    const { raw, header } = signBody(envelopeWith([], 'unknown-pnid-xxx'), VERIFY_TOKEN);
     const res = await app.inject({
       method: 'POST',
-      url: '/webhook/whatsapp/unknown-slug',
+      url: '/webhook/whatsapp',
       headers: { 'content-type': 'application/json', 'x-hub-signature-256': header },
       payload: raw,
     });
@@ -136,7 +139,7 @@ runOrSkip('T27 WA inbound webhook (integration)', () => {
     await seedWaConfig();
     const res = await app.inject({
       method: 'POST',
-      url: `/webhook/whatsapp/${HOTEL_SLUG}`,
+      url: '/webhook/whatsapp',
       headers: { 'content-type': 'application/json' },
       payload: JSON.stringify(envelopeWith([])),
     });
@@ -151,7 +154,7 @@ runOrSkip('T27 WA inbound webhook (integration)', () => {
     const raw = JSON.stringify(env);
     const res = await app.inject({
       method: 'POST',
-      url: `/webhook/whatsapp/${HOTEL_SLUG}`,
+      url: '/webhook/whatsapp',
       headers: {
         'content-type': 'application/json',
         'x-hub-signature-256': 'sha256=' + 'f'.repeat(64),
@@ -161,17 +164,38 @@ runOrSkip('T27 WA inbound webhook (integration)', () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it('should return 200 { ok: true } and NOT persist when the envelope fails zod parse', async () => {
+  it('should return 400 and NOT persist when the envelope has wrong object field (zod parse)', async () => {
     await seedWaConfig();
-    const bogusEnv = { object: 'not_whatsapp', entry: 'not-an-array' };
+    // phone_number_id is valid (tenant resolves) + HMAC is valid, but `object`
+    // field is wrong — ingestSync's zod parse surfaces a 400.
+    const bogusEnv = {
+      object: 'not_whatsapp',
+      entry: [
+        {
+          id: 'entry-1',
+          changes: [
+            {
+              field: 'messages',
+              value: {
+                messaging_product: 'whatsapp',
+                metadata: {
+                  display_phone_number: '+6289999999999',
+                  phone_number_id: PHONE_NUMBER_ID,
+                },
+                messages: [],
+              },
+            },
+          ],
+        },
+      ],
+    };
     const { raw, header } = signBody(bogusEnv, VERIFY_TOKEN);
     const res = await app.inject({
       method: 'POST',
-      url: `/webhook/whatsapp/${HOTEL_SLUG}`,
+      url: '/webhook/whatsapp',
       headers: { 'content-type': 'application/json', 'x-hub-signature-256': header },
       payload: raw,
     });
-    // Sig valid → 400 VALIDATION_ERROR surfaces from ingestSync's zod parse.
     expect(res.statusCode).toBe(400);
     const rows = await db.webhookEvent.findMany({ where: { hotelId: HOTEL_ID } });
     expect(rows).toHaveLength(0);
@@ -185,7 +209,7 @@ runOrSkip('T27 WA inbound webhook (integration)', () => {
     const { raw, header } = signBody(env, VERIFY_TOKEN);
     const res = await app.inject({
       method: 'POST',
-      url: `/webhook/whatsapp/${HOTEL_SLUG}`,
+      url: '/webhook/whatsapp',
       headers: { 'content-type': 'application/json', 'x-hub-signature-256': header },
       payload: raw,
     });
@@ -216,7 +240,7 @@ runOrSkip('T27 WA inbound webhook (integration)', () => {
     const { raw, header } = signBody(env, VERIFY_TOKEN);
     const res = await app.inject({
       method: 'POST',
-      url: `/webhook/whatsapp/${HOTEL_SLUG}`,
+      url: '/webhook/whatsapp',
       headers: {
         'content-type': 'application/json',
         'x-hub-signature-256': header,

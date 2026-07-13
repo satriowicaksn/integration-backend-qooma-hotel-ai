@@ -55,7 +55,7 @@ export const whatsappWebhookRoutes: FastifyPluginAsync<WhatsappWebhookRoutesOpti
     },
   ];
 
-  fastify.post('/webhook/whatsapp/:hotel_slug', { preHandler }, async (req) => {
+  fastify.post('/webhook/whatsapp', { preHandler }, async (req) => {
     const hotelId = requireHotelId(req.hotelId);
     // Persist FIRST (spec §4.6-4.7). Sync leg only touches
     // webhook_events + returns eventId; per-message conversations

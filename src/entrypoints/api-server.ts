@@ -54,7 +54,6 @@ import { HotelCoreDndPassthroughAdapter } from '@modules/whatsapp/adapters/hc-dn
 import { HotelCoreGuestUpsertStubAdapter } from '@modules/whatsapp/adapters/hc-guest-upsert.stub-adapter.js';
 import { HotelCoreQuotaPassthroughAdapter } from '@modules/whatsapp/adapters/hc-quota-passthrough.adapter.js';
 import { HttpAiInboundMessageAdapter } from '@modules/whatsapp/adapters/http-ai-inbound-message.adapter.js';
-import { EnvWaHotelSlugLookup } from '@modules/whatsapp/adapters/wa-hotel-slug-lookup.adapter.js';
 import { WhatsappWebhookSecretResolver } from '@modules/whatsapp/adapters/whatsapp-webhook-secret.adapter.js';
 import { WhatsappConfigRepository } from '@modules/whatsapp/whatsapp-config.repository.js';
 import { whatsappConfigRoutes } from '@modules/whatsapp/whatsapp-config.routes.js';
@@ -72,7 +71,12 @@ import { registerErrorHandler } from '@plugins/error-handler.plugin.js';
 import { registerWebhookRawBody, verifyWebhookSignature } from '@plugins/hmac-validator.plugin.js';
 import { internalRpcAuthGuard } from '@plugins/internal-rpc-auth.plugin.js';
 import { jwtAuthGuard, requireRole } from '@plugins/jwt-auth.plugin.js';
-import { createSlugResolver, resolveTenantFromSlug } from '@plugins/tenant-resolver.plugin.js';
+import {
+  createPhoneNumberIdResolver,
+  createSlugResolver,
+  resolveTenantFromPhoneNumberId,
+  resolveTenantFromSlug,
+} from '@plugins/tenant-resolver.plugin.js';
 
 const CORRELATION_HEADER = 'x-correlation-id';
 
@@ -303,14 +307,16 @@ export async function buildServer(): Promise<FastifyInstance> {
     waAiInbound,
     logger,
   );
-  const waSlugAdapter = new EnvWaHotelSlugLookup(config.WHATSAPP_WEBHOOK_HOTEL_SLUG_MAP ?? '');
-  const waSlugResolver = createSlugResolver({ lookup: (slug) => waSlugAdapter.lookup(slug) });
+  const waPhoneNumberIdResolver = createPhoneNumberIdResolver({
+    lookup: (phoneNumberId) =>
+      waConfigRepo.findByPhoneNumberId(phoneNumberId).then((c) => c?.hotelId ?? null),
+  });
   const waSecretResolver = new WhatsappWebhookSecretResolver(waConfigRepo);
   await app.register(whatsappWebhookRoutes, {
     ingestService: waIngestService,
     conversationsService,
     dispatchService: outboundDispatchService,
-    tenantResolver: resolveTenantFromSlug({ resolver: waSlugResolver }),
+    tenantResolver: resolveTenantFromPhoneNumberId({ resolver: waPhoneNumberIdResolver }),
     signatureGuard: verifyWebhookSignature({
       provider: 'whatsapp',
       resolveSecret: (req) =>
