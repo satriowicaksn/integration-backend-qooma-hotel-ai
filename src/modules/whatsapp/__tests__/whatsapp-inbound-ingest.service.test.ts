@@ -255,7 +255,7 @@ describe('WhatsappInboundIngestService.processEvent — worker discipline (never
     const aiArg = aiDouble.inboundWaMessage.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(aiArg).toMatchObject({
       hotelId: HOTEL_ID,
-      agentSlug: 'reception',
+      agentSlug: 'default',
       sourceId: 'wamid.hello1',
       messages: [{ role: 'user', content: 'Halo' }],
       context: { guestId: 'guest-1', channel: 'whatsapp', locale: 'id' },
