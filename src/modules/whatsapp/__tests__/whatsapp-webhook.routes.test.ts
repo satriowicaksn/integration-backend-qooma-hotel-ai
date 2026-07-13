@@ -136,6 +136,8 @@ describe('POST /webhook/whatsapp/:hotel_slug — guard order + persist/dispatch 
       });
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({ ok: true });
+      // Fire-and-forget: flush microtasks so the background chain completes.
+      await new Promise<void>((r) => setImmediate(r));
       expect(order).toEqual(['tenant', 'signature', 'persist', 'upsert', 'dispatch']);
     } finally {
       await app.close();
@@ -166,6 +168,8 @@ describe('POST /webhook/whatsapp/:hotel_slug — guard order + persist/dispatch 
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({ ok: true });
       expect(order).toContain('persist');
+      // Fire-and-forget: flush microtasks so the catch handler runs.
+      await new Promise<void>((r) => setImmediate(r));
       expect(logger.error).toHaveBeenCalledWith(
         expect.objectContaining({ msg: 'whatsapp_inbound.dispatch_failed' }),
       );
@@ -278,6 +282,8 @@ describe('POST /webhook/whatsapp/:hotel_slug — guard order + persist/dispatch 
         headers: { 'x-hub-signature-256': signatureValue },
         payload: VALID_ENVELOPE,
       });
+      // Fire-and-forget: flush microtasks so the catch handler (logger.error) runs.
+      await new Promise<void>((r) => setImmediate(r));
       for (const method of ['info', 'warn', 'error', 'debug'] as const) {
         for (const call of logger[method].mock.calls) {
           expect(JSON.stringify(call[0])).not.toContain(signatureValue);

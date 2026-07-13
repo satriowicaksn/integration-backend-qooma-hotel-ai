@@ -12,6 +12,7 @@ import type { Logger } from '@core/logger/logger.js';
 import type { WhatsappConversationsService } from '../whatsapp-conversations.service.js';
 import type { WhatsappInboundIngestService } from '../whatsapp-inbound-ingest.service.js';
 import { processInboundWebhook } from '../whatsapp-inbound.jobs.js';
+import type { WhatsappOutboundDispatchService } from '../whatsapp-outbound-dispatch.service.js';
 
 const HOTEL_ID = '11111111-2222-3333-4444-555555555555';
 const EVENT_ID = 'dddddddd-eeee-ffff-0000-111111111111';
@@ -37,18 +38,24 @@ interface ConversationsDouble {
 interface IngestDouble {
   processEvent: jest.Mock;
 }
+interface DispatchDouble {
+  dispatchMessage: jest.Mock;
+}
 
 function buildDeps(overrides: {
   upsertOnInbound?: jest.Mock;
   processEvent?: jest.Mock;
   logger?: ReturnType<typeof createLoggerSpy>;
+  dispatchDouble?: DispatchDouble;
 }): {
   conversationsDouble: ConversationsDouble;
   ingestDouble: IngestDouble;
+  dispatchDouble: DispatchDouble | undefined;
   logger: ReturnType<typeof createLoggerSpy>;
   deps: {
     conversationsService: WhatsappConversationsService;
     ingestService: WhatsappInboundIngestService;
+    dispatchService?: WhatsappOutboundDispatchService | undefined;
     logger: Logger;
   };
 } {
@@ -64,10 +71,15 @@ function buildDeps(overrides: {
   return {
     conversationsDouble,
     ingestDouble,
+    dispatchDouble: overrides.dispatchDouble,
     logger,
     deps: {
       conversationsService: conversationsDouble as unknown as WhatsappConversationsService,
       ingestService: ingestDouble as unknown as WhatsappInboundIngestService,
+      dispatchService:
+        overrides.dispatchDouble !== undefined
+          ? (overrides.dispatchDouble as unknown as WhatsappOutboundDispatchService)
+          : undefined,
       logger,
     },
   };
@@ -186,5 +198,111 @@ describe('processInboundWebhook', () => {
     );
 
     expect(ingestDouble.processEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('should call dispatchService.dispatchMessage for each dispatched outcome with aiReply', async () => {
+    const dispatchDouble: DispatchDouble = {
+      dispatchMessage: jest.fn(() =>
+        Promise.resolve({ kind: 'dispatched', dispatchId: 'disp-1', externalId: 'ext-1' }),
+      ),
+    };
+    const processEvent = jest.fn(() =>
+      Promise.resolve([
+        {
+          messageId: 'wamid.1',
+          guestId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+          dispatched: true,
+          aiReply: 'Hello from AI',
+        },
+      ]),
+    );
+    const { deps } = buildDeps({ processEvent, dispatchDouble });
+    const env = envelope([{ from: '+6281234567890', body: 'hi', id: 'wamid.1' }]);
+
+    await processInboundWebhook(
+      { eventId: EVENT_ID, hotelId: HOTEL_ID, waConfigId: HOTEL_ID, envelope: env as never },
+      deps,
+    );
+
+    expect(dispatchDouble.dispatchMessage).toHaveBeenCalledTimes(1);
+    const arg = dispatchDouble.dispatchMessage.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(arg['hotelId']).toBe(HOTEL_ID);
+    expect(arg['guestId']).toBe('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
+    expect(arg['recipientPhone']).toBe('+6281234567890');
+    expect(arg['body']).toBe('Hello from AI');
+  });
+
+  it('should NOT call dispatchService.dispatchMessage when dispatchService is not provided', async () => {
+    const processEvent = jest.fn(() =>
+      Promise.resolve([
+        {
+          messageId: 'wamid.1',
+          guestId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+          dispatched: true,
+          aiReply: 'Hello from AI',
+        },
+      ]),
+    );
+    const { deps } = buildDeps({ processEvent });
+    const env = envelope([{ from: '+6281234567890', body: 'hi', id: 'wamid.1' }]);
+
+    await expect(
+      processInboundWebhook(
+        { eventId: EVENT_ID, hotelId: HOTEL_ID, waConfigId: HOTEL_ID, envelope: env as never },
+        deps,
+      ),
+    ).resolves.toBeDefined();
+  });
+
+  it('should NOT call dispatchService.dispatchMessage for outcomes with dispatched: false', async () => {
+    const dispatchDouble: DispatchDouble = {
+      dispatchMessage: jest.fn(() =>
+        Promise.resolve({ kind: 'dispatched', dispatchId: 'disp-1', externalId: 'ext-1' }),
+      ),
+    };
+    const processEvent = jest.fn(() =>
+      Promise.resolve([
+        { messageId: 'wamid.1', dispatched: false, error: 'guest_upsert: timeout' },
+      ]),
+    );
+    const { deps } = buildDeps({ processEvent, dispatchDouble });
+    const env = envelope([{ from: '+6281234567890', body: 'hi', id: 'wamid.1' }]);
+
+    await processInboundWebhook(
+      { eventId: EVENT_ID, hotelId: HOTEL_ID, waConfigId: HOTEL_ID, envelope: env as never },
+      deps,
+    );
+
+    expect(dispatchDouble.dispatchMessage).not.toHaveBeenCalled();
+  });
+
+  it('should log an error and NOT throw when dispatchService.dispatchMessage rejects', async () => {
+    const dispatchDouble: DispatchDouble = {
+      dispatchMessage: jest.fn(() => Promise.reject(new Error('BSP down'))),
+    };
+    const processEvent = jest.fn(() =>
+      Promise.resolve([
+        {
+          messageId: 'wamid.1',
+          guestId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+          dispatched: true,
+          aiReply: 'Hello from AI',
+        },
+      ]),
+    );
+    const logger = createLoggerSpy();
+    const { deps } = buildDeps({ processEvent, dispatchDouble, logger });
+    const env = envelope([{ from: '+6281234567890', body: 'hi', id: 'wamid.1' }]);
+
+    await expect(
+      processInboundWebhook(
+        { eventId: EVENT_ID, hotelId: HOTEL_ID, waConfigId: HOTEL_ID, envelope: env as never },
+        deps,
+      ),
+    ).resolves.toBeDefined();
+
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ msg: 'whatsapp_inbound.ai_reply_dispatch_failed' }),
+    );
   });
 });

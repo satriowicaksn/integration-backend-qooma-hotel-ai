@@ -21,11 +21,13 @@ import type { Logger } from '@core/logger/logger.js';
 import type { WhatsappConversationsService } from './whatsapp-conversations.service.js';
 import type { WhatsappInboundIngestService } from './whatsapp-inbound-ingest.service.js';
 import { processInboundWebhook } from './whatsapp-inbound.jobs.js';
+import type { WhatsappOutboundDispatchService } from './whatsapp-outbound-dispatch.service.js';
 import { WhatsappInboundEnvelopeSchema } from './whatsapp-webhook-ingest.schema.js';
 
 export interface WhatsappWebhookRoutesOptions {
   readonly ingestService: WhatsappInboundIngestService;
   readonly conversationsService: WhatsappConversationsService;
+  readonly dispatchService?: WhatsappOutboundDispatchService | undefined;
   readonly tenantResolver: (req: FastifyRequest) => Promise<void>;
   readonly signatureGuard: (req: FastifyRequest) => Promise<void>;
   readonly logger: Logger;
@@ -60,24 +62,23 @@ export const whatsappWebhookRoutes: FastifyPluginAsync<WhatsappWebhookRoutesOpti
     // upsert + guest/AI orchestration happens BELOW.
     const ingest = await opts.ingestService.ingestSync(hotelId, true, req.body);
 
-    // Compose T29 conversations upsert + T12 async orchestrator.
-    // WA config PK is hotelId (see prisma/schema.prisma), so
-    // waConfigId === hotelId.
-    try {
-      await processInboundWebhook(
-        {
-          eventId: ingest.eventId,
-          hotelId,
-          waConfigId: hotelId,
-          envelope: WhatsappInboundEnvelopeSchema.parse(req.body),
-        },
-        {
-          conversationsService: opts.conversationsService,
-          ingestService: opts.ingestService,
-          logger: opts.logger,
-        },
-      );
-    } catch (err) {
+    // Fire-and-forget: return 200 to Meta immediately (spec §4.7 ≤10s budget).
+    // Conversations upsert + guest/AI orchestration + AI reply dispatch run
+    // in background; any failure is logged but never surfaces to Meta.
+    void processInboundWebhook(
+      {
+        eventId: ingest.eventId,
+        hotelId,
+        waConfigId: hotelId,
+        envelope: WhatsappInboundEnvelopeSchema.parse(req.body),
+      },
+      {
+        conversationsService: opts.conversationsService,
+        ingestService: opts.ingestService,
+        dispatchService: opts.dispatchService,
+        logger: opts.logger,
+      },
+    ).catch((err: unknown) => {
       opts.logger.error({
         msg: LOG_MSG_DISPATCH_FAILED,
         module: LOG_MODULE,
@@ -85,7 +86,7 @@ export const whatsappWebhookRoutes: FastifyPluginAsync<WhatsappWebhookRoutesOpti
         eventId: ingest.eventId,
         errCode: err instanceof Error ? err.name : 'unknown',
       });
-    }
+    });
     return { ok: true };
   });
 
