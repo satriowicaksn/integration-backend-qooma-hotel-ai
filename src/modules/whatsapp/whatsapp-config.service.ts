@@ -69,8 +69,9 @@ export class WhatsappConfigService {
       phoneNumberId: input.phoneNumberId,
       phoneNumber: maskWaPhone(input.phoneNumber),
       accessToken: maskTokenForLog(input.accessToken),
+      wabaId: input.wabaId,
       webhookUrl: input.webhookUrl,
-      webhookVerifyToken: maskTokenForLog(input.webhookVerifyToken),
+      webhookVerifyToken: maskTokenForLog(input.webhookVerifyToken ?? ''),
     });
 
     const accessTokenEnc = encrypt(input.accessToken);
@@ -80,6 +81,7 @@ export class WhatsappConfigService {
       phoneNumberId: input.phoneNumberId,
       phoneNumber: input.phoneNumber,
       accessTokenEnc,
+      wabaId: input.wabaId,
       webhookUrl: input.webhookUrl,
       webhookVerifyToken: input.webhookVerifyToken,
     });

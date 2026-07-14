@@ -61,9 +61,11 @@ function toWhatsappWire(view: WhatsappOverviewView): IntegrationOverviewResponse
   return {
     bsp: view.bsp,
     phone_number: view.phoneNumber,
+    phone_number_id: view.phoneNumberId,
     verified_at: view.verifiedAt,
     has_access_token: view.hasAccessToken,
     webhook_url: view.webhookUrl,
+    waba_id: view.wabaId ?? null,
   };
 }
 

@@ -18,9 +18,11 @@ const WaOverviewSchema = z
   .object({
     bsp: z.string(),
     phone_number: z.string(),
+    phone_number_id: z.string(),
     verified_at: z.string().nullable(),
     has_access_token: z.boolean(),
     webhook_url: z.string().nullable(),
+    waba_id: z.string().nullable().optional(),
   })
   .strict();
 

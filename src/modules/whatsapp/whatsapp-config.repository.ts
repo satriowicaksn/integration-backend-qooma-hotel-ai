@@ -31,16 +31,20 @@ export class WhatsappConfigRepository {
         phoneNumberId: input.phoneNumberId,
         phoneNumber: input.phoneNumber,
         accessTokenEnc: input.accessTokenEnc,
-        webhookUrl: input.webhookUrl,
-        webhookVerifyToken: input.webhookVerifyToken,
+        wabaId: input.wabaId ?? null,
+        webhookUrl: input.webhookUrl ?? '',
+        webhookVerifyToken: input.webhookVerifyToken ?? '',
       },
       update: {
         bsp: input.bsp,
         phoneNumberId: input.phoneNumberId,
         phoneNumber: input.phoneNumber,
         accessTokenEnc: input.accessTokenEnc,
-        webhookUrl: input.webhookUrl,
-        webhookVerifyToken: input.webhookVerifyToken,
+        ...(input.wabaId !== undefined ? { wabaId: input.wabaId } : {}),
+        ...(input.webhookUrl !== undefined ? { webhookUrl: input.webhookUrl } : {}),
+        ...(input.webhookVerifyToken !== undefined
+          ? { webhookVerifyToken: input.webhookVerifyToken }
+          : {}),
       },
     });
   }

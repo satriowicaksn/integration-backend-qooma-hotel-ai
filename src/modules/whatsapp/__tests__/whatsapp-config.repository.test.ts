@@ -100,7 +100,7 @@ describe('WhatsappConfigRepository.upsert', () => {
       update: Record<string, unknown>;
     };
     expect(callArg.where).toEqual({ hotelId: HOTEL_ID });
-    expect(callArg.create).toEqual({ ...sampleInput, hotelId: HOTEL_ID });
+    expect(callArg.create).toEqual({ ...sampleInput, hotelId: HOTEL_ID, wabaId: null });
     expect(callArg.update).toEqual({ ...sampleInput });
   });
 });

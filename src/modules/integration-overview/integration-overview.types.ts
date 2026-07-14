@@ -12,9 +12,11 @@ export type HealthPillStatus = 'healthy' | 'degraded' | 'down';
 export interface WhatsappOverviewView {
   readonly bsp: string;
   readonly phoneNumber: string;
+  readonly phoneNumberId: string;
   readonly verifiedAt: string | null;
   readonly hasAccessToken: boolean;
   readonly webhookUrl: string | null;
+  readonly wabaId: string | null;
 }
 
 export interface TelegramOverviewView {

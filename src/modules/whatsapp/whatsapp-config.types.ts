@@ -28,8 +28,9 @@ export interface WhatsappConfigUpsertInput {
   readonly phoneNumberId: string;
   readonly phoneNumber: string;
   readonly accessToken: string;
-  readonly webhookUrl: string;
-  readonly webhookVerifyToken: string;
+  readonly wabaId?: string | undefined;
+  readonly webhookUrl?: string | undefined;
+  readonly webhookVerifyToken?: string | undefined;
 }
 
 export interface WhatsappConfigPersistenceInput {
@@ -37,6 +38,7 @@ export interface WhatsappConfigPersistenceInput {
   readonly phoneNumberId: string;
   readonly phoneNumber: string;
   readonly accessTokenEnc: string;
-  readonly webhookUrl: string;
-  readonly webhookVerifyToken: string;
+  readonly wabaId?: string | undefined;
+  readonly webhookUrl?: string | undefined;
+  readonly webhookVerifyToken?: string | undefined;
 }

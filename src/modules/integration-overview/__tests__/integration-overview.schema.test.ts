@@ -8,9 +8,11 @@ const FULL_RESPONSE = {
   whatsapp: {
     bsp: '1engage',
     phone_number: '+6281234567890',
+    phone_number_id: '109876543210987',
     verified_at: '2026-07-01T12:00:00Z',
     has_access_token: true,
     webhook_url: 'https://example.com/wa-webhook',
+    waba_id: null,
   },
   telegram: {
     bot_username: 'qooma_demo_bot',
