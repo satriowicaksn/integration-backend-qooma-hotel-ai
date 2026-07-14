@@ -26,8 +26,9 @@ export const WhatsappConfigPutSchema = z
     phoneNumberId: z.string().min(1).max(PHONE_NUMBER_ID_MAX),
     phoneNumber: z.string().regex(E164_REGEX).max(PHONE_NUMBER_MAX),
     accessToken: z.string().min(1),
-    webhookUrl: z.string().url().max(WEBHOOK_URL_MAX),
-    webhookVerifyToken: z.string().min(1).max(WEBHOOK_VERIFY_TOKEN_MAX),
+    wabaId: z.string().min(1).max(80).optional(),
+    webhookUrl: z.string().url().max(WEBHOOK_URL_MAX).optional(),
+    webhookVerifyToken: z.string().min(1).max(WEBHOOK_VERIFY_TOKEN_MAX).optional(),
   })
   .strict();
 

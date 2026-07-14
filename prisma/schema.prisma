@@ -37,6 +37,7 @@ model WaConfig {
   accessTokenEnc       String    @map("access_token_enc") @db.Text
   webhookUrl           String    @map("webhook_url") @db.VarChar(500)
   webhookVerifyToken   String    @map("webhook_verify_token") @db.VarChar(80)
+  wabaId               String?   @map("waba_id") @db.VarChar(80)
   verifiedAt           DateTime? @map("verified_at") @db.Timestamptz
   createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz

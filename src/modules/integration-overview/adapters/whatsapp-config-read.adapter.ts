@@ -16,9 +16,11 @@ export class WhatsappConfigReadAdapter implements WhatsappConfigReadPort {
     return {
       bsp: row.bsp,
       phoneNumber: row.phoneNumber,
+      phoneNumberId: row.phoneNumberId,
       verifiedAt: row.verifiedAt === null ? null : row.verifiedAt.toISOString(),
       hasAccessToken: row.accessTokenEnc.length > 0,
       webhookUrl: row.webhookUrl,
+      wabaId: row.wabaId ?? null,
     };
   }
 }
