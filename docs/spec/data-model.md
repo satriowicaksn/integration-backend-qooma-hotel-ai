@@ -100,7 +100,7 @@ tiers (Auth) ───< (N) hotels (Auth)
                       ├───< (N) knowledge_entries                     (Hotel Core)
                       ├───< (N) wa_templates                          (Hotel Core)
                       ├───< (N) feature_flags                         (Hotel Core; per-hotel state rows)
-                      ├───< (1) billing_quotas                        (Hotel Core; per-month rows)
+                      ├───< (1) billing_quotas                        (Hotel Core; 1 prepaid-balance row per hotel)
                       ├───< (N) billing_invoices                      (Hotel Core)
                       └───< (N) notifications                         (Hotel Core; ──> (1) users recipient)
 ```
@@ -116,7 +116,7 @@ Use real FKs. `users.hotel_id → hotels.id` is intra-Auth (both moved to Auth p
 **Tier-gating for Hotel Core**: when a Hotel Core endpoint needs the tier, JOIN — don't RPC to Auth:
 
 ```sql
-SELECT t.name AS tier_name, t.features, t.outbound_quota_monthly
+SELECT t.name AS tier_name, t.features, t.agent_cap
 FROM hotels h JOIN tiers t ON h.tier_id = t.id
 WHERE h.id = $session.hotel_id;
 ```
@@ -144,7 +144,7 @@ WHERE h.id = $session.hotel_id;
 
 - `departments.telegram_chat_id` + `departments.supervisor_telegram_id` — HC owns these columns; Integration reads them when dispatching escalation pings or daily brief PDFs to per-dept Telegram groups.
 - Hotel `dnd` (now on Auth's `hotels` row per H11) — Integration reads via cross-table join (or RPC) to gate outbound during quiet hours.
-- Outbound quota meter on `billing_quotas` (HC-owned) — Integration RPCs HC's `check_and_reserve_outbound_quota` + `commit_outbound_quota_increment` two-phase to ensure HC's meter reflects only confirmed sends.
+- Outbound prepaid-balance meter on `billing_quotas` (HC-owned; 1 row per hotel, no monthly reset) — Integration RPCs HC's `check_and_reserve_outbound_quota` + `commit_outbound_quota_increment` two-phase to ensure HC's balance reflects only confirmed sends.
 
 **Cross-service writes (Integration → HC) — NEW H12**:
 

@@ -330,7 +330,7 @@ describe('WhatsappOutboundDispatchService.dispatchMessage — quota exhaustion',
       buildAllHappyMocks();
     quotaDouble.checkAndReserve.mockResolvedValue({
       reserved: false,
-      reason: 'monthly_quota_100_percent',
+      reason: 'topup_balance_exhausted',
     });
     const service = new WhatsappOutboundDispatchService(
       repo,
@@ -344,7 +344,7 @@ describe('WhatsappOutboundDispatchService.dispatchMessage — quota exhaustion',
 
     expect(outcome.kind).toBe('quota_exhausted');
     if (outcome.kind === 'quota_exhausted') {
-      expect(outcome.reason).toBe('monthly_quota_100_percent');
+      expect(outcome.reason).toBe('topup_balance_exhausted');
     }
     expect(repoDouble.persistPending).not.toHaveBeenCalled();
     expect(bspDouble.sendText).not.toHaveBeenCalled();

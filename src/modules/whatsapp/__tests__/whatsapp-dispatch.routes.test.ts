@@ -274,7 +274,7 @@ describe('POST /internal/wa/dispatch — outcome mapping', () => {
   it('should return 200 with kind=quota_exhausted and NOT touch conversations', async () => {
     const dispatchDouble: DispatchDouble = {
       dispatchMessage: jest.fn(() =>
-        Promise.resolve({ kind: 'quota_exhausted' as const, reason: 'monthly_cap_reached' }),
+        Promise.resolve({ kind: 'quota_exhausted' as const, reason: 'topup_balance_exhausted' }),
       ),
     };
     const conversationsDouble: ConversationsDouble = { upsertOnOutbound: jest.fn() };

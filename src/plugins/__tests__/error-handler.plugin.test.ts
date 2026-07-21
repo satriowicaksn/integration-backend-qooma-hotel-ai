@@ -16,7 +16,7 @@ async function buildApp(): Promise<FastifyInstance> {
     throw new WaConfigInvalidError('missing phone_number_id', { field: 'phone_number_id' });
   });
   app.get('/quota', () => {
-    throw new OutboundQuotaError('monthly quota exhausted');
+    throw new OutboundQuotaError('outbound top-up balance exhausted');
   });
   app.get('/notfound', () => {
     throw new NotFoundError('hotel', 'acme');
@@ -48,7 +48,7 @@ describe('registerErrorHandler', () => {
     const res = await app.inject({ method: 'GET', url: '/quota' });
     expect(res.statusCode).toBe(429);
     expect(res.json()).toEqual({
-      error: { code: 'RATE_LIMIT', message: 'monthly quota exhausted', details: {} },
+      error: { code: 'RATE_LIMIT', message: 'outbound top-up balance exhausted', details: {} },
     });
     await app.close();
   });
