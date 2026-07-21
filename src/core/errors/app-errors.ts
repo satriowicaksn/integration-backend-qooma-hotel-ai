@@ -110,7 +110,10 @@ export class DndBlockError extends AppError {
   readonly code = 'DND_BLOCK';
 }
 
-/** Outbound quota at 100% for the month. Distinct from generic RateLimitError. */
+/**
+ * ADD-25: prepaid outbound top-up balance exhausted (0 remaining). Inbound is
+ * free and never blocked. Distinct from generic RateLimitError.
+ */
 export class OutboundQuotaError extends AppError {
   readonly statusCode = 429;
   readonly code = 'RATE_LIMIT';

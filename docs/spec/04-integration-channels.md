@@ -12,7 +12,7 @@
 
 - **Webhook ingress is bursty and external** — WA/Telegram can hit you with bursts; isolate from CRM request loop.
 - **Third-party rate limits** — WA Cloud API has per-template-per-hour quotas. Need centralized governance + retry queue. Hotel Core shouldn't be aware of Meta's quota state machine.
-- **Outbound quota meter** — every WA outbound counts against per-hotel monthly quota. Centralizing dispatch makes the meter trivial (Integration RPCs Hotel Core's billing module to increment).
+- **Outbound quota meter** — every WA outbound draws down the per-hotel prepaid outbound balance (top-up packages S/M/L; 0 included per tier; no monthly reset). Centralizing dispatch makes the meter trivial (Integration RPCs Hotel Core's billing module to decrement the balance). Inbound is free (never metered).
 - **Operational shape** — long-running webhook listeners + queues differ from CRUD request/response. Different scaling needs.
 - **Single owner per channel** — per H12 ruling, owning both config CRUD AND dispatch logic in one service means no cross-service round-trip for "what's my access token?" lookups. Hotel Core stays focused on CRM ops.
 
@@ -389,7 +389,7 @@ Emitted via gateway:
 | 422  | `WA_CONFIG_INVALID`             | Missing required WA config fields                                   |
 | 422  | `TELEGRAM_CONFIG_INVALID`       | Missing bot token or username                                       |
 | 422  | `DND_BLOCK`                     | Outbound refused due to DND window (returned on internal RPC only)  |
-| 429  | `RATE_LIMIT`                    | Outbound quota at 100% for the month                                |
+| 429  | `RATE_LIMIT`                    | Outbound prepaid balance exhausted (0 remaining)                    |
 | 502  | `THIRD_PARTY_UNREACHABLE`       | Upstream (Meta / Telegram / Claude API) failed                      |
 | 503  | `CHANNEL_DEGRADED`              | Best-effort response when health is `degraded`                      |
 

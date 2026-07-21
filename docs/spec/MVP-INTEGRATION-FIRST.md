@@ -95,7 +95,7 @@ Each migration is forward-only. Indexes per DDL in `04-integration-channels.md` 
 
 **4.4 DND gating on outbound** — `send_wa_message` MUST check `hotels.dnd` (cross-service read) BEFORE dispatch. If in DND and not VVIP-exempt and not inbound-trigger → queue for after DND end OR drop, per `exception_*` flags. Inbound messages NEVER blocked by DND.
 
-**4.5 Quota gating on outbound** — RPC HC `check_and_reserve_outbound_quota(hotel_id)` BEFORE dispatch. If 100% → 429. On success, RPC HC `commit_outbound_quota_increment(hotel_id, 1)` AFTER dispatch confirmation. This is a **two-phase** flow so HC's meter reflects only actually-sent messages.
+**4.5 Quota gating on outbound** — RPC HC `check_and_reserve_outbound_quota(hotel_id)` BEFORE dispatch. If prepaid balance = 0 → 429. On success, RPC HC `commit_outbound_quota_increment(hotel_id, 1)` AFTER dispatch confirmation. This is a **two-phase** flow so HC's prepaid-balance meter reflects only actually-sent messages.
 
 **4.6 Idempotent webhook ingest** — Meta retries on timeout. Use `webhook_events.id` + dedupe on `(provider, external_id)` for the message payload. Don't double-create tickets / messages.
 
@@ -120,7 +120,7 @@ A test pass:
 - [ ] **WA inbound creates a ticket** — send a test WA message to the bot phone. Webhook fires; `webhook_events` row created; HC `upsert_guest_by_wa_phone` called; AI RPC fired; (in MVP, AI stubs return synthetic ticket creation); ticket appears in CRM via `GET /api/tickets`.
 - [ ] **WA outbound dispatched** — from HC, RPC `send_wa_message(hotel_id, guest_id, "Test message")`. Dispatch enqueued; sent to WA Cloud API; receipt returned; `outbound_dispatch_queue` row shows `status: 'sent'`, `external_id` populated.
 - [ ] **DND blocks outbound** — set hotel `dnd: { start: '23:00', end: '07:00' }`. RPC `send_wa_message` at 23:30 → dispatch deferred to 07:00 (or dropped per config).
-- [ ] **Quota gates outbound** — set hotel quota to 1 used, 1 total. RPC `send_wa_message` → `429 RATE_LIMIT`. Reset quota → succeeds.
+- [ ] **Quota gates outbound** — set hotel prepaid balance to 1 total, 1 used (0 remaining). RPC `send_wa_message` → `429 RATE_LIMIT`. Top up balance → succeeds.
 - [ ] **Telegram config CRUD** — `PUT /api/integrations/telegram { bot_token, bot_username }` succeeds.
 - [ ] **Per-dept Telegram routing** — `PUT /api/integrations/telegram/departments/:dept_id { telegram_chat_id, supervisor_telegram_id }` writes to HC's `departments` table. Verify in HC: `GET /api/settings/departments/:id` returns the new values.
 - [ ] **Telegram outbound (escalation)** — HC RPC `send_telegram_message(chat_id, "Escalation: ticket #...")`. Telegram bot posts to the chat.

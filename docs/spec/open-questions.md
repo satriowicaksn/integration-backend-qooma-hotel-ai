@@ -83,12 +83,11 @@
 
 ## Q-CONTRACT-12 — Billing full shape (ADD-13)
 
-**FE assumed**: `GET /api/settings/billing` returns full `Billing` object with `tier`, `outbound_quota`, `active_agents`, `active_users_count`, `extra_addons`, `invoices`, `daily_brief_pdf_url_latest`. `POST /api/billing/upgrade-package` returns `pending_confirmation`.
+**FE assumed**: `GET /api/settings/billing` returns full `Billing` object with `tier`, `outbound_quota` (prepaid balance: `balance_total` / `balance_used` / `balance_remaining`), `active_agents`, `active_users_count`, `extra_addons`, `invoices`, `daily_brief_pdf_url_latest`. `POST /api/billing/outbound-topup { package: 'S' | 'M' | 'L' }` returns `pending_confirmation`.
 
 **Backend needs to confirm**:
 
-- Outbound quota thresholds `[80, 100]` percent.
-- Monthly reset day/time (UTC vs hotel timezone — FE doesn't care, but log it for monitoring).
+- Low-balance notification thresholds `[20, 5]` percent **remaining** (prepaid balance; no monthly allotment, no reset).
 - Whether daily brief PDF URL is presigned (FE just hits it with `<a href download>`).
 
 **Cost of deviation**: medium — billing page is rich.
@@ -213,13 +212,13 @@
 
 ## Q-CONTRACT-23 — Tiers lookup table (Phase 2.8 — H11 service-split ruling)
 
-**FE assumed**: `tiers` lookup table in Auth's DB (PO ruling H11 — "Tier exists in DB"). Read endpoint `GET /api/admin/tiers` returns all 4 rows + per-tier config (`outbound_quota_monthly`, `agent_cap`, `agent_minimum`, `user_cap`, `department_cap`, `features` JSONB, `is_custom` for enterprise). Super_admin-only read in MVP. `hotels.tier_id` FK → `tiers.id`. Existing `AdminHotel.tier` + `/api/hotels/me { tier }` responses keep the flat `tier: 'luxury'` string (backend joins `tiers.name` on read) for FE compatibility. Full shape: `01-auth-identity.md` §1.4 + API-CONTRACT §2.1b.
+**FE assumed**: `tiers` lookup table in Auth's DB (PO ruling H11 — "Tier exists in DB"). Read endpoint `GET /api/admin/tiers` returns all 4 rows + per-tier config (`agent_cap`, `user_cap`, `department_cap`, `features` JSONB, `is_custom` for enterprise). Outbound is **not** tier-gated — it is a prepaid top-up balance per hotel (0 included), so `outbound_quota_monthly` and `agent_minimum` are dropped from the tier schema. Super_admin-only read in MVP. `hotels.tier_id` FK → `tiers.id`. Existing `AdminHotel.tier` + `/api/hotels/me { tier }` responses keep the flat `tier: 'luxury'` string (backend joins `tiers.name` on read) for FE compatibility. Full shape: `01-auth-identity.md` §1.4 + API-CONTRACT §2.1b.
 
 **Backend needs to confirm**:
 
-- The 4 tier rows + the per-tier config values (FE recommendation in `01-auth-identity.md` §1.4 mirrors CLAUDE.md §1 tier matrix — adapt if PO directs different caps/quotas).
+- The 4 tier rows + the per-tier config values. `agent_cap` = TOTAL agents incl. Receptionist per tier: **lite=2, professional=4, luxury=6, enterprise=custom** (`-1` sentinel). No minimum-agent floor — the cap is an upper bound only; extra agents beyond the cap are billed as `+Agent` add-ons.
 - Read scope: super_admin-only in MVP. **Alternate** PO may direct: authenticated-all (so gm_admin can show their tier's full config for upsell UX). FE accepts either.
-- `is_custom: true` for enterprise — should enterprise allow per-tenant override columns on the `hotels` row (e.g. `hotels.outbound_quota_override`)? Out of MVP per PO; flag if you ship later.
+- `is_custom: true` for enterprise — enterprise still uses the shared prepaid top-up model (no per-tenant outbound override column); only the `agent_cap` sentinel differs. Flag any per-tenant override needs if you ship later.
 - Write surface (`PATCH /api/admin/tiers/:name` to edit config without redeploy) is **explicitly OUT OF SCOPE for Phase 2.8** — migration-managed only. Confirm.
 
 **Cost of deviation**: low — `tiers` is a new code surface (no legacy mocks to retrofit). FE adds `src/services/tiers.api.ts` + types when backend ships.
