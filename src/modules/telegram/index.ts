@@ -16,6 +16,7 @@ export type {
   DispatchIgnoredReason,
   DispatchResult,
   HelpCommand,
+  OtpHandledVia,
   ParsedCommand,
   StaffIdentity,
   StaffRole,
@@ -26,6 +27,7 @@ export type {
 } from './telegram-inbound.types.js';
 
 export type {
+  TelegramCallbackQuery,
   TelegramChat,
   TelegramMessage,
   TelegramUpdate,
@@ -33,8 +35,10 @@ export type {
 } from './telegram-inbound.schema.js';
 
 export {
+  TelegramCallbackQuerySchema,
   TelegramChatSchema,
   TelegramMessageSchema,
+  TelegramReplyToMessageSchema,
   TelegramUpdateSchema,
   TelegramUserSchema,
 } from './telegram-inbound.schema.js';
@@ -44,3 +48,10 @@ export { TelegramInboundService } from './telegram-inbound.service.js';
 
 export type { StaffLookupPort } from './ports/staff-lookup.port.js';
 export type { TicketActionPort } from './ports/ticket-action.port.js';
+
+export { OTP_CALLBACK_DATA_PREFIX } from './ports/otp-interaction.port.js';
+export type {
+  OtpCallbackInteraction,
+  OtpInteractionPort,
+  OtpReplyCodeInteraction,
+} from './ports/otp-interaction.port.js';

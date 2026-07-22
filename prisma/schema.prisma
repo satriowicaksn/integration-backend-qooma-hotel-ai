@@ -179,6 +179,26 @@ model Message {
   @@map("messages")
 }
 
+// T97 (ADD-24) — OTP delivery-verification ticket context. Stores the
+// dept-group message linkage + guest WA coordinates captured when the OTP
+// ticket notification is dispatched, so the later [Kirim ulang kode]
+// callback can dispatch the resent code to the guest without asking Core
+// for guest PII. NEVER stores the otp code itself (anti-cheat: the code
+// only transits Core → WA dispatch, in-memory).
+model OtpTicketContext {
+  ticketId          String   @id @map("ticket_id") @db.Uuid
+  hotelId           String   @map("hotel_id") @db.Uuid
+  chatId            String   @map("chat_id") @db.VarChar(64)
+  telegramMessageId Int      @map("telegram_message_id")
+  guestWaPhone      String?  @map("guest_wa_phone") @db.VarChar(20)
+  guestId           String?  @map("guest_id") @db.Uuid
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([hotelId])
+  @@map("otp_ticket_context")
+}
+
 model OtaMailboxState {
   hotelId          String    @id @map("hotel_id") @db.Uuid
   imapHost         String    @map("imap_host") @db.VarChar(255)

@@ -24,6 +24,14 @@ export const TelegramChatSchema = z
   })
   .passthrough();
 
+// T97 (ADD-24): the subset of `reply_to_message` needed to resolve which
+// ticket-notification message a 2-digit OTP reply targets.
+export const TelegramReplyToMessageSchema = z
+  .object({
+    message_id: z.number().int(),
+  })
+  .passthrough();
+
 export const TelegramMessageSchema = z
   .object({
     message_id: z.number().int(),
@@ -31,6 +39,25 @@ export const TelegramMessageSchema = z
     chat: TelegramChatSchema,
     from: TelegramUserSchema.optional(),
     text: z.string().optional(),
+    reply_to_message: TelegramReplyToMessageSchema.optional(),
+  })
+  .passthrough();
+
+// T97 (ADD-24): callback_query subset for the OTP inline-keyboard presses.
+// `message` is the group message that carried the keyboard (Telegram omits
+// it for very old messages), `data` is our compact `otp:<action>:<ticket>`.
+export const TelegramCallbackQuerySchema = z
+  .object({
+    id: z.string().min(1),
+    from: TelegramUserSchema,
+    message: z
+      .object({
+        message_id: z.number().int(),
+        chat: TelegramChatSchema,
+      })
+      .passthrough()
+      .optional(),
+    data: z.string().optional(),
   })
   .passthrough();
 
@@ -38,6 +65,7 @@ export const TelegramUpdateSchema = z
   .object({
     update_id: z.number().int(),
     message: TelegramMessageSchema.optional(),
+    callback_query: TelegramCallbackQuerySchema.optional(),
   })
   .passthrough();
 
@@ -45,3 +73,4 @@ export type TelegramUpdate = z.infer<typeof TelegramUpdateSchema>;
 export type TelegramMessage = z.infer<typeof TelegramMessageSchema>;
 export type TelegramUser = z.infer<typeof TelegramUserSchema>;
 export type TelegramChat = z.infer<typeof TelegramChatSchema>;
+export type TelegramCallbackQuery = z.infer<typeof TelegramCallbackQuerySchema>;

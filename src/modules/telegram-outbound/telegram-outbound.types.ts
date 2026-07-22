@@ -3,6 +3,18 @@
 
 export type TelegramParseMode = 'HTML' | 'MarkdownV2';
 
+/** Telegram Bot API `InlineKeyboardButton` / `InlineKeyboardMarkup` wire
+ *  shapes (subset). snake_case on purpose — these serialize verbatim into
+ *  the `reply_markup` request field (T97 / ADD-24 OTP action buttons). */
+export interface TelegramInlineKeyboardButton {
+  readonly text: string;
+  readonly callback_data: string;
+}
+
+export interface TelegramInlineKeyboardMarkup {
+  readonly inline_keyboard: ReadonlyArray<ReadonlyArray<TelegramInlineKeyboardButton>>;
+}
+
 /** Input consumed by `TelegramDispatchService.sendMessage`.
  *  Caller (Hotel Core escalation worker) supplies a pre-resolved
  *  `chatId` — per-dept routing (T18) or `default_chat_id` fallback is a
@@ -12,6 +24,15 @@ export interface SendTelegramMessageInput {
   readonly chatId: string;
   readonly body: string;
   readonly parseMode?: TelegramParseMode;
+  readonly replyMarkup?: TelegramInlineKeyboardMarkup;
+  readonly replyToMessageId?: number;
+}
+
+/** Input consumed by `TelegramDispatchService.answerCallbackQuery` (T97). */
+export interface AnswerTelegramCallbackInput {
+  readonly hotelId: string;
+  readonly callbackQueryId: string;
+  readonly text?: string;
 }
 
 /** Result returned by the service after a successful dispatch.
