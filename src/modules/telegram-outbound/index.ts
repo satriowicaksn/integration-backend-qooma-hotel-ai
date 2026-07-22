@@ -2,8 +2,11 @@
 // schemas + DTOs. All imports use `.js` extensions (binding #8).
 
 export type {
+  AnswerTelegramCallbackInput,
   SendTelegramMessageInput,
   TelegramConfigForDispatch,
+  TelegramInlineKeyboardButton,
+  TelegramInlineKeyboardMarkup,
   TelegramParseMode,
   TelegramSendResult,
 } from './telegram-outbound.types.js';
@@ -24,7 +27,15 @@ export type { DispatchClock, TelegramDispatchPorts } from './telegram-outbound.s
 
 export type { TelegramConfigReadPort } from './ports/telegram-config-read.port.js';
 export type {
+  TelegramBotAnswerCallbackInput,
   TelegramBotApiPort,
   TelegramBotSendMessageInput,
   TelegramBotSendMessageResult,
 } from './ports/telegram-bot-api.port.js';
+
+export { telegramOutboundRoutes } from './telegram-outbound.routes.js';
+export type {
+  OtpNotifyHandler,
+  OtpNotifyInput,
+  TelegramOutboundRoutesOptions,
+} from './telegram-outbound.routes.js';

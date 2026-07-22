@@ -58,6 +58,7 @@ interface BotApiMock {
   sendMessage: jest.Mock<
     (input: TelegramBotSendMessageInput) => Promise<TelegramBotSendMessageResult>
   >;
+  answerCallbackQuery: jest.Mock<(input: unknown) => Promise<void>>;
 }
 
 interface LoggerMock extends Logger {
@@ -88,6 +89,7 @@ function buildService(): {
   const botApi: BotApiMock = {
     sendMessage:
       jest.fn<(input: TelegramBotSendMessageInput) => Promise<TelegramBotSendMessageResult>>(),
+    answerCallbackQuery: jest.fn<(input: unknown) => Promise<void>>().mockResolvedValue(undefined),
   };
   const logger = buildLogger();
   const service = new TelegramDispatchService(
@@ -191,6 +193,47 @@ describe('TelegramDispatchService.sendMessage — PII discipline (bindings #3 / 
     const record = logger.info.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(JSON.stringify(record)).not.toContain(BOT_TOKEN_PLAINTEXT);
     expect(JSON.stringify(record)).not.toContain(BOT_TOKEN_PLAINTEXT.split(':')[1] ?? '');
+  });
+});
+
+describe('TelegramDispatchService — T97 OTP surface', () => {
+  it('should pass replyMarkup + replyToMessageId through to the bot API', async () => {
+    const { service, config, botApi } = buildService();
+    config.getForHotel.mockResolvedValue(buildConfigView());
+    botApi.sendMessage.mockResolvedValue({ messageId: '1' });
+    const markup = { inline_keyboard: [[{ text: 'Sudah diantar', callback_data: 'otp:done:t' }]] };
+
+    await service.sendMessage({ ...BASE_INPUT, replyMarkup: markup, replyToMessageId: 4242 });
+
+    expect(botApi.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ replyMarkup: markup, replyToMessageId: 4242 }),
+    );
+  });
+
+  it('answerCallbackQuery should decrypt at call time and forward the plaintext token', async () => {
+    const { service, config, botApi } = buildService();
+    config.getForHotel.mockResolvedValue(buildConfigView());
+
+    await service.answerCallbackQuery({
+      hotelId: HOTEL_ID,
+      callbackQueryId: 'cbq-1',
+      text: 'Dicatat.',
+    });
+
+    expect(botApi.answerCallbackQuery).toHaveBeenCalledWith({
+      botToken: BOT_TOKEN_PLAINTEXT,
+      callbackQueryId: 'cbq-1',
+      text: 'Dicatat.',
+    });
+  });
+
+  it('answerCallbackQuery should throw NotFoundError when the hotel has no config', async () => {
+    const { service, config } = buildService();
+    config.getForHotel.mockResolvedValue(null);
+
+    await expect(
+      service.answerCallbackQuery({ hotelId: HOTEL_ID, callbackQueryId: 'cbq-1' }),
+    ).rejects.toBeInstanceOf(NotFoundError);
   });
 });
 

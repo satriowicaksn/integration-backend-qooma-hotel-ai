@@ -36,11 +36,19 @@ export type TicketActionOutcome =
 
 export type DispatchResult =
   | { readonly kind: 'reply'; readonly text: string }
-  | { readonly kind: 'ignored'; readonly reason: DispatchIgnoredReason };
+  | { readonly kind: 'ignored'; readonly reason: DispatchIgnoredReason }
+  | { readonly kind: 'handled'; readonly via: OtpHandledVia };
+
+// T97 (ADD-24): OTP interactions are fully handled by the OTP port (it
+// posts its own group notes) — no bot reply text flows back through here.
+export type OtpHandledVia = 'otp_callback' | 'otp_reply_verify';
 
 export type DispatchIgnoredReason =
   | 'staff_not_recognized'
   | 'no_message'
   | 'no_sender'
   | 'no_text'
-  | 'unknown_command';
+  | 'unknown_command'
+  | 'otp_not_configured'
+  | 'callback_unsupported'
+  | 'duplicate_update';

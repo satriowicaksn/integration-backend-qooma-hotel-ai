@@ -72,6 +72,11 @@ const EnvSchema = z.object({
   // AI service base URL — dev: http://localhost:3000 | staging: https://ai-staging.sharedisini.com
   // Optional: `api-server.ts` uses stub adapter when unset (Q-B-05).
   AI_BASE_URL: z.string().url().optional(),
+  // Hotel Core internal RPC (ADD-24 OTP delivery verification). Both are
+  // required together for the real HotelCoreOtpAdapter; when either is
+  // unset `api-server.ts` wires the stub adapter (loud warn on boot).
+  HOTEL_CORE_BASE_URL: z.string().url().optional(),
+  HOTEL_CORE_INTERNAL_SECRET: z.string().min(32).optional(),
   // HMAC-SHA256 secret for outbound calls to AI service (X-Service-Signature).
   // Required when AI_BASE_URL is set. Generate: `openssl rand -base64 36`.
   INTEGRATION_TO_AI_HMAC_SECRET: z.string().min(32).optional(),

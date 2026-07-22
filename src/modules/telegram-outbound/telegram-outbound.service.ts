@@ -22,7 +22,11 @@ import { decrypt } from '@shared/utils/crypto.js';
 
 import type { TelegramBotApiPort } from './ports/telegram-bot-api.port.js';
 import type { TelegramConfigReadPort } from './ports/telegram-config-read.port.js';
-import type { SendTelegramMessageInput, TelegramSendResult } from './telegram-outbound.types.js';
+import type {
+  AnswerTelegramCallbackInput,
+  SendTelegramMessageInput,
+  TelegramSendResult,
+} from './telegram-outbound.types.js';
 
 export interface TelegramDispatchPorts {
   readonly config: TelegramConfigReadPort;
@@ -63,6 +67,10 @@ export class TelegramDispatchService {
         chatId: input.chatId,
         body: input.body,
         ...(input.parseMode !== undefined ? { parseMode: input.parseMode } : {}),
+        ...(input.replyMarkup !== undefined ? { replyMarkup: input.replyMarkup } : {}),
+        ...(input.replyToMessageId !== undefined
+          ? { replyToMessageId: input.replyToMessageId }
+          : {}),
       });
     } catch (err) {
       throw new ExternalServiceError('telegram_bot_api', errorMessage(err));
@@ -84,6 +92,34 @@ export class TelegramDispatchService {
       messageId: apiResult.messageId,
       sentAt,
     };
+  }
+
+  // T97 (ADD-24): acknowledge an OTP inline-keyboard press. Same call-time
+  // decrypt discipline as sendMessage; `text` content is NEVER logged.
+  async answerCallbackQuery(input: AnswerTelegramCallbackInput): Promise<void> {
+    const config = await this.ports.config.getForHotel({ hotelId: input.hotelId });
+    if (config === null) {
+      throw new NotFoundError('telegram_config', input.hotelId);
+    }
+
+    const botToken = decrypt(config.botTokenEnc);
+
+    try {
+      await this.ports.botApi.answerCallbackQuery({
+        botToken,
+        callbackQueryId: input.callbackQueryId,
+        ...(input.text !== undefined ? { text: input.text } : {}),
+      });
+    } catch (err) {
+      throw new ExternalServiceError('telegram_bot_api', errorMessage(err));
+    }
+
+    this.logger.info({
+      msg: 'telegram_outbound.callback_answered',
+      module: 'telegram-outbound',
+      hotelId: input.hotelId,
+      callbackQueryId: input.callbackQueryId,
+    });
   }
 }
 

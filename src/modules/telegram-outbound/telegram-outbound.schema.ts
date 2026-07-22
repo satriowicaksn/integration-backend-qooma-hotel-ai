@@ -17,14 +17,33 @@ const TELEGRAM_BODY_MAX = 4096;
 
 export const TelegramParseModeEnum = z.enum(['HTML', 'MarkdownV2']);
 
+// T97 (ADD-24): OTP extension fields. `requires_otp: true` makes the
+// dispatch attach the 4-button OTP inline keyboard and register the group
+// message with Hotel Core — `ticket_id` becomes mandatory. `guest_wa_phone`
+// + `guest_id` are captured for the later [Kirim ulang kode] WA dispatch.
+// `.strict()` doubles as the anti-cheat floor: a caller can NEVER smuggle
+// an `otp_code` (or any other) field into the Telegram payload.
 export const SendTelegramMessageRequestSchema = z
   .object({
     hotel_id: z.string().uuid(),
     chat_id: z.string().min(1).max(64),
     body: z.string().min(1).max(TELEGRAM_BODY_MAX),
     parse_mode: TelegramParseModeEnum.optional(),
+    requires_otp: z.boolean().optional(),
+    ticket_id: z.string().uuid().optional(),
+    guest_wa_phone: z.string().min(5).max(20).optional(),
+    guest_id: z.string().uuid().optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.requires_otp === true && value.ticket_id === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['ticket_id'],
+        message: 'ticket_id is required when requires_otp is true',
+      });
+    }
+  });
 
 export type SendTelegramMessageRequestDto = z.infer<typeof SendTelegramMessageRequestSchema>;
 

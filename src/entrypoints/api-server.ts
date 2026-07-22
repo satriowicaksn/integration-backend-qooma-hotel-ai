@@ -47,6 +47,16 @@ import { DepartmentTelegramReadStubAdapter } from '@modules/telegram-dept-routin
 import { DepartmentTelegramWriteStubAdapter } from '@modules/telegram-dept-routing/adapters/department-telegram-write-stub.adapter.js';
 import { telegramDeptRoutingRoutes } from '@modules/telegram-dept-routing/telegram-dept-routing.routes.js';
 import { TelegramDeptRoutingService } from '@modules/telegram-dept-routing/telegram-dept-routing.service.js';
+import { HotelCoreOtpStubAdapter } from '@modules/telegram-otp/adapters/hotel-core-otp-stub.adapter.js';
+import { HotelCoreOtpAdapter } from '@modules/telegram-otp/adapters/hotel-core-otp.adapter.js';
+import { WaGuestSendAdapter } from '@modules/telegram-otp/adapters/wa-guest-send.adapter.js';
+import { TelegramOtpCallbackService } from '@modules/telegram-otp/telegram-otp-callback.service.js';
+import { TelegramOtpNotifyService } from '@modules/telegram-otp/telegram-otp-notify.service.js';
+import { OtpTicketContextRepository } from '@modules/telegram-otp/telegram-otp.repository.js';
+import { TelegramBotApiAdapter } from '@modules/telegram-outbound/adapters/telegram-bot-api.adapter.js';
+import { TelegramConfigDispatchReadAdapter } from '@modules/telegram-outbound/adapters/telegram-config-read.adapter.js';
+import { telegramOutboundRoutes } from '@modules/telegram-outbound/telegram-outbound.routes.js';
+import { TelegramDispatchService } from '@modules/telegram-outbound/telegram-outbound.service.js';
 import type { HttpPoster } from '@modules/whatsapp/adapters/1engage.adapter.js';
 import { create1engageAdapter } from '@modules/whatsapp/adapters/1engage.adapter.js';
 import { AiInboundStubAdapter } from '@modules/whatsapp/adapters/ai-inbound.stub-adapter.js';
@@ -129,6 +139,72 @@ export async function buildServer(): Promise<FastifyInstance> {
     guards: gmAdminGuards,
   });
 
+  // T28 — WA outbound dispatch service (ADR-0009, spec §2.4). Created up
+  // here (before T27/T19 wiring) so both the WA inbound webhook (AI reply
+  // dispatch) and the T97 OTP resend flow can consume it. Route
+  // registration stays env-gated on `WA_BSP_BASE_URL` (Q-C-16) further
+  // below. HC quota + DND are **passthrough** per ADR-0009 (FINAL MVP).
+  let outboundDispatchService: WhatsappOutboundDispatchService | undefined;
+  if (config.WA_BSP_BASE_URL !== undefined) {
+    const bspHttpPoster = createBspHttpPoster();
+    const bsp = create1engageAdapter({
+      http: bspHttpPoster,
+      config: { baseUrl: config.WA_BSP_BASE_URL, apiVersion: config.WA_BSP_API_VERSION },
+    });
+    const quotaAdapter = new HotelCoreQuotaPassthroughAdapter(logger);
+    const dndAdapter = new HotelCoreDndPassthroughAdapter(logger);
+    const outboundDispatchRepo = new WhatsappOutboundDispatchRepository(db);
+    outboundDispatchService = new WhatsappOutboundDispatchService(
+      outboundDispatchRepo,
+      bsp,
+      quotaAdapter,
+      dndAdapter,
+      logger,
+    );
+  }
+
+  // T97 (ADD-24) — OTP delivery verification wiring. Real Hotel Core RPC
+  // adapter only when BOTH env vars are set; otherwise a loud stub.
+  const telegramDispatchService = new TelegramDispatchService(
+    {
+      config: new TelegramConfigDispatchReadAdapter(telegramRepo),
+      botApi: new TelegramBotApiAdapter(),
+    },
+    logger,
+  );
+  const hotelCoreOtp =
+    config.HOTEL_CORE_BASE_URL !== undefined && config.HOTEL_CORE_INTERNAL_SECRET !== undefined
+      ? new HotelCoreOtpAdapter(
+          {
+            baseUrl: config.HOTEL_CORE_BASE_URL,
+            internalSecret: config.HOTEL_CORE_INTERNAL_SECRET,
+          },
+          logger,
+        )
+      : new HotelCoreOtpStubAdapter(logger);
+  const otpContextRepo = new OtpTicketContextRepository(db);
+  const otpCallbackService = new TelegramOtpCallbackService(
+    {
+      core: hotelCoreOtp,
+      telegram: telegramDispatchService,
+      repo: otpContextRepo,
+      ...(outboundDispatchService !== undefined
+        ? { waSend: new WaGuestSendAdapter(outboundDispatchService) }
+        : {}),
+    },
+    logger,
+  );
+  const otpNotifyService = new TelegramOtpNotifyService(
+    { core: hotelCoreOtp, telegram: telegramDispatchService, repo: otpContextRepo },
+    logger,
+  );
+  logger.warn({
+    msg: 'telegram_otp.startup',
+    module: 'telegram-otp',
+    hcAdapter: config.HOTEL_CORE_BASE_URL !== undefined ? 'HTTP' : 'STUB',
+    waResend: outboundDispatchService !== undefined ? 'BSP' : 'SKIP',
+  });
+
   // T19-followup: Telegram inbound webhook (spec §2.3 + §3.2 + §4.6-4.7).
   // Raw-body parser + tenant resolver + signature guard compose in order.
   // HC RPC adapters ship as stubs pending Q-C-06 + Q-C-07 (PLAN GAP #1).
@@ -141,6 +217,7 @@ export async function buildServer(): Promise<FastifyInstance> {
     new StaffLookupStubAdapter(logger),
     new TicketActionStubAdapter(logger),
     logger,
+    otpCallbackService,
   );
   await app.register(telegramInboundRoutes, {
     service: inboundService,
@@ -259,32 +336,6 @@ export async function buildServer(): Promise<FastifyInstance> {
     guards: [internalRpcAuthGuard({ secret: config.INTERNAL_RPC_SECRET })],
   });
 
-  // T28 — WA outbound dispatch service (ADR-0009, spec §2.4).
-  // Created here (before T27) so it can be passed to the inbound webhook
-  // route for fire-and-forget AI reply dispatch. Route registration is
-  // env-gated on `WA_BSP_BASE_URL` (Q-C-16); without it the 1engage BSP
-  // has no target and dispatch would immediately fail — we prefer NOT to
-  // register the route so HC gets a clean 404 instead of a confusing 502.
-  // HC quota + DND are **passthrough** per ADR-0009 (FINAL MVP, NOT stubs).
-  let outboundDispatchService: WhatsappOutboundDispatchService | undefined;
-  if (config.WA_BSP_BASE_URL !== undefined) {
-    const bspHttpPoster = createBspHttpPoster();
-    const bsp = create1engageAdapter({
-      http: bspHttpPoster,
-      config: { baseUrl: config.WA_BSP_BASE_URL, apiVersion: config.WA_BSP_API_VERSION },
-    });
-    const quotaAdapter = new HotelCoreQuotaPassthroughAdapter(logger);
-    const dndAdapter = new HotelCoreDndPassthroughAdapter(logger);
-    const outboundDispatchRepo = new WhatsappOutboundDispatchRepository(db);
-    outboundDispatchService = new WhatsappOutboundDispatchService(
-      outboundDispatchRepo,
-      bsp,
-      quotaAdapter,
-      dndAdapter,
-      logger,
-    );
-  }
-
   // T27 — WA inbound webhook (Meta-facing, spec §2.3 + §3.1).
   // Guard order: raw-body parser (registered above for telegram) →
   // resolveTenantFromSlug → verifyWebhookSignature. HC guest upsert is
@@ -358,6 +409,17 @@ export async function buildServer(): Promise<FastifyInstance> {
       reason: 'WA_BSP_BASE_URL is unset — /internal/wa/dispatch not registered',
     });
   }
+
+  // T97 (ADD-24) — Telegram outbound internal RPC (spec §2.4 row 88).
+  // Hotel Core calls this for dept-group ticket pings; `requires_otp: true`
+  // + `ticket_id` routes through the OTP notify flow (inline keyboard +
+  // message-id registration + resend context).
+  await app.register(telegramOutboundRoutes, {
+    dispatchService: telegramDispatchService,
+    otpNotifier: otpNotifyService,
+    guards: [internalRpcAuthGuard({ secret: config.INTERNAL_RPC_SECRET })],
+    logger,
+  });
 
   return app;
 }
