@@ -90,6 +90,10 @@ export const whatsappWebhookRoutes: FastifyPluginAsync<WhatsappWebhookRoutesOpti
     return { ok: true };
   });
 
+  fastify.get('/webhook/whatsapp', { preHandler }, async (req) => {
+    return { ok: true };
+  });
+
   return Promise.resolve();
 };
 
