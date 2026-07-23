@@ -91,6 +91,8 @@ export const whatsappWebhookRoutes: FastifyPluginAsync<WhatsappWebhookRoutesOpti
   });
 
   fastify.get('/webhook/whatsapp', { preHandler }, async (req) => {
+    await opts.ingestService.ingestSync('hotelId', true, req.body);
+
     return { ok: true };
   });
 
