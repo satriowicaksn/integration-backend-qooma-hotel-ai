@@ -73,7 +73,14 @@ const EnvSchema = z.object({
   // POSTs always fail HMAC and never reach persist/dispatch. Set to `false`
   // to bypass the X-Hub-Signature-256 check on the T27 inbound webhook.
   // Boot logs a loud warn when disabled. Default `true` (safe).
-  WA_WEBHOOK_HMAC_ENABLED: z.coerce.boolean().default(true),
+  //
+  // Do NOT use `z.coerce.boolean()` here: it calls JS `Boolean(v)`, so any
+  // non-empty string (including "false") coerces to `true`. Parse the raw
+  // string explicitly instead.
+  WA_WEBHOOK_HMAC_ENABLED: z
+    .string()
+    .default('true')
+    .transform((v) => v.trim().toLowerCase() !== 'false' && v.trim() !== ''),
   // AI service base URL — dev: http://localhost:3000 | staging: https://ai-staging.sharedisini.com
   // Optional: `api-server.ts` uses stub adapter when unset (Q-B-05).
   AI_BASE_URL: z.string().url().optional(),

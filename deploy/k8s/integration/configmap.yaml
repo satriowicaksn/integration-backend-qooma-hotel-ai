@@ -33,4 +33,6 @@ data:
   # verification on POST /webhook/whatsapp so real Meta payloads (signed with
   # App Secret, not verify_token) can reach the ingest → dispatch → AI chain.
   # KEEP UNSET / TRUE IN PRODUCTION. Track Q-A-04 unpark to remove.
+  # NOTE: empty string here also disables the guard (`v.trim() === ''` → false).
+  # Explicit 'false' is the readable form. See env.ts WA_WEBHOOK_HMAC_ENABLED.
   WA_WEBHOOK_HMAC_ENABLED: 'false'
