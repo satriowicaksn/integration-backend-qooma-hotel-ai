@@ -21,6 +21,7 @@ import { createLogger } from '@core/logger/logger.js';
 import { db } from '@core/prisma/prisma-client.js';
 
 import { ChannelHealthRepository } from '@modules/channel-health/channel-health.repository.js';
+import { hotelBootstrapRoutes } from '@modules/hotel-bootstrap/index.js';
 import { ChannelHealthReadAdapter } from '@modules/integration-overview/adapters/channel-health-read.adapter.js';
 import { QrStateReadAdapter } from '@modules/integration-overview/adapters/qr-state-read.adapter.js';
 import { TelegramConfigReadAdapter } from '@modules/integration-overview/adapters/telegram-config-read.adapter.js';
@@ -333,6 +334,11 @@ export async function buildServer(): Promise<FastifyInstance> {
   await app.register(whatsappConversationsRoutes, {
     service: conversationsService,
     repository: conversationsRepo,
+    guards: [internalRpcAuthGuard({ secret: config.INTERNAL_RPC_SECRET })],
+  });
+
+  await app.register(hotelBootstrapRoutes, {
+    waConfigRepo,
     guards: [internalRpcAuthGuard({ secret: config.INTERNAL_RPC_SECRET })],
   });
 
