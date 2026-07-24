@@ -395,7 +395,8 @@ export async function buildServer(): Promise<FastifyInstance> {
     logger.warn({
       msg: 'whatsapp_inbound.hmac_disabled',
       module: 'whatsapp',
-      reason: 'WA_WEBHOOK_HMAC_ENABLED=false — X-Hub-Signature-256 NOT verified. Q-A-04 unpark pending.',
+      reason:
+        'WA_WEBHOOK_HMAC_ENABLED=false — X-Hub-Signature-256 NOT verified. Q-A-04 unpark pending.',
     });
   }
 
