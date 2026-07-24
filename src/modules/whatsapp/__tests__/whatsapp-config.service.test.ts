@@ -124,7 +124,7 @@ describe('WhatsappConfigService.getForHotel', () => {
 
     expect(result.hotelId).toBe(HOTEL_ID);
     expect(result.accessToken).toBe(maskTokenForLog(PLAINTEXT_ACCESS_TOKEN));
-    expect(result.webhookVerifyToken).toBe(maskTokenForLog(PLAINTEXT_WEBHOOK_VERIFY_TOKEN));
+    expect(result.webhookVerifyToken).toBe(PLAINTEXT_WEBHOOK_VERIFY_TOKEN);
     expect(result.phoneNumber).toBe(PLAINTEXT_PHONE_NUMBER);
     expect(result.bsp).toBe('1engage');
     expect(result.verifiedAt).toBeNull();
@@ -149,7 +149,8 @@ describe('WhatsappConfigService.getForHotel', () => {
     const result = await service.getForHotel(HOTEL_ID);
 
     expect(JSON.stringify(result)).not.toContain(PLAINTEXT_ACCESS_TOKEN);
-    expect(JSON.stringify(result)).not.toContain(PLAINTEXT_WEBHOOK_VERIFY_TOKEN);
+    // webhookVerifyToken IS intentionally exposed in the GET response so GM
+    // can copy-paste it into Meta Business Manager.
     expect(result.verifiedAt).toBeInstanceOf(Date);
   });
 });
@@ -235,7 +236,7 @@ describe('WhatsappConfigService.upsertForHotel', () => {
     const result = await service.upsertForHotel(HOTEL_ID, validUpsertInput);
 
     expect(result.accessToken).toBe(maskTokenForLog(PLAINTEXT_ACCESS_TOKEN));
-    expect(result.webhookVerifyToken).toBe(maskTokenForLog(PLAINTEXT_WEBHOOK_VERIFY_TOKEN));
+    expect(result.webhookVerifyToken).toBe(PLAINTEXT_WEBHOOK_VERIFY_TOKEN);
     expect(JSON.stringify(result)).not.toContain(PLAINTEXT_ACCESS_TOKEN);
   });
 
