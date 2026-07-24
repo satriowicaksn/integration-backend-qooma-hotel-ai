@@ -69,6 +69,11 @@ const EnvSchema = z.object({
   // defaults to Meta Graph `v22.0` per spec §3.1.
   WA_BSP_BASE_URL: z.string().url().optional(),
   WA_BSP_API_VERSION: z.string().default('v22.0'),
+  // Q-A-04 parked workaround — verify_token ≠ Meta App Secret, so real Meta
+  // POSTs always fail HMAC and never reach persist/dispatch. Set to `false`
+  // to bypass the X-Hub-Signature-256 check on the T27 inbound webhook.
+  // Boot logs a loud warn when disabled. Default `true` (safe).
+  WA_WEBHOOK_HMAC_ENABLED: z.coerce.boolean().default(true),
   // AI service base URL — dev: http://localhost:3000 | staging: https://ai-staging.sharedisini.com
   // Optional: `api-server.ts` uses stub adapter when unset (Q-B-05).
   AI_BASE_URL: z.string().url().optional(),
