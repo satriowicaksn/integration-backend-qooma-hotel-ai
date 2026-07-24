@@ -19,7 +19,8 @@ export class WhatsappConfigReadAdapter implements WhatsappConfigReadPort {
       phoneNumberId: row.phoneNumberId,
       verifiedAt: row.verifiedAt === null ? null : row.verifiedAt.toISOString(),
       hasAccessToken: row.accessTokenEnc.length > 0,
-      webhookUrl: row.webhookUrl,
+      webhookUrl: row.webhookUrl === '' ? null : row.webhookUrl,
+      webhookVerifyToken: row.webhookVerifyToken === '' ? null : row.webhookVerifyToken,
       wabaId: row.wabaId ?? null,
     };
   }

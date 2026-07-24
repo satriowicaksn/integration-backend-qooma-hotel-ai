@@ -12,6 +12,7 @@ const FULL_RESPONSE = {
     verified_at: '2026-07-01T12:00:00Z',
     has_access_token: true,
     webhook_url: 'https://example.com/wa-webhook',
+    webhook_verify_token: 'verify-token-abc',
     waba_id: null,
   },
   telegram: {

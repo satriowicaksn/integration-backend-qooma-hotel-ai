@@ -22,6 +22,7 @@ const WaOverviewSchema = z
     verified_at: z.string().nullable(),
     has_access_token: z.boolean(),
     webhook_url: z.string().nullable(),
+    webhook_verify_token: z.string().nullable(),
     waba_id: z.string().nullable().optional(),
   })
   .strict();

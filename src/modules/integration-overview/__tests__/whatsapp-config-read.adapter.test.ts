@@ -57,6 +57,7 @@ describe('WhatsappConfigReadAdapter.getForHotel', () => {
       verifiedAt: '2026-07-05T10:00:00.000Z',
       hasAccessToken: true,
       webhookUrl: 'https://example.com/wa',
+      webhookVerifyToken: 'x'.repeat(32),
       wabaId: null,
     });
   });
