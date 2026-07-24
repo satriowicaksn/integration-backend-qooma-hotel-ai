@@ -363,16 +363,19 @@ export async function buildServer(): Promise<FastifyInstance> {
       waConfigRepo.findByPhoneNumberId(phoneNumberId).then((c) => c?.hotelId ?? null),
   });
   const waSecretResolver = new WhatsappWebhookSecretResolver(waConfigRepo);
+  const waSignatureGuard = config.WA_WEBHOOK_HMAC_ENABLED
+    ? verifyWebhookSignature({
+        provider: 'whatsapp',
+        resolveSecret: (req) =>
+          waSecretResolver.resolveSecret({ hotelId: requireHotelIdForSecret(req.hotelId) }),
+      })
+    : (): Promise<void> => Promise.resolve();
   await app.register(whatsappWebhookRoutes, {
     ingestService: waIngestService,
     conversationsService,
     dispatchService: outboundDispatchService,
     tenantResolver: resolveTenantFromPhoneNumberId({ resolver: waPhoneNumberIdResolver }),
-    signatureGuard: verifyWebhookSignature({
-      provider: 'whatsapp',
-      resolveSecret: (req) =>
-        waSecretResolver.resolveSecret({ hotelId: requireHotelIdForSecret(req.hotelId) }),
-    }),
+    signatureGuard: waSignatureGuard,
     verifyHubToken: (token) => waConfigRepo.existsByVerifyToken(token),
     logger,
   });
@@ -384,8 +387,17 @@ export async function buildServer(): Promise<FastifyInstance> {
     aiAdapter: config.AI_BASE_URL !== undefined ? 'HTTP' : 'STUB',
     dispatchAdapter: outboundDispatchService !== undefined ? 'BSP' : 'SKIP',
     ratifyQs: config.AI_BASE_URL !== undefined ? 'Q-B-04' : 'Q-B-04,Q-B-05',
-    hmacSecret: 'webhook_verify_token_per_Q-A-04',
+    hmacSecret: config.WA_WEBHOOK_HMAC_ENABLED
+      ? 'webhook_verify_token_per_Q-A-04'
+      : 'DISABLED_Q-A-04_workaround',
   });
+  if (!config.WA_WEBHOOK_HMAC_ENABLED) {
+    logger.warn({
+      msg: 'whatsapp_inbound.hmac_disabled',
+      module: 'whatsapp',
+      reason: 'WA_WEBHOOK_HMAC_ENABLED=false — X-Hub-Signature-256 NOT verified. Q-A-04 unpark pending.',
+    });
+  }
 
   // T28 — WA outbound dispatch internal RPC route (behind internalRpcAuthGuard).
   if (outboundDispatchService !== undefined) {
