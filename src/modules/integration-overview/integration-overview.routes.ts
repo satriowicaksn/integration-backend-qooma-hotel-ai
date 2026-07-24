@@ -65,6 +65,7 @@ function toWhatsappWire(view: WhatsappOverviewView): IntegrationOverviewResponse
     verified_at: view.verifiedAt,
     has_access_token: view.hasAccessToken,
     webhook_url: view.webhookUrl,
+    webhook_verify_token: view.webhookVerifyToken,
     waba_id: view.wabaId ?? null,
   };
 }

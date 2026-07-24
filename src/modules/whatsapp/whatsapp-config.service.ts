@@ -91,6 +91,9 @@ export class WhatsappConfigService {
 
   private toDomain(row: WaConfigRow): WhatsappConfigDomain {
     const plaintextAccessToken = decrypt(row.accessTokenEnc);
+    // webhookVerifyToken is returned in plaintext — GM must paste it into Meta
+    // Business Manager as the shared secret. accessToken stays masked because
+    // it never needs to leave the server after the initial upsert.
     return {
       hotelId: row.hotelId,
       bsp: row.bsp as WhatsappBspVendor,
@@ -98,7 +101,7 @@ export class WhatsappConfigService {
       phoneNumber: row.phoneNumber,
       accessToken: maskTokenForLog(plaintextAccessToken),
       webhookUrl: row.webhookUrl,
-      webhookVerifyToken: maskTokenForLog(row.webhookVerifyToken),
+      webhookVerifyToken: row.webhookVerifyToken,
       verifiedAt: row.verifiedAt,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,

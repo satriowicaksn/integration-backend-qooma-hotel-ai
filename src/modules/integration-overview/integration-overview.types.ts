@@ -16,6 +16,7 @@ export interface WhatsappOverviewView {
   readonly verifiedAt: string | null;
   readonly hasAccessToken: boolean;
   readonly webhookUrl: string | null;
+  readonly webhookVerifyToken: string | null;
   readonly wabaId: string | null;
 }
 
