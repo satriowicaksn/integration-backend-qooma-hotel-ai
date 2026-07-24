@@ -39,6 +39,7 @@ const sampleInput: WhatsappConfigPersistenceInput = {
 interface PrismaTestDouble {
   waConfig: {
     findUnique: jest.Mock;
+    findFirst: jest.Mock;
     upsert: jest.Mock;
   };
 }
@@ -47,6 +48,7 @@ function createPrismaDouble(): { db: PrismaClient; double: PrismaTestDouble } {
   const double: PrismaTestDouble = {
     waConfig: {
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
       upsert: jest.fn(),
     },
   };
@@ -74,6 +76,39 @@ describe('WhatsappConfigRepository.findByHotelId', () => {
     double.waConfig.findUnique.mockResolvedValue(null);
     const result = await repo.findByHotelId(HOTEL_ID);
     expect(result).toBeNull();
+  });
+});
+
+describe('WhatsappConfigRepository.existsByVerifyToken', () => {
+  let db: PrismaClient;
+  let double: PrismaTestDouble;
+  let repo: WhatsappConfigRepository;
+
+  beforeEach(() => {
+    ({ db, double } = createPrismaDouble());
+    repo = new WhatsappConfigRepository(db);
+  });
+
+  it('should return true when at least one config row matches the verify token', async () => {
+    double.waConfig.findFirst.mockResolvedValue({ hotelId: HOTEL_ID });
+    const result = await repo.existsByVerifyToken('verify-token-abc');
+    expect(result).toBe(true);
+    expect(double.waConfig.findFirst).toHaveBeenCalledWith({
+      where: { webhookVerifyToken: 'verify-token-abc' },
+      select: { hotelId: true },
+    });
+  });
+
+  it('should return false when no config row matches the verify token', async () => {
+    double.waConfig.findFirst.mockResolvedValue(null);
+    const result = await repo.existsByVerifyToken('mismatch');
+    expect(result).toBe(false);
+  });
+
+  it('should short-circuit to false without hitting the DB on an empty token', async () => {
+    const result = await repo.existsByVerifyToken('');
+    expect(result).toBe(false);
+    expect(double.waConfig.findFirst).not.toHaveBeenCalled();
   });
 });
 

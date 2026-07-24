@@ -22,6 +22,15 @@ export class WhatsappConfigRepository {
     return this.db.waConfig.findFirst({ where: { phoneNumberId } });
   }
 
+  async existsByVerifyToken(token: string): Promise<boolean> {
+    if (token.length === 0) return false;
+    const row = await this.db.waConfig.findFirst({
+      where: { webhookVerifyToken: token },
+      select: { hotelId: true },
+    });
+    return row !== null;
+  }
+
   async upsert(hotelId: string, input: WhatsappConfigPersistenceInput): Promise<WaConfig> {
     return this.db.waConfig.upsert({
       where: { hotelId },

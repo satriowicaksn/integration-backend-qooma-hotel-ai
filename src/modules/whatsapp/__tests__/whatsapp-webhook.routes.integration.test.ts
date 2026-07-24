@@ -234,6 +234,28 @@ runOrSkip('T27 WA inbound webhook (integration)', () => {
     expect(messages[0]?.webhookEventId).toBe(events[0]?.id);
   });
 
+  it('should echo hub.challenge as raw text/plain 200 on a valid Meta GET verification handshake', async () => {
+    await seedWaConfig();
+    const res = await app.inject({
+      method: 'GET',
+      url: `/webhook/whatsapp?hub.mode=subscribe&hub.verify_token=${encodeURIComponent(
+        VERIFY_TOKEN,
+      )}&hub.challenge=my-challenge-42`,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe('my-challenge-42');
+    expect(res.headers['content-type']).toContain('text/plain');
+  });
+
+  it('should return 403 on a Meta GET verification handshake with an unknown verify token', async () => {
+    await seedWaConfig();
+    const res = await app.inject({
+      method: 'GET',
+      url: '/webhook/whatsapp?hub.mode=subscribe&hub.verify_token=wrong-token&hub.challenge=my-challenge-42',
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
   it('should echo the inbound x-correlation-id on the webhook response', async () => {
     await seedWaConfig();
     const env = envelopeWith([]);
