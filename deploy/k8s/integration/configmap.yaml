@@ -29,3 +29,8 @@ data:
   JWT_REFRESH_TTL: '30d'
   ENCRYPTION_KEY_VERSION: 'v1'
   TELEGRAM_API_BASE: 'https://api.telegram.org'
+  # Q-A-04 parked workaround (staging only) — disables X-Hub-Signature-256
+  # verification on POST /webhook/whatsapp so real Meta payloads (signed with
+  # App Secret, not verify_token) can reach the ingest → dispatch → AI chain.
+  # KEEP UNSET / TRUE IN PRODUCTION. Track Q-A-04 unpark to remove.
+  WA_WEBHOOK_HMAC_ENABLED: 'false'
