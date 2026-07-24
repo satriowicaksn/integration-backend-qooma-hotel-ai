@@ -50,6 +50,7 @@ async function buildApp(opts: {
   tenantRejects?: NotFoundError | undefined;
   signatureRejects?: AuthError | undefined;
   omitHotelId?: boolean;
+  verifyHubToken?: (token: string) => Promise<boolean>;
 }): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
   registerErrorHandler(app);
@@ -73,6 +74,7 @@ async function buildApp(opts: {
     conversationsService: opts.conversationsDouble as unknown as WhatsappConversationsService,
     tenantResolver,
     signatureGuard,
+    verifyHubToken: opts.verifyHubToken ?? (() => Promise.resolve(false)),
     logger: opts.logger,
   });
   await app.ready();
@@ -255,6 +257,77 @@ describe('POST /webhook/whatsapp — guard order + persist/dispatch discipline',
       });
       expect(res.statusCode).toBe(400);
       expect(ingest.ingestSync).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('should NOT run tenant nor signature guards on the GET verification handshake', async () => {
+    const order: string[] = [];
+    const ingest: IngestDouble = { ingestSync: jest.fn(), processEvent: jest.fn() };
+    const conversationsDouble: ConversationsDouble = { upsertOnInbound: jest.fn() };
+    const verifyHubToken = jest.fn(() => Promise.resolve(true));
+    const app = await buildApp({
+      ingestDouble: ingest,
+      conversationsDouble,
+      logger: buildLogger(),
+      order,
+      // Both guards would throw if invoked — this proves the GET bypasses them.
+      tenantRejects: new NotFoundError('hotel', 'unknown'),
+      signatureRejects: new AuthError('bad sig'),
+      verifyHubToken: (token) => verifyHubToken(token),
+    });
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/webhook/whatsapp?hub.mode=subscribe&hub.verify_token=abc&hub.challenge=CHAL',
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toBe('CHAL');
+      expect(res.headers['content-type']).toContain('text/plain');
+      expect(verifyHubToken).toHaveBeenCalledWith('abc');
+      expect(order).toEqual([]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('should return 403 with empty body when hub.verify_token does not match any config', async () => {
+    const app = await buildApp({
+      ingestDouble: { ingestSync: jest.fn(), processEvent: jest.fn() },
+      conversationsDouble: { upsertOnInbound: jest.fn() },
+      logger: buildLogger(),
+      order: [],
+      verifyHubToken: () => Promise.resolve(false),
+    });
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/webhook/whatsapp?hub.mode=subscribe&hub.verify_token=nope&hub.challenge=CHAL',
+      });
+      expect(res.statusCode).toBe(403);
+      expect(res.body).toBe('');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('should return 403 when hub.mode is not "subscribe" (defensive) without calling the token lookup', async () => {
+    const verifyHubToken = jest.fn(() => Promise.resolve(true));
+    const app = await buildApp({
+      ingestDouble: { ingestSync: jest.fn(), processEvent: jest.fn() },
+      conversationsDouble: { upsertOnInbound: jest.fn() },
+      logger: buildLogger(),
+      order: [],
+      verifyHubToken: (token) => verifyHubToken(token),
+    });
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/webhook/whatsapp?hub.mode=unsubscribe&hub.verify_token=abc&hub.challenge=CHAL',
+      });
+      expect(res.statusCode).toBe(403);
+      expect(verifyHubToken).not.toHaveBeenCalled();
     } finally {
       await app.close();
     }

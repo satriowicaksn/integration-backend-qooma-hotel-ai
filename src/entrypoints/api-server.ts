@@ -373,6 +373,7 @@ export async function buildServer(): Promise<FastifyInstance> {
       resolveSecret: (req) =>
         waSecretResolver.resolveSecret({ hotelId: requireHotelIdForSecret(req.hotelId) }),
     }),
+    verifyHubToken: (token) => waConfigRepo.existsByVerifyToken(token),
     logger,
   });
 
